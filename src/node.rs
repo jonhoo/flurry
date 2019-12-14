@@ -1,6 +1,6 @@
+use super::Table;
 use crossbeam::epoch::{Atomic, Guard, Shared};
 use parking_lot::Mutex;
-use std::cell::UnsafeCell;
 use std::sync::atomic::Ordering;
 
 /// Entry in a bin.
@@ -23,14 +23,31 @@ where
     ) -> Shared<'g, Node<K, V>> {
         match *self {
             BinEntry::Node(ref n) => n.find(hash, key, guard),
-            BinEntry::Moved(ptr) => {
+            BinEntry::Moved(next_table) => {
                 // We have a reference to the old table, otherwise we wouldn't have a reference to
                 // self. We got that under the given Guard. Since we have not yet dropped that
                 // guard, no collection has happened since then. Since _this_ table has not been
                 // garbage collected, the _later_ table in next_table, _definitely_ hasn't.
-                let next_table = Shared::from(ptr);
+                let mut table = Shared::from(next_table);
 
-                // FIXME: implement ForwardingNode::find
+                loop {
+                    if table.is_null() || table.bins.is_empty() {
+                        return Shared::null();
+                    }
+                    let bini = table.bini(hash);
+                    let mut bin = table.bin(bini);
+                    if bin.is_null() {
+                        return Shared::null();
+                    }
+
+                    match *bin {
+                        BinEntry::Node(ref n) => break n.find(hash, key, guard),
+                        BinEntry::Moved(next_table) => {
+                            table = Shared::from(next_table);
+                            continue;
+                        }
+                    }
+                }
             }
         }
     }
@@ -55,8 +72,9 @@ where
         key: &K,
         guard: &'g Guard,
     ) -> Shared<'g, Node<K, V>> {
+        // TODO: maybe turn into a loop instead of recursing
         if self.hash == hash && &self.key == key {
-            return Shared::from(n as *const _);
+            return Shared::from(self as *const _);
         }
         let next = self.next.load(Ordering::SeqCst, guard);
         if next.is_null() {

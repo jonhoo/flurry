@@ -1,10 +1,10 @@
 mod node;
 use node::*;
 
-use crossbream::epoch::{Atomic, Guard, Owned, Shared};
-use parking_lot::lock_api::RawMutex;
-use std::collections::hash_map::{BuildHasher, RandomState};
-use std::sync::atomic::{AtomicIsize, AtomicUsize};
+use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hash};
+use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 
 /// The largest possible table capacity.  This value must be
 /// exactly 1<<30 to stay within Java array allocation and indexing
@@ -29,7 +29,7 @@ const LOAD_FACTOR: f64 = 0.75;
 /// serves as a lower bound to avoid resizers encountering
 /// excessive memory contention.  The value should be at least
 /// `DEFAULT_CAPACITY`.
-const MIN_TRANSFER_STRIDE: usize = 16;
+const MIN_TRANSFER_STRIDE: isize = 16;
 
 /// The number of bits used for generation stamp in `size_ctl`.
 /// Must be at least 6 for 32bit arrays.
@@ -37,7 +37,7 @@ const RESIZE_STAMP_BITS: usize = 16;
 
 /// The maximum number of threads that can help resize.
 /// Must fit in `32 - RESIZE_STAMP_BITS` bits.
-const MAX_RESIZERS: usize = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
+const MAX_RESIZERS: isize = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
 
 /// The bit shift for recording size stamp in `size_ctl`.
 const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
@@ -45,10 +45,10 @@ const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
 pub struct FlurryHashMap<K, V, S = RandomState> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
-    table: Atomic<Table<K, V, S>>,
+    table: Atomic<Table<K, V>>,
 
     /// The next table to use; non-null only while resizing.
-    next_table: Atomic<Table<K, V, S>>,
+    next_table: Atomic<Table<K, V>>,
 
     /// The next table index (plus one) to split while resizing.
     transfer_index: AtomicIsize,
@@ -72,6 +72,7 @@ where
     S: BuildHasher,
 {
     fn hash(&self, key: &K) -> u64 {
+        use std::hash::Hasher;
         let mut h = self.build_hasher.build_hasher();
         key.hash(&mut h);
         h.finish()
@@ -107,20 +108,64 @@ where
         self.get(key, guard).map(|v| then(&*v))
     }
 
-    pub fn insert(&self, key: K, value: V) -> Option<()> {}
+    fn init_table(&self, guard: &Guard) -> Shared<Table<K, V>> {
+        loop {
+            let table = self.table.load(Ordering::SeqCst, guard);
+            if !table.is_null() && !table.bins.is_empty() {
+                break table;
+            }
+            // try to allocate the table
+            let mut sc = self.size_ctl.load(Ordering::SeqCst);
+            if sc < 0 {
+                // we lost the initialization race; just spin
+                std::thread::yield_now();
+                continue;
+            }
+
+            if self.size_ctl.compare_and_swap(sc, -1, Ordering::SeqCst) == sc {
+                // we get to do it!
+                let mut table = self.table.load(Ordering::SeqCst, guard);
+                if table.is_null() || table.bins.is_empty() {
+                    let n = if sc > 0 {
+                        sc as usize
+                    } else {
+                        DEFAULT_CAPACITY
+                    };
+                    let new_table = Owned::new(Table {
+                        bins: vec![Atomic::null(); n].into_boxed_slice(),
+                    });
+                    table = new_table.into_shared(guard);
+                    self.table.store(table, Ordering::SeqCst);
+                    sc = n as isize - (n >> 2) as isize;
+                }
+                self.size_ctl.store(sc, Ordering::SeqCst);
+                break table;
+            }
+        }
+    }
+
+    pub fn insert(&self, key: K, value: V) -> Option<()> {
+        self.put(key, value, false)
+    }
 
     fn put(&self, key: K, value: V, no_replacement: bool) -> Option<()> {
-        let h = self.hash(key);
+        let h = self.hash(&key);
 
-        let guard = crossbeam::epoch::pin();
-        let mut table = self.table.load(Ordering::SeqCst, &guard);
+        let guard = &crossbeam::epoch::pin();
+        let mut table = self.table.load(Ordering::SeqCst, guard);
 
-        let mut node = Owned::new(BinEntry::Node {
+        let mut node = Owned::new(BinEntry::Node(Node {
             key,
             value: Owned::new(value),
             hash: h,
             next: Atomic::null(),
-        });
+        }));
+
+        let key = if let BinEntry::Node(Node { ref key, .. }) = *node {
+            key
+        } else {
+            unreachable!();
+        };
 
         loop {
             if table.is_null() || table.bins.len() == 0 {
@@ -134,7 +179,7 @@ where
                 // fast path -- bin is empty so stick us at the front
                 match table.cas_bin(bini, bin, node, guard) {
                     Ok(_old_null_ptr) => {
-                        self.add_count(1, 0);
+                        self.add_count(1, Some(0), guard);
                         return None;
                     }
                     Err(changed) => {
@@ -147,18 +192,18 @@ where
 
             // slow path -- bin is non-empty
             match *bin {
-                BinEntry::Moved => {
-                    // FIXME: Moved.nextTable vs self.next_table ???
-                    table = table.help_transfer();
-                    unimplemented!()
+                BinEntry::Moved(next_table) => {
+                    table = self.help_transfer(table, next_table, guard);
                 }
                 BinEntry::Node(ref head)
-                    if if_absent && head.hash == h && &head.key == &node.key =>
+                    if no_replacement && head.hash == h && &head.key == key =>
                 {
                     // fast path if replacement is disallowed and first bin matches
                     return Some(());
                 }
                 BinEntry::Node(ref head) => {
+                    let head = Shared::from(head as *const _);
+
                     // bin is non-empty, need to link into it, so we must take the lock
                     let _guard = head.lock.lock();
 
@@ -176,14 +221,17 @@ where
 
                     let mut bin_count = 1;
                     let mut n = head;
+
                     let old_val = loop {
-                        if n.hash == node.hash && n.key == node.key {
+                        if n.hash == h && n.key == key {
                             // the key already exists in the map!
                             if no_replacement {
                                 // the key is not absent, so don't update
-                            } else {
-                                let now_garbage = n.value.swap(node.value, Ordering::SeqCst, guard);
+                            } else if let BinEntry::Node(Node { value, .. }) = *node.into_box() {
+                                let now_garbage = n.value.swap(value, Ordering::SeqCst, guard);
                                 unimplemented!("need to dispose of garbage");
+                            } else {
+                                unreachable!();
                             }
                             break Some(());
                         }
@@ -204,15 +252,48 @@ where
 
                     if old_val.is_none() {
                         // increment count
-                        self.add_count(1, bin_count);
+                        self.add_count(1, Some(bin_count), guard);
                     }
-                    return old_value;
+                    return old_val;
                 }
             }
         }
     }
 
-    fn add_count(&self, n: isize, resize_hint: Option<usize>) {
+    fn help_transfer(
+        &self,
+        table: Shared<Table<K, V>>,
+        next_table: *const Table<K, V>,
+        guard: &Guard,
+    ) -> Shared<Table<K, V>> {
+        if table.is_null() || next_table.is_null() {
+            return table;
+        }
+
+        let next_table = Shared::from(next_table);
+
+        let rs = Self::resize_stamp(table.bins.len()) << RESIZE_STAMP_SHIFT;
+        while next_table == self.next_table.load(Ordering::SeqCst, guard)
+            && table == self.table.load(Ordering::SeqCst, guard)
+        {
+            let sc = self.size_ctl.load(Ordering::SeqCst);
+            if sc >= 0
+                || sc == rs + MAX_RESIZERS
+                || sc == rs + 1
+                || self.transfer_index.load(Ordering::SeqCst) <= 0
+            {
+                break;
+            }
+
+            if self.size_ctl.compare_and_swap(sc, sc + 1, Ordering::SeqCst) == sc {
+                self.transfer(table, next_table, guard);
+                break;
+            }
+        }
+        return next_table;
+    }
+
+    fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard) {
         // TODO: implement the Java CounterCell business here
 
         let count = if n > 0 {
@@ -234,13 +315,12 @@ where
 
         loop {
             let sc = self.size_ctl.load(Ordering::SeqCst);
-            if count < sc {
+            if (count as isize) < sc {
                 // we're not at the next resize point yet
                 break;
             }
 
-            let guard = crossbeam::epoch::pin();
-            let mut table = self.table.load(Ordering::SeqCst, &guard);
+            let mut table = self.table.load(Ordering::SeqCst, guard);
             if table.is_null() {
                 // table will be initalized by another thread anyway
                 break;
@@ -258,7 +338,7 @@ where
                 if sc == rs + MAX_RESIZERS || sc == rs + 1 {
                     break;
                 }
-                let nt = self.next_table.load(Ordering::SeqCst, &guard);
+                let nt = self.next_table.load(Ordering::SeqCst, guard);
                 if nt.is_null() {
                     break;
                 }
@@ -268,12 +348,12 @@ where
 
                 // try to join!
                 if self.size_ctl.compare_and_swap(sc, sc + 1, Ordering::SeqCst) == sc {
-                    self.transfer(table, nt);
+                    self.transfer(table, nt, guard);
                 }
             } else if self.size_ctl.compare_and_swap(sc, rs + 2, Ordering::SeqCst) == sc {
                 // a resize is needed, but has not yet started
                 // TODO: figure out why this is rs + 2, not just rs
-                self.transfer(table, Shared::null());
+                self.transfer(table, Shared::null(), guard);
             }
 
             // another resize may be needed!
@@ -281,7 +361,12 @@ where
         }
     }
 
-    fn transfer(&self, table: Shared<Table>, mut next_table: Shared<Table>, guard: &Guard) {
+    fn transfer(
+        &self,
+        table: Shared<Table<K, V>>,
+        mut next_table: Shared<Table<K, V>>,
+        guard: &Guard,
+    ) {
         let n = table.bins.len();
         // TODO: use num_cpus to help determine stride
         let stride = MIN_TRANSFER_STRIDE;
@@ -289,10 +374,10 @@ where
         if next_table.is_null() {
             // we are initiating a resize
             let table = Owned::new(Table {
-                bins: [Atomic::null(); n << 1],
+                bins: vec![Atomic::null(); n << 1].into_boxed_slice(),
             });
 
-            let now_garbage = self.next_table.store(table, Ordering::SeqCst, guard);
+            let now_garbage = self.next_table.swap(table, Ordering::SeqCst, guard);
             assert!(now_garbage.is_null());
             self.transfer_index.store(n, Ordering::SeqCst);
             next_table = self.next_table.load(Ordering::Relaxed, guard);
@@ -341,21 +426,21 @@ where
 
                 if finishing {
                     // this branch is only taken for one thread partaking in the resize!
-                    self.next_table.store(Owned::null(), Ordering::SeqCst);
-                    let now_garbage = self.table.swap(next_table, Ordering::SeqCst);
+                    self.next_table.store(Shared::null(), Ordering::SeqCst);
+                    let now_garbage = self.table.swap(next_table, Ordering::SeqCst, guard);
                     unimplemented!("do something with the garbage");
                     self.size_ctl.store((n << 1) - (n >> 1), Ordering::SeqCst);
                     return;
                 }
 
                 let sc = self.size_ctl.load(Ordering::SeqCst);
-                if self.size_ctl.compare_and_swap(sc, sc - 1) == sc {
+                if self.size_ctl.compare_and_swap(sc, sc - 1, Ordering::SeqCst) == sc {
                     if (sc - 2) != Self::resize_stamp(n) << RESIZE_STAMP_SHIFT {
                         return;
                     }
 
                     // we are the chosen thread to finish the resize!
-                    finish = true;
+                    finishing = true;
 
                     // ???
                     advance = true;
@@ -386,11 +471,13 @@ where
                     advance = true;
                 }
                 BinEntry::Node(ref head) => {
+                    let head = Shared::from(head as *const _);
+
                     // bin is non-empty, need to link into it, so we must take the lock
                     let _guard = head.lock.lock();
 
                     // need to check that this is _still_ the head
-                    let current_head = table.bin(bini, guard);
+                    let current_head = table.bin(i, guard);
                     if current_head.as_raw() != bin.as_raw() {
                         // nope -- try again from the start
                         continue;
@@ -425,7 +512,7 @@ where
 
                     p = head;
                     while p != last_run {
-                        let link = if p.hash & n == 0 {
+                        let link = if p.hash & n as u64 == 0 {
                             // to the low bin!
                             &mut low_bin
                         } else {
@@ -438,16 +525,16 @@ where
                             key: p.key.clone(),
                             lock: p.lock.clone(),
                             value: p.value.clone(),
-                            next: *link,
+                            next: Atomic::from(*link),
                         })
                         .into_shared(guard);
 
                         p = p.next.load(Ordering::SeqCst, guard);
                     }
 
-                    next_table.store(i, low_bin);
-                    next_table.store(i + n, high_bin);
-                    table.store(i, Owned::new(BinEntry::Moved(next_table.as_raw())));
+                    next_table.store_bin(i, low_bin);
+                    next_table.store_bin(i + n, high_bin);
+                    table.store_bin(i, Owned::new(BinEntry::Moved(next_table.as_raw())));
                     advance = true;
                 }
             }
@@ -457,19 +544,19 @@ where
     /// Returns the stamp bits for resizing a table of size n.
     /// Must be negative when shifted left by RESIZE_STAMP_SHIFT.
     fn resize_stamp(n: isize) -> isize {
-        n.leading_zeros() | (1 << (RESIZE_STAMP_BITS - 1))
+        n.leading_zeros() as isize | (1 << (RESIZE_STAMP_BITS - 1)) as isize
     }
 }
 
 struct Table<K, V> {
-    bins: [Atomic<BinEntry<K, V>>],
+    bins: Box<[Atomic<BinEntry<K, V>>]>,
 }
 
-impl Table<K, V> {
+impl<K, V> Table<K, V> {
     #[inline]
     fn bini(&self, hash: u64) -> usize {
         let mask = self.bins.len() as u64 - 1;
-        (h & mask) as usize
+        (hash & mask) as usize
     }
 
     #[inline]
@@ -493,6 +580,6 @@ impl Table<K, V> {
 
     #[inline]
     fn store_bin(&self, i: usize, new: Owned<BinEntry<K, V>>) {
-        self.bins[i].store(new, Ordering::Relase)
+        self.bins[i].store(new, Ordering::Release)
     }
 }
