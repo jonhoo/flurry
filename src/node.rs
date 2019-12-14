@@ -11,6 +11,16 @@ pub(crate) enum BinEntry<K, V> {
     Moved(*const Table<K, V>),
 }
 
+impl<K, V> BinEntry<K, V> {
+    pub(crate) fn as_node(&self) -> Option<&Node<K, V>> {
+        if let BinEntry::Node(ref n) = *self {
+            Some(n)
+        } else {
+            None
+        }
+    }
+}
+
 impl<K, V> BinEntry<K, V>
 where
     K: Eq,
@@ -20,30 +30,53 @@ where
         hash: u64,
         key: &K,
         guard: &'g Guard,
-    ) -> Shared<'g, Node<K, V>> {
+    ) -> Shared<'g, BinEntry<K, V>> {
         match *self {
-            BinEntry::Node(ref n) => n.find(hash, key, guard),
+            BinEntry::Node(_) => {
+                let mut node = self;
+                loop {
+                    let n = if let BinEntry::Node(ref n) = node {
+                        n
+                    } else {
+                        unreachable!();
+                    };
+
+                    if n.hash == hash && &n.key == key {
+                        break Shared::from(self as *const _);
+                    }
+                    let next = n.next.load(Ordering::SeqCst, guard);
+                    if next.is_null() {
+                        break Shared::null();
+                    }
+                    // safety: next will only be dropped, if we are dropped. we won't be dropped until epoch
+                    // passes, which is protected by guard.
+                    node = unsafe { next.deref() };
+                }
+            }
             BinEntry::Moved(next_table) => {
-                // We have a reference to the old table, otherwise we wouldn't have a reference to
+                // safety: We have a reference to the old table, otherwise we wouldn't have a reference to
                 // self. We got that under the given Guard. Since we have not yet dropped that
-                // guard, no collection has happened since then. Since _this_ table has not been
-                // garbage collected, the _later_ table in next_table, _definitely_ hasn't.
-                let mut table = Shared::from(next_table);
+                // guard, _this_ table has not been garbage collected, and so the _later_ table in
+                // next_table, _definitely_ hasn't.
+                let mut table = unsafe { &*next_table };
 
                 loop {
-                    if table.is_null() || table.bins.is_empty() {
+                    if table.bins.is_empty() {
                         return Shared::null();
                     }
                     let bini = table.bini(hash);
-                    let mut bin = table.bin(bini);
+                    let bin = table.bin(bini, guard);
                     if bin.is_null() {
                         return Shared::null();
                     }
+                    // safety: the table is protected by the guard, and so is the bin.
+                    let bin = unsafe { bin.deref() };
 
                     match *bin {
-                        BinEntry::Node(ref n) => break n.find(hash, key, guard),
+                        BinEntry::Node(_) => break bin.find(hash, key, guard),
                         BinEntry::Moved(next_table) => {
-                            table = Shared::from(next_table);
+                            // safety: same as above.
+                            table = unsafe { &*next_table };
                             continue;
                         }
                     }
@@ -58,28 +91,6 @@ pub(crate) struct Node<K, V> {
     pub(crate) hash: u64,
     pub(crate) key: K,
     pub(crate) value: Atomic<V>,
-    pub(crate) next: Atomic<Node<K, V>>,
+    pub(crate) next: Atomic<BinEntry<K, V>>,
     pub(crate) lock: Mutex<()>,
-}
-
-impl<K, V> Node<K, V>
-where
-    K: Eq,
-{
-    pub(crate) fn find<'g>(
-        &'g self,
-        hash: u64,
-        key: &K,
-        guard: &'g Guard,
-    ) -> Shared<'g, Node<K, V>> {
-        // TODO: maybe turn into a loop instead of recursing
-        if self.hash == hash && &self.key == key {
-            return Shared::from(self as *const _);
-        }
-        let next = self.next.load(Ordering::SeqCst, guard);
-        if next.is_null() {
-            return Shared::null();
-        }
-        return next.find(hash, key, guard);
-    }
 }
