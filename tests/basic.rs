@@ -54,6 +54,35 @@ fn update() {
 }
 
 #[test]
+fn concurrent_insert() {
+    let map = Arc::new(FlurryHashMap::<usize, usize>::new());
+
+    let map1 = map.clone();
+    let t1 = std::thread::spawn(move || {
+        for i in 0..64 {
+            map1.insert(i, 0);
+        }
+    });
+    let map2 = map.clone();
+    let t2 = std::thread::spawn(move || {
+        for i in 0..64 {
+            map2.insert(i, 1);
+        }
+    });
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    let guard = epoch::pin();
+    for i in 0..64 {
+        let e = map.get(&i, &guard).unwrap();
+        // safety: the map guarantees that it will not free something there is a Shared to
+        let v = unsafe { e.deref() };
+        assert!(v == &0 || v == &1);
+    }
+}
+
+#[test]
 fn current_kv_dropped() {
     let dropped1 = Arc::new(0);
     let dropped2 = Arc::new(0);
