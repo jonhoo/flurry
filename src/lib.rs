@@ -295,7 +295,7 @@ where
                 }
                 BinEntry::Node(ref head) => {
                     // bin is non-empty, need to link into it, so we must take the lock
-                    let _guard = head.lock.lock();
+                    let head_lock = head.lock.lock();
 
                     // need to check that this is _still_ the head
                     let current_head = t.bin(bini, guard);
@@ -366,6 +366,7 @@ where
 
                         bin_count += 1;
                     };
+                    drop(head_lock);
 
                     // TODO: TREEIFY_THRESHOLD
 
@@ -659,7 +660,7 @@ where
                 }
                 BinEntry::Node(ref head) => {
                     // bin is non-empty, need to link into it, so we must take the lock
-                    let _guard = head.lock.lock();
+                    let head_lock = head.lock.lock();
 
                     // need to check that this is _still_ the head
                     let current_head = table.bin(i, guard);
@@ -771,6 +772,8 @@ where
                     }
 
                     advance = true;
+
+                    drop(head_lock);
                 }
             }
         }
