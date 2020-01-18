@@ -11,6 +11,24 @@ pub(crate) enum BinEntry<K, V> {
     Moved(*const Table<K, V>),
 }
 
+unsafe impl<K, V> Send for BinEntry<K, V>
+where
+    K: Send,
+    V: Send,
+    Node<K, V>: Send,
+    Table<K, V>: Send,
+{
+}
+
+unsafe impl<K, V> Sync for BinEntry<K, V>
+where
+    K: Sync,
+    V: Sync,
+    Node<K, V>: Sync,
+    Table<K, V>: Sync,
+{
+}
+
 impl<K, V> BinEntry<K, V> {
     pub(crate) fn as_node(&self) -> Option<&Node<K, V>> {
         if let BinEntry::Node(ref n) = *self {
