@@ -687,16 +687,16 @@ where
                         // arrived yet. therefore, it will be dropped in a future epoch, and is
                         // safe to use now.
                         let node = unsafe { p.deref() }.as_node().unwrap();
-
                         let next = node.next.load(Ordering::SeqCst, guard);
-                        if next.is_null() {
-                            break;
-                        }
 
                         let b = node.hash & n as u64;
                         if b != run_bit {
                             run_bit = b;
                             last_run = p;
+                        }
+
+                        if next.is_null() {
+                            break;
                         }
                         p = next;
                     }
