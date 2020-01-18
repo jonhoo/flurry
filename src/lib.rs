@@ -108,6 +108,11 @@ where
         h.finish()
     }
 
+    pub fn contains_key(&self, key: &K) -> bool {
+        let guard = crossbeam::epoch::pin();
+        self.get(key, &guard).is_some()
+    }
+
     // TODO: implement a guard API of our own
     pub fn get<'g>(&'g self, key: &K, guard: &'g Guard) -> Option<Shared<'g, V>> {
         let h = self.hash(key);
