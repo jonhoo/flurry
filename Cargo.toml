@@ -8,3 +8,4 @@ license = "GPL-2.0-only"
 [dependencies]
 crossbeam = "0.7"
 parking_lot = "0.9"
+rand = "0.7"
