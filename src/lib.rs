@@ -42,6 +42,8 @@ const MAX_RESIZERS: isize = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
 /// The bit shift for recording size stamp in `size_ctl`.
 const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
 
+mod iter;
+
 pub struct FlurryHashMap<K, V, S = RandomState> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
@@ -800,10 +802,20 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
 
         // safety: same as above + we own the table
         let mut table = unsafe { table.into_owned() }.into_box();
-        for bin in Vec::from(std::mem::replace(
-            &mut table.bins,
-            vec![].into_boxed_slice(),
-        )) {
+        table.drop_bins();
+    }
+}
+
+struct Table<K, V> {
+    bins: Box<[Atomic<BinEntry<K, V>>]>,
+}
+
+impl<K, V> Table<K, V> {
+    fn drop_bins(&mut self) {
+        // safety: we have &mut self, so not concurrently accessed by anyone else
+        let guard = unsafe { crossbeam::epoch::unprotected() };
+
+        for bin in Vec::from(std::mem::replace(&mut self.bins, vec![].into_boxed_slice())) {
             if bin.load(Ordering::SeqCst, guard).is_null() {
                 // bin was never used
                 continue;
@@ -840,10 +852,6 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
             }
         }
     }
-}
-
-struct Table<K, V> {
-    bins: Box<[Atomic<BinEntry<K, V>>]>,
 }
 
 impl<K, V> Drop for Table<K, V> {
