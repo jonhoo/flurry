@@ -66,6 +66,33 @@ pub struct FlurryHashMap<K, V, S = RandomState> {
     build_hasher: S,
 }
 
+impl<K, V> FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+{
+    pub fn new() -> Self {
+        Self {
+            table: Atomic::null(),
+            next_table: Atomic::null(),
+            transfer_index: AtomicIsize::new(0),
+            count: AtomicUsize::new(0),
+            size_ctl: AtomicIsize::new(0),
+            build_hasher: RandomState::new(),
+        }
+    }
+
+    pub fn with_capacity(n: usize) -> Self {
+        assert_ne!(n, 0);
+        let mut m = Self::new();
+        let size = (1.0 + (n as f64) / LOAD_FACTOR) as usize;
+        // NOTE: tableSizeFor in Java
+        let cap = std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two());
+        m.size_ctl = AtomicIsize::new(cap as isize);
+        m
+    }
+}
+
 impl<K, V, S> FlurryHashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -229,6 +256,7 @@ where
                 match t.cas_bin(bini, bin, node, guard) {
                     Ok(_old_null_ptr) => {
                         self.add_count(1, Some(0), guard);
+                        guard.flush();
                         return None;
                     }
                     Err(changed) => {
@@ -345,6 +373,7 @@ where
                         // increment count
                         self.add_count(1, Some(bin_count), guard);
                     }
+                    guard.flush();
                     return old_val;
                 }
             }
@@ -407,7 +436,9 @@ where
         if resize_hint.is_none() {
             return;
         }
-        let saw_bin_length = resize_hint.unwrap();
+
+        // TODO: use the resize hint
+        let _saw_bin_length = resize_hint.unwrap();
 
         loop {
             let sc = self.size_ctl.load(Ordering::SeqCst);
@@ -759,12 +790,22 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
 
         assert!(self.next_table.load(Ordering::SeqCst, guard).is_null());
         let table = self.table.swap(Shared::null(), Ordering::SeqCst, guard);
+        if table.is_null() {
+            // table was never allocated!
+            return;
+        }
+
         // safety: same as above + we own the table
         let mut table = unsafe { table.into_owned() }.into_box();
         for bin in Vec::from(std::mem::replace(
             &mut table.bins,
             vec![].into_boxed_slice(),
         )) {
+            if bin.load(Ordering::SeqCst, guard).is_null() {
+                // bin was never used
+                continue;
+            }
+
             // safety: same as above + we own the bin
             let bin = unsafe { bin.into_owned() };
             match *bin {
@@ -858,3 +899,6 @@ impl<K, V> Table<K, V> {
         self.bins[i].store(new, Ordering::Release)
     }
 }
+
+#[cfg(test)]
+mod tests {}
