@@ -42,7 +42,7 @@ const MAX_RESIZERS: isize = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
 /// The bit shift for recording size stamp in `size_ctl`.
 const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
 
-mod iter;
+pub mod iter;
 
 pub struct FlurryHashMap<K, V, S = RandomState> {
     /// The array of bins. Lazily initialized upon first insertion.

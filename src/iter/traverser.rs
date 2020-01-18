@@ -2,7 +2,7 @@ use crate::{BinEntry, Node, Table};
 use crossbeam::epoch::{Guard, Shared};
 use std::sync::atomic::Ordering;
 
-struct NodeIter<'g, K, V> {
+pub(crate) struct NodeIter<'g, K, V> {
     /// Current table; update if resized
     table: Option<&'g Table<K, V>>,
 
@@ -28,7 +28,7 @@ struct NodeIter<'g, K, V> {
 }
 
 impl<'g, K, V> NodeIter<'g, K, V> {
-    fn new(table: Shared<'g, Table<K, V>>, guard: &'g Guard) -> Self {
+    pub(crate) fn new(table: Shared<'g, Table<K, V>>, guard: &'g Guard) -> Self {
         let (table, len) = if table.is_null() {
             (None, 0)
         } else {
