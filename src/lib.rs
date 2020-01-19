@@ -68,6 +68,16 @@ pub struct FlurryHashMap<K, V, S = RandomState> {
     build_hasher: S,
 }
 
+impl<K, V> Default for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K, V> FlurryHashMap<K, V, RandomState>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -423,20 +433,23 @@ where
                 break;
             }
         }
-        return next_table;
+        next_table
     }
 
     fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard) {
         // TODO: implement the Java CounterCell business here
 
-        let mut count = if n > 0 {
-            let n = n as usize;
-            self.count.fetch_add(n, Ordering::SeqCst) + n
-        } else if n < 0 {
-            let n = n.abs() as usize;
-            self.count.fetch_sub(n, Ordering::SeqCst) - n
-        } else {
-            self.count.load(Ordering::SeqCst)
+        use std::cmp;
+        let mut count = match n.cmp(&0) {
+            cmp::Ordering::Greater => {
+                let n = n as usize;
+                self.count.fetch_add(n, Ordering::SeqCst) + n
+            }
+            cmp::Ordering::Less => {
+                let n = n.abs() as usize;
+                self.count.fetch_sub(n, Ordering::SeqCst) - n
+            }
+            cmp::Ordering::Equal => self.count.load(Ordering::SeqCst),
         };
 
         // if resize_hint is None, it means the caller does not want us to consider a resize.
@@ -897,6 +910,7 @@ impl<K, V> Table<K, V> {
     }
 
     #[inline]
+    #[allow(clippy::type_complexity)]
     fn cas_bin<'g>(
         &self,
         i: usize,
