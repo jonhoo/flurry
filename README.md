@@ -1,3 +1,9 @@
+
+# flurry
+
+[![Build Status](https://travis-ci.com/rkm/flurry.svg?branch=master)](https://travis-ci.com/rkm/flurry)
+![GitHub](https://img.shields.io/github/license/rkm/flurry)
+
 A port of Java's `java.util.concurrent.ConcurrentHashMap` to Rust.
 
 The port is based on the GPL-licensed [source file from JDK13] as of
