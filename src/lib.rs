@@ -221,6 +221,7 @@ const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
 
 /// Iterator types.
 pub mod iter;
+use iter::*;
 
 /// Types needed to safely access shared data concurrently.
 pub mod epoch {
@@ -1010,6 +1011,36 @@ where
     /// Must be negative when shifted left by RESIZE_STAMP_SHIFT.
     fn resize_stamp(n: usize) -> isize {
         n.leading_zeros() as isize | (1 << (RESIZE_STAMP_BITS - 1)) as isize
+    }
+
+    /// An iterator visiting all key-value pairs in arbitrary order.
+    /// The iterator element type is `(&'g K, &'g V)`.
+    ///
+    /// To obtain a `Guard`, use [`epoch::pin`].
+    pub fn iter<'g>(&self, guard: &'g Guard) -> Iter<'g, K, V> {
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Iter { node_iter, guard }
+    }
+
+    /// An iterator visiting all keys in arbitrary order.
+    /// The iterator element type is `&'g K`.
+    ///
+    /// To obtain a `Guard`, use [`epoch::pin`].
+    pub fn keys<'g>(&self, guard: &'g Guard) -> Keys<'g, K, V> {
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Keys { node_iter }
+    }
+
+    /// An iterator visiting all values in arbitrary order.
+    /// The iterator element type is `&'g V`.
+    ///
+    /// To obtain a `Guard`, use [`epoch::pin`].
+    pub fn values<'g>(&self, guard: &'g Guard) -> Values<'g, K, V> {
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Values { node_iter, guard }
     }
 }
 
