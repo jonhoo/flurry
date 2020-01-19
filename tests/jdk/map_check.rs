@@ -37,6 +37,35 @@ where
     assert_eq!(sum, expect);
 }
 
+fn t4<K>(map: &FlurryHashMap<K, usize>, keys: &[K], expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    for i in 0..keys.len() {
+        if map.contains_key(&keys[i]) {
+            sum += 1;
+        }
+    }
+    assert_eq!(sum, expect);
+}
+
+fn t7<K>(map: &FlurryHashMap<K, usize>, k1: &[K], k2: &[K])
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    for i in 0..k1.len() {
+        if map.contains_key(&k1[i]) {
+            sum += 1;
+        }
+        if map.contains_key(&k2[i]) {
+            sum += 1;
+        }
+    }
+    assert_eq!(sum, k1.len());
+}
+
 #[test]
 fn everything() {
     let mut rng = rand::thread_rng();
@@ -51,6 +80,12 @@ fn everything() {
     t3(&map, &keys[..], SIZE);
     // put (present)
     t3(&map, &keys[..], 0);
+    // contains_key (present & absent)
+    t7(&map, &keys[..], &absent_keys[..]);
+    // contains_key (present)
+    t4(&map, &keys[..], SIZE);
+    // contains_key (absent)
+    t4(&map, &absent_keys[..], 0);
     // get (present)
     t1(&map, &keys[..], SIZE);
     // get (absent)
