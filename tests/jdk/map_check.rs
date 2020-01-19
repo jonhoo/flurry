@@ -66,6 +66,42 @@ where
     assert_eq!(sum, k1.len());
 }
 
+fn ittest1<K>(map: &FlurryHashMap<K, usize>, expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    let guard = epoch::pin();
+    for _ in map.keys(&guard) {
+        sum += 1;
+    }
+    assert_eq!(sum, expect);
+}
+
+fn ittest2<K>(map: &FlurryHashMap<K, usize>, expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    let guard = epoch::pin();
+    for _ in map.values(&guard) {
+        sum += 1;
+    }
+    assert_eq!(sum, expect);
+}
+
+fn ittest3<K>(map: &FlurryHashMap<K, usize>, expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    let guard = epoch::pin();
+    for _ in map.iter(&guard) {
+        sum += 1;
+    }
+    assert_eq!(sum, expect);
+}
+
 #[test]
 fn everything() {
     let mut rng = rand::thread_rng();
@@ -90,4 +126,9 @@ fn everything() {
     t1(&map, &keys[..], SIZE);
     // get (absent)
     t1(&map, &absent_keys[..], 0);
+
+    // iter, keys, values (present)
+    ittest1(&map, SIZE);
+    ittest2(&map, SIZE);
+    ittest3(&map, SIZE);
 }
