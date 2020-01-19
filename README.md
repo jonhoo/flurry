@@ -1,8 +1,8 @@
 
 # flurry
 
-[![Build Status](https://travis-ci.com/rkm/flurry.svg?branch=master)](https://travis-ci.com/rkm/flurry)
-![GitHub](https://img.shields.io/github/license/rkm/flurry)
+[![Build Status](https://travis-ci.com/jonhoo/flurry.svg?branch=master)](https://travis-ci.com/jonhoo/flurry)
+![GitHub](https://img.shields.io/github/license/jonhoo/flurry)
 
 A port of Java's `java.util.concurrent.ConcurrentHashMap` to Rust.
 
