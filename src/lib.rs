@@ -124,7 +124,7 @@ where
     }
 
     // TODO: implement a guard API of our own
-    pub fn get<'g>(&'g self, key: &K, guard: &'g Guard) -> Option<Shared<'g, V>> {
+    pub fn get<'g>(&'g self, key: &K, guard: &'g Guard) -> Option<&'g V> {
         let h = self.hash(key);
         let table = self.table.load(Ordering::SeqCst, guard);
         if table.is_null() {
@@ -169,14 +169,17 @@ where
 
         let v = node.value.load(Ordering::SeqCst, guard);
         assert!(!v.is_null());
-        Some(v)
+        // safety: the lifetime of the reference is bound to the guard
+        // supplied which means that the memory will not be modified
+        // until at least after the guard goes out of scope
+        unsafe { v.as_ref() }
     }
 
     pub fn get_and<R, F: FnOnce(&V) -> R>(&self, key: &K, then: F) -> Option<R> {
         let guard = &crossbeam::epoch::pin();
         // safety: we are still holding the guard, and saw `v`, so it won't be dropped until the
         // next epoch after we drop our guard at the earliest.
-        self.get(key, guard).map(|v| then(unsafe { v.deref() }))
+        self.get(key, guard).map(then)
     }
 
     fn init_table<'g>(&self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
