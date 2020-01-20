@@ -1,0 +1,39 @@
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-url = "https://github.com/rustsec/advisory-db"
+vulnerability = "deny"
+unmaintained = "warn"
+notice = "warn"
+ignore = []
+
+[licenses]
+unlicensed = "deny"
+allow = []
+deny = []
+copyleft = "warn"
+allow-osi-fsf-free = "either"
+confidence-threshold = 0.8
+
+[bans]
+multiple-versions = "warn"
+highlight = "all"
+allow = [
+    #{ name = "ansi_term", version = "=0.11.0" },
+]
+deny = [
+    # Each entry the name of a crate and a version range. If version is
+    # not specified, all versions will be matched.
+    #{ name = "ansi_term", version = "=0.11.0" },
+]
+skip = [
+    #{ name = "ansi_term", version = "=0.11.0" },
+]
+skip-tree = [
+    #{ name = "ansi_term", version = "=0.11.0", depth = 20 },
+]
+
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+allow-git = []
