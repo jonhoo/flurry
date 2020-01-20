@@ -102,7 +102,6 @@ fn concurrent_insert() {
     }
 }
 
-
 #[test]
 fn concurrent_remove() {
     let map = Arc::new(FlurryHashMap::<usize, usize>::new());
