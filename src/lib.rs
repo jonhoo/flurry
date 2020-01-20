@@ -1076,7 +1076,7 @@ where
                         validated = true;
                         // TODO: tree nodes
                         let mut e = bin;
-                        let mut pred: Shared<BinEntry<K, V>> = Shared::null();
+                        let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
                         loop {
                             // safety: either e is bin, in which case it is valid due to the above,
                             // or e was obtained from a next pointer.
