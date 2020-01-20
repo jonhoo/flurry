@@ -8,11 +8,25 @@ jobs:
    pool:
      vmImage: ubuntu-16.04
    steps:
+     # Work around https://github.com/microsoft/azure-pipelines-tasks/issues/12179
+     - bash: |
+         sudo rm -r /usr/share/rust/.cargo/bin
+       displayName: Remove .cargo/bin so we can restore it from cache
+     - task: Cache@2
+       inputs:
+         key: cargo-deny | $(Agent.OS)
+         path: /usr/share/rust/.cargo/bin
+         cacheHitVar: CACHE_RESTORED
+     - bash: |
+         find -D exec /usr/share/rust/.cargo/bin ! -name 'cargo-deny' -type f -exec rm {} +
+       displayName: Only rely on cached cargo-deny
+       condition: eq(variables.CACHE_RESTORED, 'true')
      - template: install-rust.yml@templates
        parameters:
          rust: stable
      - script: cargo install cargo-deny
        displayName: install cargo-deny
+       condition: ne(variables.CACHE_RESTORED, 'true')
      - script: cargo deny check
        displayName: cargo deny
 
