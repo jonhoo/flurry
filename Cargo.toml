@@ -3,7 +3,7 @@ name = "flurry"
 version = "0.1.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 edition = "2018"
-license = "GPL-2.0-only"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 crossbeam = "0.7"
