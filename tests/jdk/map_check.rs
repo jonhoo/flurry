@@ -24,6 +24,20 @@ where
     assert_eq!(sum, expect * iters);
 }
 
+fn t2<K>(map: &FlurryHashMap<K, usize>, keys: &[K], expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq + std::fmt::Display,
+{
+    let mut sum = 0;
+    let guard = epoch::pin();
+    for key in keys {
+        if map.remove(key, &guard).is_some() {
+            sum += 1;
+        }
+    }
+    assert_eq!(sum, expect);
+}
+
 fn t3<K>(map: &FlurryHashMap<K, usize>, keys: &[K], expect: usize)
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -33,6 +47,22 @@ where
         if map.insert(keys[i], 0).is_none() {
             sum += 1;
         }
+    }
+    assert_eq!(sum, expect);
+}
+
+fn t5<K>(map: &FlurryHashMap<K, usize>, keys: &[K], expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    let guard = epoch::pin();
+    let mut i = keys.len() as isize - 2;
+    while i >= 0 {
+        if map.remove(&keys[i as usize], &guard).is_some() {
+            sum += 1;
+        }
+        i -= 2;
     }
     assert_eq!(sum, expect);
 }
@@ -55,4 +85,8 @@ fn everything() {
     t1(&map, &keys[..], SIZE);
     // get (absent)
     t1(&map, &absent_keys[..], 0);
+    // remove (absent)
+    t2(&map, &absent_keys[..], 0);
+    // remove (present)
+    t5(&map, &keys[..], SIZE / 2);
 }

@@ -44,8 +44,7 @@ fn insert_and_remove() {
     {
         let guard = epoch::pin();
         let old = map.remove(&42, &guard).unwrap();
-        // safety: the map guarantees that it will not free something there is a Shared to
-        assert_eq!(unsafe { old.deref() }, &0);
+        assert_eq!(old, &0);
         assert!(map.get(&42, &guard).is_none());
     }
 }
@@ -109,7 +108,7 @@ fn concurrent_remove() {
     let map = Arc::new(FlurryHashMap::<usize, usize>::new());
 
     for i in 0..64 {
-        map.insert(i, 64 - i);
+        map.insert(i, i);
     }
 
     let map1 = map.clone();
