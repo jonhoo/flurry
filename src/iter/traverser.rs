@@ -2,6 +2,7 @@ use crate::{BinEntry, Node, Table};
 use crossbeam::epoch::{Guard, Shared};
 use std::sync::atomic::Ordering;
 
+#[derive(Debug)]
 pub(crate) struct NodeIter<'g, K, V> {
     /// Current table; update if resized
     table: Option<&'g Table<K, V>>,
@@ -174,6 +175,7 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
     }
 }
 
+#[derive(Debug)]
 struct TableStack<'g, K, V> {
     length: usize,
     index: usize,
