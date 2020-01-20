@@ -26,6 +26,31 @@ fn get_empty() {
 }
 
 #[test]
+fn remove_empty() {
+    let map = FlurryHashMap::<usize, usize>::new();
+
+    {
+        let guard = epoch::pin();
+        let old = map.remove(&42, &guard);
+        assert!(old.is_none());
+    }
+}
+
+#[test]
+fn insert_and_remove() {
+    let map = FlurryHashMap::<usize, usize>::new();
+
+    map.insert(42, 0);
+    {
+        let guard = epoch::pin();
+        let old = map.remove(&42, &guard).unwrap();
+        // safety: the map guarantees that it will not free something there is a Shared to
+        assert_eq!(unsafe { old.deref() }, &0);
+        assert!(map.get(&42, &guard).is_none());
+    }
+}
+
+#[test]
 fn insert_and_get() {
     let map = FlurryHashMap::<usize, usize>::new();
 
@@ -75,6 +100,40 @@ fn concurrent_insert() {
     for i in 0..64 {
         let v = map.get(&i, &guard).unwrap();
         assert!(v == &0 || v == &1);
+    }
+}
+
+
+#[test]
+fn concurrent_remove() {
+    let map = Arc::new(FlurryHashMap::<usize, usize>::new());
+
+    for i in 0..64 {
+        map.insert(i, 64 - i);
+    }
+
+    let map1 = map.clone();
+    let t1 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        for i in 0..64 {
+            map1.remove(&i, &guard);
+        }
+    });
+    let map2 = map.clone();
+    let t2 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        for i in 0..64 {
+            map2.remove(&i, &guard);
+        }
+    });
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    // after joining the threads, the map should be empty
+    let guard = epoch::pin();
+    for i in 0..64 {
+        assert!(map.get(&i, &guard).is_none());
     }
 }
 
