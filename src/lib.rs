@@ -177,8 +177,6 @@ where
 
     pub fn get_and<R, F: FnOnce(&V) -> R>(&self, key: &K, then: F) -> Option<R> {
         let guard = &crossbeam::epoch::pin();
-        // safety: we are still holding the guard, and saw `v`, so it won't be dropped until the
-        // next epoch after we drop our guard at the earliest.
         self.get(key, guard).map(then)
     }
 
