@@ -1082,30 +1082,27 @@ where
                             // or e was obtained from a next pointer.
                             let n = unsafe { e.deref() }.as_node().unwrap();
                             let next = n.next.load(Ordering::SeqCst, guard);
-                            if n.hash == h {
-                                let ek = &n.key;
-                                if ek == key {
-                                    let ev = head.value.load(Ordering::SeqCst, guard);
-                                    old_val = Some(ev);
+                            if n.hash == h && &n.key == key {
+                                let ev = n.value.load(Ordering::SeqCst, guard);
+                                old_val = Some(ev);
 
-                                    // remove the BinEntry containing the removed key value pair from the bucket
-                                    if !pred.is_null() {
-                                        // either by changing the pointer of the previous BinEntry, if present
-                                        // safety: as above
-                                        unsafe { pred.deref() }
-                                            .as_node()
-                                            .unwrap()
-                                            .next
-                                            .store(next, Ordering::SeqCst);
-                                    } else {
-                                        // or by setting the next node as the first BinEntry if there is no previous entry
-                                        t.store_bin(i, next);
-                                    }
-
-                                    // in either case, mark the BinEntry as garbage, since it was just removed
-                                    // safety: as for val below / in put
-                                    unsafe { guard.defer_destroy(e) };
+                                // remove the BinEntry containing the removed key value pair from the bucket
+                                if !pred.is_null() {
+                                    // either by changing the pointer of the previous BinEntry, if present
+                                    // safety: as above
+                                    unsafe { pred.deref() }
+                                        .as_node()
+                                        .unwrap()
+                                        .next
+                                        .store(next, Ordering::SeqCst);
+                                } else {
+                                    // or by setting the next node as the first BinEntry if there is no previous entry
+                                    t.store_bin(i, next);
                                 }
+
+                                // in either case, mark the BinEntry as garbage, since it was just removed
+                                // safety: as for val below / in put
+                                unsafe { guard.defer_destroy(e) };
                             }
                             pred = e;
                             if next.is_null() {
@@ -1135,10 +1132,9 @@ where
                             //    any reference to the value.
                             //  - another thread is about to get a reference to this value.
                             //    they execute _after_ the store_bin, and therefore do _not_ get a
-                            //    reference to the old value (they get value instead). there are
-                            //    no other ways to get to a value except through its Node's
-                            //    `value` field (which is now gone together with the node), so freeing
-                            //    the old value is fine.
+                            //    reference to the old value. there are no other ways to get to a
+                            //    value except through its Node's `value` field (which is now gone
+                            //    together with the node), so freeing the old value is fine.
                             unsafe { guard.defer_destroy(val) };
 
                             // safety: the lifetime of the reference is bound to the guard
@@ -1151,7 +1147,7 @@ where
                 }
             }
         }
-        return None;
+        None
     }
 }
 
