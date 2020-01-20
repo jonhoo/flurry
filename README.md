@@ -1,7 +1,5 @@
-<!--
 [![Crates.io](https://img.shields.io/crates/v/flurry.svg)](https://crates.io/crates/flurry)
 [![Documentation](https://docs.rs/flurry/badge.svg)](https://docs.rs/flurry/)
--->
 [![Build Status](https://dev.azure.com/jonhoo/jonhoo/_apis/build/status/flurry?branchName=master)](https://dev.azure.com/jonhoo/jonhoo/_build/latest?definitionId=15&branchName=master)
 [![Codecov](https://codecov.io/github/jonhoo/flurry/coverage.svg?branch=master)](https://codecov.io/gh/jonhoo/flurry)
 [![Dependency status](https://deps.rs/repo/github/jonhoo/flurry/status.svg)](https://deps.rs/repo/github/jonhoo/flurry)

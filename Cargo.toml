@@ -1,9 +1,23 @@
 [package]
 name = "flurry"
-version = "0.1.0"
-authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
+version = "0.0.1"
 edition = "2018"
+authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 license = "MIT OR Apache-2.0"
+
+readme = "README.md"
+description = "Rust port of Java's ConcurrentHashMap"
+repository = "https://github.com/jonhoo/flurry.git"
+
+keywords = ["hashmap","concurrent","map"]
+categories = ["concurrency", "data-structures"]
+
+exclude = ["/jsr166/**"]
+
+[badges]
+azure-devops = { project = "jonhoo/jonhoo", pipeline = "flurry", build = "15" }
+codecov = { repository = "jonhoo/flurry", branch = "master", service = "github" }
+maintenance = { status = "experimental" }
 
 [dependencies]
 crossbeam = "0.7"
