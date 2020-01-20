@@ -2,6 +2,7 @@ jobs:
  - template: default.yml@templates
    parameters:
      codecov_token: $(CODECOV_TOKEN_SECRET)
+     minrust: 1.36.0 # parking_lot 0.10
 
 resources:
   repositories:

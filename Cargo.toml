@@ -21,5 +21,5 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 crossbeam = "0.7"
-parking_lot = "0.9"
+parking_lot = "0.10"
 rand = "0.7"
