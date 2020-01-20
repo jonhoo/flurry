@@ -33,8 +33,7 @@ fn insert_and_get() {
     {
         let guard = epoch::pin();
         let e = map.get(&42, &guard).unwrap();
-        // safety: the map guarantees that it will not free something there is a Shared to
-        assert_eq!(unsafe { e.deref() }, &0);
+        assert_eq!(e, &0);
     }
 }
 
@@ -48,8 +47,7 @@ fn update() {
     {
         let guard = epoch::pin();
         let e = map.get(&42, &guard).unwrap();
-        // safety: the map guarantees that it will not free something there is a Shared to
-        assert_eq!(unsafe { e.deref() }, &1);
+        assert_eq!(e, &1);
     }
 }
 
@@ -75,9 +73,7 @@ fn concurrent_insert() {
 
     let guard = epoch::pin();
     for i in 0..64 {
-        let e = map.get(&i, &guard).unwrap();
-        // safety: the map guarantees that it will not free something there is a Shared to
-        let v = unsafe { e.deref() };
+        let v = map.get(&i, &guard).unwrap();
         assert!(v == &0 || v == &1);
     }
 }
