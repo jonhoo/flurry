@@ -3,6 +3,18 @@ jobs:
    parameters:
      codecov_token: $(CODECOV_TOKEN_SECRET)
      minrust: 1.36.0 # parking_lot 0.10
+ - job: deny
+   displayName: "Disallowed attributes"
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+       parameters:
+         rust: stable
+     - script: cargo install cargo-deny
+       displayName: install cargo-deny
+     - script: cargo deny check
+       displayName: cargo deny
 
 resources:
   repositories:
