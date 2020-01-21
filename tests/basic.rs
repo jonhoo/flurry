@@ -10,7 +10,8 @@ fn new() {
 #[test]
 fn insert() {
     let map = FlurryHashMap::<usize, usize>::new();
-    let old = map.insert(42, 0);
+    let guard = epoch::pin();
+    let old = map.insert(42, 0, &guard);
     assert!(old.is_none());
 }
 
@@ -29,7 +30,7 @@ fn get_empty() {
 fn insert_and_get() {
     let map = FlurryHashMap::<usize, usize>::new();
 
-    map.insert(42, 0);
+    map.insert(42, 0, &epoch::pin());
     {
         let guard = epoch::pin();
         let e = map.get(&42, &guard).unwrap();
@@ -41,9 +42,10 @@ fn insert_and_get() {
 fn update() {
     let map = FlurryHashMap::<usize, usize>::new();
 
-    map.insert(42, 0);
-    let old = map.insert(42, 1);
-    assert!(old.is_some());
+    let guard = epoch::pin();
+    map.insert(42, 0, &guard);
+    let old = map.insert(42, 1, &guard);
+    assert_eq!(old, Some(&0));
     {
         let guard = epoch::pin();
         let e = map.get(&42, &guard).unwrap();
@@ -58,13 +60,13 @@ fn concurrent_insert() {
     let map1 = map.clone();
     let t1 = std::thread::spawn(move || {
         for i in 0..64 {
-            map1.insert(i, 0);
+            map1.insert(i, 0, &epoch::pin());
         }
     });
     let map2 = map.clone();
     let t2 = std::thread::spawn(move || {
         for i in 0..64 {
-            map2.insert(i, 1);
+            map2.insert(i, 1, &epoch::pin());
         }
     });
 
@@ -85,7 +87,7 @@ fn current_kv_dropped() {
 
     let map = FlurryHashMap::<Arc<usize>, Arc<usize>>::new();
 
-    map.insert(dropped1.clone(), dropped2.clone());
+    map.insert(dropped1.clone(), dropped2.clone(), &epoch::pin());
     assert_eq!(Arc::strong_count(&dropped1), 2);
     assert_eq!(Arc::strong_count(&dropped2), 2);
 
@@ -105,11 +107,11 @@ fn drop_value() {
 
     let map = FlurryHashMap::<usize, Arc<usize>>::new();
 
-    map.insert(42, dropped1.clone());
+    map.insert(42, dropped1.clone(), &epoch::pin());
     assert_eq!(Arc::strong_count(&dropped1), 2);
     assert_eq!(Arc::strong_count(&dropped2), 1);
 
-    map.insert(42, dropped2.clone());
+    map.insert(42, dropped2.clone(), &epoch::pin());
     assert_eq!(Arc::strong_count(&dropped2), 2);
 
     drop(map);

@@ -70,8 +70,9 @@ mod tests {
     fn iter() {
         let map = FlurryHashMap::<usize, usize>::new();
 
-        map.insert(1, 42);
-        map.insert(2, 84);
+        let guard = epoch::pin();
+        map.insert(1, 42, &guard);
+        map.insert(2, 84, &guard);
 
         let guard = epoch::pin();
         assert_eq!(
@@ -84,8 +85,9 @@ mod tests {
     fn keys() {
         let map = FlurryHashMap::<usize, usize>::new();
 
-        map.insert(1, 42);
-        map.insert(2, 84);
+        let guard = epoch::pin();
+        map.insert(1, 42, &guard);
+        map.insert(2, 84, &guard);
 
         let guard = epoch::pin();
         assert_eq!(
@@ -98,10 +100,11 @@ mod tests {
     fn values() {
         let map = FlurryHashMap::<usize, usize>::new();
 
-        map.insert(1, 42);
-        map.insert(2, 84);
+        let mut guard = epoch::pin();
+        map.insert(1, 42, &guard);
+        map.insert(2, 84, &guard);
+        guard.repin();
 
-        let guard = epoch::pin();
         assert_eq!(
             map.values(&guard).collect::<HashSet<&usize>>(),
             HashSet::from_iter(vec![&42, &84])

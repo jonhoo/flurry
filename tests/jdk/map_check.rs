@@ -29,8 +29,9 @@ where
     K: Sync + Send + Copy + Hash + Eq,
 {
     let mut sum = 0;
+    let guard = epoch::pin();
     for i in 0..keys.len() {
-        if map.insert(keys[i], 0).is_none() {
+        if map.insert(keys[i], 0, &guard).is_none() {
             sum += 1;
         }
     }
