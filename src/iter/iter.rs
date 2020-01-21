@@ -3,13 +3,9 @@ use std::sync::atomic::Ordering;
 
 use crate::NodeIter;
 
-/// An iterator over the entries of a `FlurryHashMap`.
+/// An iterator over a map's entries.
 ///
-/// This `struct` is created by the [`iter`] method on [`FlurryHashMap`].
-/// See its documentation for more.
-///
-/// [`iter`]: /flurry/struct.FlurryHashMap.html#method.iter
-/// [`FlurryHashMap`]: /flurry/struct.FlurryHashMap.html
+/// See [`FlurryHashMap::iter`] for details.
 #[derive(Debug)]
 pub struct Iter<'g, K, V> {
     pub(crate) node_iter: NodeIter<'g, K, V>,
@@ -27,13 +23,9 @@ impl<'g, K, V> Iterator for Iter<'g, K, V> {
     }
 }
 
-/// An iterator over the keys of a `FlurryHashMap`.
+/// An iterator over a map's keys.
 ///
-/// This `struct` is created by the [`keys`] method on [`FlurryHashMap`].
-/// See its documentation for more.
-///
-/// [`keys`]: /flurry/struct.FlurryHashMap.html#method.keys
-/// [`FlurryHashMap`]: /flurry/struct.FlurryHashMap.html
+/// See [`FlurryHashMap::keys`] for details.
 #[derive(Debug)]
 pub struct Keys<'g, K, V> {
     pub(crate) node_iter: NodeIter<'g, K, V>,
@@ -47,13 +39,9 @@ impl<'g, K, V> Iterator for Keys<'g, K, V> {
     }
 }
 
-/// An iterator over the values of a `FlurryHashMap`.
+/// An iterator over a map's values.
 ///
-/// This `struct` is created by the [`values`] method on [`FlurryHashMap`].
-/// See its documentation for more.
-///
-/// [`values`]: /flurry/struct.FlurryHashMap.html#method.values
-/// [`FlurryHashMap`]: /flurry/struct.FlurryHashMap.html
+/// See [`FlurryHashMap::values`] for details.
 #[derive(Debug)]
 pub struct Values<'g, K, V> {
     pub(crate) node_iter: NodeIter<'g, K, V>,
@@ -74,7 +62,7 @@ impl<'g, K, V> Iterator for Values<'g, K, V> {
 #[cfg(test)]
 mod tests {
     use crate::FlurryHashMap;
-    use crossbeam::epoch::{self};
+    use crossbeam::epoch;
     use std::collections::HashSet;
     use std::iter::FromIterator;
 
