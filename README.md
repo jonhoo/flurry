@@ -14,6 +14,34 @@ under the `jsr166/` subdirectory for easy reference.
 The port was developed as part of a series of [live coding streams]
 kicked off by [this tweet].
 
+## TODOs
+
+There are a number of things missing from this port that exist in the
+[original Java code](jsr166/src/ConcurrentHashMap.java). Some of these
+are indicated by `TODO` blocks in the code, but this is (maybe) a more
+complete list. For all of these, PRs are warmly welcome, and I will try
+to review them as promptly as I can! Feel free to open draft PRs if you
+want suggestions for how to proceed.
+
+ - Add benchmarks for single-core (from `hashbrown`) and concurrent
+   (from `dashmap`) performance measurements.
+ - Finish the safety argument for `BinEntry::Moved` (see `FIXME`
+   comment).
+ - Use sharded counters (`LongAdder` and `CounterCell` in Java) in
+   `add_count`.
+ - Add `computeIfAbsent` and friends. I have a suspicion that
+   `ReservationNode` could also be used to implement an `Entry`-API like
+   the one on `std::collections::HashMap`.
+ - Implement the `TreeNode` optimization for large bins. Make sure you
+   also read the implementation notes on that optimization in the big
+   comment in the Java code.
+ - Implement batch operations like `from_iter` and `extend`.
+ - Add (optional) serialization and deserialization support.
+ - Provide methods that wrap `get`, `insert`, `remove`, and friends so
+   that the user does not need to know about `Guard`.
+ - Take advantage of the resize hint given to `add_count`.
+ - Use `num_cpus` to choose resize stride more intelligently.
+
 ## License
 
 Licensed under either of
