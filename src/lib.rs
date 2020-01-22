@@ -1112,11 +1112,24 @@ where
     V: Sync + Send,
     S: BuildHasher,
 {
+    #[inline]
     // TODO: Implement Java's `tryPresize` method to pre-allocate space for
     // the incoming entries
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         let guard = crossbeam::epoch::pin();
         (*self).put_all(iter.into_iter(), &guard);
+    }
+}
+
+impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Copy + Hash + Eq,
+    V: Sync + Send + Copy,
+    S: BuildHasher,
+{
+    #[inline]
+    fn extend<T: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: T) {
+        self.extend(iter.into_iter().map(|(&key, &value)| (key, value)));
     }
 }
 
@@ -1126,15 +1139,15 @@ where
     V: Sync + Send,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
-        let mut it = iter.into_iter();
+        let mut iter = iter.into_iter();
 
-        if let Some((key, value)) = it.next() {
+        if let Some((key, value)) = iter.next() {
             let guard = unsafe { crossbeam::epoch::unprotected() };
-            let (lower, _) = it.size_hint();
+            let (lower, _) = iter.size_hint();
             let map = Self::with_capacity(lower.saturating_add(1));
 
             map.put(key, value, false, &guard);
-            map.put_all(it, &guard);
+            map.put_all(iter, &guard);
             map
         } else {
             Self::new()
