@@ -1124,7 +1124,6 @@ where
     V: Sync + Send,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
-        // safety: we have &mut self, so not concurrently accessed by anyone else
         let it = iter.into_iter();
         let (lower, _) = it.size_hint();
         
