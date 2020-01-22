@@ -194,6 +194,9 @@
 #![deny(missing_docs, missing_debug_implementations)]
 #![warn(rust_2018_idioms)]
 
+#[macro_use]
+extern crate lazy_static;
+
 mod node;
 use node::*;
 
@@ -201,6 +204,7 @@ use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::iter::FromIterator;
 
 /// The largest possible table capacity.  This value must be
 /// exactly 1<<30 to stay within Java array allocation and indexing
@@ -764,8 +768,12 @@ where
         // won't be dropped while the guard remains active.
         let n = unsafe { table.deref() }.bins.len();
 
-        // TODO: use num_cpus to help determine stride
-        let stride = MIN_TRANSFER_STRIDE;
+        lazy_static! {
+            static NCPU: usize = num_cpus::get_physical();
+        }
+
+        let stride = if NCPU > 1 { (n >> 3) / NCPU } else { n }; 
+        let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
 
         if next_table.is_null() {
             // we are initiating a resize
@@ -1073,6 +1081,18 @@ where
         let node_iter = NodeIter::new(table, guard);
         Values { node_iter, guard }
     }
+
+    /// Exntends the [`FlurryHashMap`] with the contents of `iter`.
+    // TODO: Implement this in a not as stupid way
+    pub fn extend<'g, T: IntoIterator<Item = (K, V)>>(
+        &self,
+        iter: T,
+        guard: &'g Guard
+    ) {
+        for (key, value) in iter {
+            self.put(key, value, false, guard);
+        }
+    }
 }
 
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
@@ -1090,6 +1110,17 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
         // safety: same as above + we own the table
         let mut table = unsafe { table.into_owned() }.into_box();
         table.drop_bins();
+    }
+}
+
+impl<K, V, S> FromIterator<(K, V)> for FlurryHashMap<K, V, S> {
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) {
+        // safety: we have &mut self, so not concurrently accessed by anyone else
+        let guard = unsafe { crossbeam::epoch::unprotected() };
+        let output = Self::new();
+        output.extend(iter, &guard);
+
+        output
     }
 }
 
