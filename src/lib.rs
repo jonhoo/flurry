@@ -643,6 +643,12 @@ where
         }
     }
 
+    fn put_all<'g, I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &'g Guard) {
+        for (key, value) in iter {
+            self.put(key, value, false, guard);
+        }
+    }
+
     fn help_transfer<'g>(
         &self,
         table: Shared<'g, Table<K, V>>,
@@ -1110,10 +1116,7 @@ where
     // the incoming entries
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         let guard = crossbeam::epoch::pin();
-
-        for (key, value) in iter {
-            (*self).put(key, value, false, &guard);
-        }
+        (*self).put_all(iter.into_iter(), &guard);
     }
 }
 
@@ -1124,18 +1127,18 @@ where
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         let mut it = iter.into_iter();
+        let guard = crossbeam::epoch::pin();
 
         let map = if let Some((key, value)) = it.next() {
-            let guard = crossbeam::epoch::pin();
             let (lower, _) = it.size_hint();
             let map = Self::with_capacity(lower.saturating_add(1));
             map.put(key, value, false, &guard);
             map
         } else {
-            Self::new()
+            return Self::new();
         };
 
-        (&mut &map).extend(it);
+        map.put_all(it, &guard);
         map
     }
 }
