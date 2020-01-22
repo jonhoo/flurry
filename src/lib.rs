@@ -1127,19 +1127,18 @@ where
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         let mut it = iter.into_iter();
-        let guard = crossbeam::epoch::pin();
 
-        let map = if let Some((key, value)) = it.next() {
+        if let Some((key, value)) = it.next() {
+            let guard = crossbeam::epoch::pin();
             let (lower, _) = it.size_hint();
             let map = Self::with_capacity(lower.saturating_add(1));
+
             map.put(key, value, false, &guard);
+            map.put_all(it, &guard);
             map
         } else {
-            return Self::new();
-        };
-
-        map.put_all(it, &guard);
-        map
+            Self::new()
+        }
     }
 }
 
