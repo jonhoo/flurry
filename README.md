@@ -33,6 +33,8 @@ want suggestions for how to proceed.
  - Add [`computeIfAbsent`] and [friends]. I have a suspicion that
    `ReservationNode` could also be used to implement an [`Entry`-API]
    like the one on `std::collections::HashMap`.
+ - Implement Java's `tryPresize` method to pre-allocate space for
+   the incoming entries in `<FlurryHashMap<K, V>> as Extend<(K, V)>>::extend`.
  - Implement the [`TreeNode` optimization] for large bins. Make sure you
    also read the [implementation notes][tree-impl] on that optimization
    in the big comment in the Java code.

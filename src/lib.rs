@@ -767,7 +767,7 @@ where
         // this references is still active (marked by the guard), so the target of the references
         // won't be dropped while the guard remains active.
         let n = unsafe { table.deref() }.bins.len();
-        let ncpu = get_ncpu();
+        let ncpu = num_cpus();
         
         let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n }; 
         let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
@@ -1104,8 +1104,8 @@ where
     V: Sync + Send,
     S: BuildHasher,
 {
-    // TODO: with specialization, we could eagerly resize if adding the number of elements in an
-    // ExactSizeIterator would exceed the capacity of the map.
+    // TODO: Implement Java's `tryPresize` method to pre-allocate space for
+    // the incoming entries
     fn extend<T: IntoIterator<Item = (K, V)>>(
         &mut self,
         iter: T,
@@ -1243,7 +1243,7 @@ impl<K, V> Table<K, V> {
 
 #[inline]
 /// Returns the number of physical CPUs in the machine (_O(1)_).
-fn get_ncpu() -> usize {
+fn num_cpus() -> usize {
     NCPU_INITIALIZER.call_once(|| unsafe {NCPU = num_cpus::get_physical()});
     
     unsafe { NCPU }
@@ -1251,3 +1251,4 @@ fn get_ncpu() -> usize {
 
 #[cfg(test)]
 mod tests {}
+
