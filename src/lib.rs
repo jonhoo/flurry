@@ -1080,7 +1080,8 @@ where
     }
 
     /// Exntends the [`FlurryHashMap`] with the contents of `iter`.
-    // TODO: Implement this in a not as stupid way
+    // TODO: with specialization, we could eagerly resize if adding the number of elements in an
+    // ExactSizeIterator would exceed the capacity of the map.
     pub fn extend<'g, T: IntoIterator<Item = (K, V)>>(
         &self,
         iter: T,
@@ -1118,7 +1119,10 @@ where
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         // safety: we have &mut self, so not concurrently accessed by anyone else
         let guard = unsafe { crossbeam::epoch::unprotected() };
-        let output: FlurryHashMap<K, V, RandomState> = FlurryHashMap::new();
+        let it = iter.iter();
+        let size_hint = it.size_hint().0;
+        
+        let output = Self::with_capacity(size_hint);
         output.extend(iter, &guard);
 
         output
