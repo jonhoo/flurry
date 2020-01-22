@@ -194,9 +194,6 @@
 #![deny(missing_docs, missing_debug_implementations)]
 #![warn(rust_2018_idioms)]
 
-#[macro_use]
-extern crate lazy_static;
-
 mod node;
 use node::*;
 
@@ -767,12 +764,9 @@ where
         // this references is still active (marked by the guard), so the target of the references
         // won't be dropped while the guard remains active.
         let n = unsafe { table.deref() }.bins.len();
+        let ncpu = num_cpus::get_physical();
 
-        lazy_static! {
-            static NCPU: usize = num_cpus::get_physical();
-        }
-
-        let stride = if NCPU > 1 { (n >> 3) / NCPU } else { n }; 
+        let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n }; 
         let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
 
         if next_table.is_null() {
@@ -1113,11 +1107,15 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     }
 }
 
-impl<K, V, S> FromIterator<(K, V)> for FlurryHashMap<K, V, S> {
-    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) {
+impl<K, V> FromIterator<(K, V)> for FlurryHashMap<K, V, RandomState> 
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+{
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         // safety: we have &mut self, so not concurrently accessed by anyone else
         let guard = unsafe { crossbeam::epoch::unprotected() };
-        let output = Self::new();
+        let output: FlurryHashMap<K, V, RandomState> = FlurryHashMap::new();
         output.extend(iter, &guard);
 
         output
