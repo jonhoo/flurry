@@ -1129,7 +1129,7 @@ where
         let mut it = iter.into_iter();
 
         if let Some((key, value)) = it.next() {
-            let guard = crossbeam::epoch::pin();
+            let guard = unsafe { crossbeam::epoch::unprotected() };
             let (lower, _) = it.size_hint();
             let map = Self::with_capacity(lower.saturating_add(1));
 
