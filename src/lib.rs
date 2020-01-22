@@ -1119,11 +1119,11 @@ where
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         // safety: we have &mut self, so not concurrently accessed by anyone else
         let guard = unsafe { crossbeam::epoch::unprotected() };
-        let it = iter.iter();
+        let it = iter.into_iter();
         let size_hint = it.size_hint().0;
         
         let output = Self::with_capacity(size_hint);
-        output.extend(iter, &guard);
+        output.extend(it, &guard);
 
         output
     }
