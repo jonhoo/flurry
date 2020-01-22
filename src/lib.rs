@@ -200,7 +200,7 @@ use node::*;
 use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
-use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::sync::{atomic::{AtomicIsize, AtomicUsize, Ordering}, Once};
 use std::iter::FromIterator;
 
 /// The largest possible table capacity.  This value must be
@@ -238,6 +238,9 @@ const MAX_RESIZERS: isize = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
 
 /// The bit shift for recording size stamp in `size_ctl`.
 const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
+
+static NCPU_INITIALIZER: Once = Once::new();
+static mut NCPU: usize = 0;
 
 /// Iterator types.
 pub mod iter;
@@ -764,8 +767,8 @@ where
         // this references is still active (marked by the guard), so the target of the references
         // won't be dropped while the guard remains active.
         let n = unsafe { table.deref() }.bins.len();
-        let ncpu = num_cpus::get_physical();
-
+        let ncpu = get_ncpu();
+        
         let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n }; 
         let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
 
@@ -1227,6 +1230,14 @@ impl<K, V> Table<K, V> {
     fn store_bin<P: crossbeam::epoch::Pointer<BinEntry<K, V>>>(&self, i: usize, new: P) {
         self.bins[i].store(new, Ordering::Release)
     }
+}
+
+#[inline]
+/// Returns the number of physical CPUs in the machine (_O(1)_).
+fn get_ncpu() -> usize {
+    NCPU_INITIALIZER.call_once(|| unsafe {NCPU = num_cpus::get_physical()});
+    
+    unsafe { NCPU }
 }
 
 #[cfg(test)]
