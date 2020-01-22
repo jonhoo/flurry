@@ -1078,19 +1078,6 @@ where
         let node_iter = NodeIter::new(table, guard);
         Values { node_iter, guard }
     }
-
-    /// Exntends the [`FlurryHashMap`] with the contents of `iter`.
-    // TODO: with specialization, we could eagerly resize if adding the number of elements in an
-    // ExactSizeIterator would exceed the capacity of the map.
-    pub fn extend<'g, T: IntoIterator<Item = (K, V)>>(
-        &self,
-        iter: T,
-        guard: &'g Guard
-    ) {
-        for (key, value) in iter {
-            self.put(key, value, false, guard);
-        }
-    }
 }
 
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
@@ -1111,6 +1098,26 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     }
 }
 
+impl <K, V, S> Extend<(K, V)> for &FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+    S: BuildHasher,
+{
+    // TODO: with specialization, we could eagerly resize if adding the number of elements in an
+    // ExactSizeIterator would exceed the capacity of the map.
+    fn extend<T: IntoIterator<Item = (K, V)>>(
+        &mut self,
+        iter: T,
+    ) {
+        let guard = crossbeam::epoch::pin();
+
+        for (key, value) in iter {
+            (*self).put(key, value, false, &guard);
+        }
+    }
+}
+
 impl<K, V> FromIterator<(K, V)> for FlurryHashMap<K, V, RandomState> 
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -1118,12 +1125,11 @@ where
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         // safety: we have &mut self, so not concurrently accessed by anyone else
-        let guard = unsafe { crossbeam::epoch::unprotected() };
         let it = iter.into_iter();
-        let size_hint = it.size_hint().0;
+        let (lower, _) = it.size_hint();
         
-        let output = Self::with_capacity(size_hint);
-        output.extend(it, &guard);
+        let output = Self::with_capacity(lower);
+        (&mut &output).extend(it);
 
         output
     }
