@@ -1106,10 +1106,7 @@ where
 {
     // TODO: Implement Java's `tryPresize` method to pre-allocate space for
     // the incoming entries
-    fn extend<T: IntoIterator<Item = (K, V)>>(
-        &mut self,
-        iter: T,
-    ) {
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         let guard = crossbeam::epoch::pin();
 
         for (key, value) in iter {
