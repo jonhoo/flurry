@@ -36,12 +36,11 @@ want suggestions for how to proceed.
  - Implement the [`TreeNode` optimization] for large bins. Make sure you
    also read the [implementation notes][tree-impl] on that optimization
    in the big comment in the Java code.
- - Implement batch operations like `from_iter` and `extend`. Note the
-   effect on [initial capacity].
+ - Optimize the `FlurryHashMap::extend` method. Note the effect on 
+   [initial capacity].
  - Add (optional) serialization and deserialization support.
  - Provide methods that wrap `get`, `insert`, `remove`, and friends so
    that the user does not need to know about `Guard`.
- - Use `num_cpus` to choose resize stride [more intelligently][numcpu].
 
   [hashbrown-bench]: https://github.com/rust-lang/hashbrown/blob/master/benches/bench.rs
   [dashmap-bench]: https://github.com/xacrimon/dashmap/tree/master/benches
