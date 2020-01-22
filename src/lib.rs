@@ -200,8 +200,11 @@ use node::*;
 use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
-use std::sync::{atomic::{AtomicIsize, AtomicUsize, Ordering}, Once};
 use std::iter::FromIterator;
+use std::sync::{
+    atomic::{AtomicIsize, AtomicUsize, Ordering},
+    Once,
+};
 
 /// The largest possible table capacity.  This value must be
 /// exactly 1<<30 to stay within Java array allocation and indexing
@@ -308,12 +311,11 @@ where
 
     /// Creates a new, empty map with an initial table size accommodating the specified number of
     /// elements without the need to dynamically resize.
-    ///
-    /// # Panics
-    ///
-    /// If the given capacity is 0.
     pub fn with_capacity(n: usize) -> Self {
-        assert_ne!(n, 0);
+        if n == 0 {
+            return Self::new();
+        }
+
         let mut m = Self::new();
         let size = (1.0 + (n as f64) / LOAD_FACTOR) as usize;
         // NOTE: tableSizeFor in Java
@@ -768,8 +770,8 @@ where
         // won't be dropped while the guard remains active.
         let n = unsafe { table.deref() }.bins.len();
         let ncpu = num_cpus();
-        
-        let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n }; 
+
+        let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n };
         let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
 
         if next_table.is_null() {
@@ -1098,7 +1100,7 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     }
 }
 
-impl <K, V, S> Extend<(K, V)> for &FlurryHashMap<K, V, S>
+impl<K, V, S> Extend<(K, V)> for &FlurryHashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -1115,19 +1117,26 @@ where
     }
 }
 
-impl<K, V> FromIterator<(K, V)> for FlurryHashMap<K, V, RandomState> 
+impl<K, V> FromIterator<(K, V)> for FlurryHashMap<K, V, RandomState>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
-        let it = iter.into_iter();
-        let (lower, _) = it.size_hint();
-        
-        let output = Self::with_capacity(lower);
-        (&mut &output).extend(it);
+        let mut it = iter.into_iter();
 
-        output
+        let map = if let Some((key, value)) = it.next() {
+            let guard = crossbeam::epoch::pin();
+            let (lower, _) = it.size_hint();
+            let map = Self::with_capacity(lower.saturating_add(1));
+            map.put(key, value, false, &guard);
+            map
+        } else {
+            Self::new()
+        };
+
+        (&mut &map).extend(it);
+        map
     }
 }
 
@@ -1241,11 +1250,10 @@ impl<K, V> Table<K, V> {
 #[inline]
 /// Returns the number of physical CPUs in the machine (_O(1)_).
 fn num_cpus() -> usize {
-    NCPU_INITIALIZER.call_once(|| unsafe {NCPU = num_cpus::get_physical()});
-    
+    NCPU_INITIALIZER.call_once(|| unsafe { NCPU = num_cpus::get_physical() });
+
     unsafe { NCPU }
 }
 
 #[cfg(test)]
 mod tests {}
-
