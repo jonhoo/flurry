@@ -1043,7 +1043,7 @@ where
             if n == 0 {
                 break;
             }
-            let i = ((n - 1) & h) as usize;
+            let i = t.bini(h);
             let bin = t.bin(i, guard);
             if bin.is_null() {
                 break;
@@ -1070,80 +1070,89 @@ where
                 BinEntry::Node(ref head) => {
                     let head_lock = head.lock.lock();
                     let mut old_val: Option<Shared<'g, V>> = None;
-                    let mut validated = false;
 
-                    if t.bin(i, guard) == bin {
-                        validated = true;
-                        // TODO: tree nodes
-                        let mut e = bin;
-                        let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
-                        loop {
-                            // safety: either e is bin, in which case it is valid due to the above,
-                            // or e was obtained from a next pointer.
-                            let n = unsafe { e.deref() }.as_node().unwrap();
-                            let next = n.next.load(Ordering::SeqCst, guard);
-                            if n.hash == h && &n.key == key {
-                                let ev = n.value.load(Ordering::SeqCst, guard);
-                                old_val = Some(ev);
+                    // need to check that this is _still_ the head
+                    if t.bin(i, guard) != bin {
+                        continue;
+                    }
 
-                                // remove the BinEntry containing the removed key value pair from the bucket
-                                if !pred.is_null() {
-                                    // either by changing the pointer of the previous BinEntry, if present
-                                    // safety: as above
-                                    unsafe { pred.deref() }
-                                        .as_node()
-                                        .unwrap()
-                                        .next
-                                        .store(next, Ordering::SeqCst);
-                                } else {
-                                    // or by setting the next node as the first BinEntry if there is no previous entry
-                                    t.store_bin(i, next);
-                                }
+                    // TODO: tree nodes
+                    let mut e = bin;
+                    let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
+                    loop {
+                        // safety: either e is bin, in which case it is valid due to the above,
+                        // or e was obtained from a next pointer. Any next pointer obtained from
+                        // bin is valid at the time we look up bin in the table, at which point
+                        // the epoch is pinned by our guard. Since we found the next pointer
+                        // in a valid map and it is not null (as checked above and below), the
+                        // node it points to was present (i.e. not removed) from the map in the
+                        // current epoch. Thus, because the epoch cannot advance until we release
+                        // our guard, e is also valid if it was obtained from a next pointer.
+                        let n = unsafe { e.deref() }.as_node().unwrap();
+                        let next = n.next.load(Ordering::SeqCst, guard);
+                        if n.hash == h && &n.key == key {
+                            let ev = n.value.load(Ordering::SeqCst, guard);
+                            old_val = Some(ev);
 
-                                // in either case, mark the BinEntry as garbage, since it was just removed
-                                // safety: as for val below / in put
-                                unsafe { guard.defer_destroy(e) };
-                            }
-                            pred = e;
-                            if next.is_null() {
-                                break;
+                            // remove the BinEntry containing the removed key value pair from the bucket
+                            if !pred.is_null() {
+                                // either by changing the pointer of the previous BinEntry, if present
+                                // safety: as above
+                                unsafe { pred.deref() }
+                                    .as_node()
+                                    .unwrap()
+                                    .next
+                                    .store(next, Ordering::SeqCst);
                             } else {
-                                e = next;
+                                // or by setting the next node as the first BinEntry if there is no previous entry
+                                t.store_bin(i, next);
                             }
+
+                            // in either case, mark the BinEntry as garbage, since it was just removed
+                            // safety: as for val below / in put
+                            unsafe { guard.defer_destroy(e) };
+
+                            // since the key was found and only one node exists per key, we can
+                            // break here (as an addition to the Java code)
+                            break;
+                        }
+                        pred = e;
+                        if next.is_null() {
+                            break;
+                        } else {
+                            e = next;
                         }
                     }
                     drop(head_lock);
 
-                    if validated {
-                        if let Some(val) = old_val {
-                            self.add_count(-1, None, guard);
-                            // safety: need to guarantee that the old value is no longer
-                            // reachable. more specifically, no thread that executes _after_
-                            // this line can ever get a reference to val.
-                            //
-                            // here are the possible cases:
-                            //
-                            //  - another thread already has a reference to the old value.
-                            //    they must have read it before the call to store_bin.
-                            //    because of this, that thread must be pinned to an epoch <=
-                            //    the epoch of our guard. since the garbage is placed in our
-                            //    epoch, it won't be freed until the _next_ epoch, at which
-                            //    point, that thread must have dropped its guard, and with it,
-                            //    any reference to the value.
-                            //  - another thread is about to get a reference to this value.
-                            //    they execute _after_ the store_bin, and therefore do _not_ get a
-                            //    reference to the old value. there are no other ways to get to a
-                            //    value except through its Node's `value` field (which is now gone
-                            //    together with the node), so freeing the old value is fine.
-                            unsafe { guard.defer_destroy(val) };
+                    if let Some(val) = old_val {
+                        self.add_count(-1, None, guard);
+                        // safety: need to guarantee that the old value is no longer
+                        // reachable. more specifically, no thread that executes _after_
+                        // this line can ever get a reference to val.
+                        //
+                        // here are the possible cases:
+                        //
+                        //  - another thread already has a reference to the old value.
+                        //    they must have read it before the call to store_bin.
+                        //    because of this, that thread must be pinned to an epoch <=
+                        //    the epoch of our guard. since the garbage is placed in our
+                        //    epoch, it won't be freed until the _next_ epoch, at which
+                        //    point, that thread must have dropped its guard, and with it,
+                        //    any reference to the value.
+                        //  - another thread is about to get a reference to this value.
+                        //    they execute _after_ the store_bin, and therefore do _not_ get a
+                        //    reference to the old value. there are no other ways to get to a
+                        //    value except through its Node's `value` field (which is now gone
+                        //    together with the node), so freeing the old value is fine.
+                        unsafe { guard.defer_destroy(val) };
 
-                            // safety: the lifetime of the reference is bound to the guard
-                            // supplied which means that the memory will not be modified
-                            // until at least after the guard goes out of scope
-                            return unsafe { val.as_ref() };
-                        }
-                        break;
+                        // safety: the lifetime of the reference is bound to the guard
+                        // supplied which means that the memory will not be freed
+                        // until at least after the guard goes out of scope
+                        return unsafe { val.as_ref() };
                     }
+                    break;
                 }
             }
         }
