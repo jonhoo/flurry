@@ -1143,9 +1143,6 @@ where
                             // in either case, mark the BinEntry as garbage, since it was just removed
                             // safety: as for val below / in put
                             unsafe { guard.defer_destroy(e) };
-
-                            // since the key was found and only one node exists per key, we can
-                            // break here (as an addition to the Java code)
                             break;
                         }
                         pred = e;
