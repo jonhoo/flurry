@@ -119,14 +119,18 @@ fn concurrent_remove() {
     let t1 = std::thread::spawn(move || {
         let guard = epoch::pin();
         for i in 0..64 {
-            map1.remove(&i, &guard);
+            if let Some(v) = map1.remove(&i, &guard) {
+                assert_eq!(v, &i);
+            }
         }
     });
     let map2 = map.clone();
     let t2 = std::thread::spawn(move || {
         let guard = epoch::pin();
         for i in 0..64 {
-            map2.remove(&i, &guard);
+            if let Some(v) = map2.remove(&i, &guard) {
+                assert_eq!(v, &i);
+            }
         }
     });
 
