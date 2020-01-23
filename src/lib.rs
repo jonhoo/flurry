@@ -6,6 +6,25 @@
 //! on shared references, retrieval operations do *not* entail locking, and there is *not* any
 //! support for locking the entire table in a way that prevents all access.
 //!
+//! # A note on `Guard` and memory use
+//!
+//! You may have noticed that many of the access methods on this map take a reference to an
+//! [`epoch::Guard`]. The exact details of this are beyond the scope of this documentation (for
+//! that, see [`crossbeam::epoch`]), but some of the implications bear repeating here. You obtain a
+//! `Guard` using [`epoch::pin`], and you can use references to the same guard to make multiple API
+//! calls if you wish. Whenever you get a reference to something stored in the map, that reference
+//! is tied to the lifetime of the `Guard` that you provided. This is because each `Guard` prevents
+//! the destruction of any item associated with it. Whenever something is read under a `Guard`,
+//! that something stays around for _at least_ as long as the `Guard` does. The map delays
+//! deallocating values until it safe to do so, and in order to amortize the cost of the necessary
+//! bookkeeping it may delay even further until there's a _batch_ of items that need to be
+//! deallocated.
+//!
+//! Notice that there is a trade-off here. Creating and dropping a `Guard` is not free, since it
+//! also needs to interact with said bookkeeping. But if you keep one around for a long time, you
+//! may accumulate much garbage which will take up valuable free memory on your system. Use your
+//! best judgement in deciding whether or not to re-use a `Guard`.
+//!
 //! # Consistency
 //!
 //! Retrieval operations (including [`get`](FlurryHashMap::get)) generally do not block, so may
@@ -221,6 +240,7 @@ const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
 
 /// Iterator types.
 pub mod iter;
+use iter::*;
 
 /// Types needed to safely access shared data concurrently.
 pub mod epoch {
@@ -427,14 +447,13 @@ where
     /// Maps `key` to `value` in this table.
     ///
     /// The value can be retrieved by calling [`get`] with a key that is equal to the original key.
-    pub fn insert(&self, key: K, value: V) -> Option<()> {
-        self.put(key, value, false)
+    pub fn insert<'g>(&self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
+        self.put(key, value, false, guard)
     }
 
-    fn put(&self, key: K, value: V, no_replacement: bool) -> Option<()> {
+    fn put<'g>(&self, key: K, value: V, no_replacement: bool, guard: &'g Guard) -> Option<&'g V> {
         let h = self.hash(&key);
 
-        let guard = &crossbeam::epoch::pin();
         let mut table = self.table.load(Ordering::SeqCst, guard);
 
         let mut node = Owned::new(BinEntry::Node(Node {
@@ -515,7 +534,11 @@ where
                     if no_replacement && head.hash == h && &head.key == key =>
                 {
                     // fast path if replacement is disallowed and first bin matches
-                    return Some(());
+                    let v = head.value.load(Ordering::SeqCst, guard);
+                    // safety: since the value is present now, and we've held a guard from the
+                    // beginning of the search, the value cannot be dropped until the next epoch,
+                    // which won't arrive until after we drop our guard.
+                    return Some(unsafe { v.deref() });
                 }
                 BinEntry::Node(ref head) => {
                     // bin is non-empty, need to link into it, so we must take the lock
@@ -544,6 +567,13 @@ where
                         let n = unsafe { p.deref() }.as_node().unwrap();
                         if n.hash == h && &n.key == key {
                             // the key already exists in the map!
+                            let current_value = head.value.load(Ordering::SeqCst, guard);
+
+                            // safety: since the value is present now, and we've held a guard from
+                            // the beginning of the search, the value cannot be dropped until the
+                            // next epoch, which won't arrive until after we drop our guard.
+                            let current_value = unsafe { current_value.deref() };
+
                             if no_replacement {
                                 // the key is not absent, so don't update
                             } else if let BinEntry::Node(Node { value, .. }) = *node.into_box() {
@@ -553,6 +583,8 @@ where
                                     Ordering::SeqCst,
                                     guard,
                                 );
+                                // NOTE: now_garbage == current_value
+
                                 // safety: need to guarantee that now_garbage is no longer
                                 // reachable. more specifically, no thread that executes _after_
                                 // this line can ever get a reference to now_garbage.
@@ -576,7 +608,7 @@ where
                             } else {
                                 unreachable!();
                             }
-                            break Some(());
+                            break Some(current_value);
                         }
 
                         // TODO: This Ordering can probably be relaxed due to the Mutex
@@ -1157,6 +1189,36 @@ where
             }
         }
         None
+    }
+
+    /// An iterator visiting all key-value pairs in arbitrary order.
+    /// The iterator element type is `(&'g K, &'g V)`.
+    ///
+    /// To obtain a `Guard`, use [`epoch::pin`].
+    pub fn iter<'g>(&self, guard: &'g Guard) -> Iter<'g, K, V> {
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Iter { node_iter, guard }
+    }
+
+    /// An iterator visiting all keys in arbitrary order.
+    /// The iterator element type is `&'g K`.
+    ///
+    /// To obtain a `Guard`, use [`epoch::pin`].
+    pub fn keys<'g>(&self, guard: &'g Guard) -> Keys<'g, K, V> {
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Keys { node_iter }
+    }
+
+    /// An iterator visiting all values in arbitrary order.
+    /// The iterator element type is `&'g V`.
+    ///
+    /// To obtain a `Guard`, use [`epoch::pin`].
+    pub fn values<'g>(&self, guard: &'g Guard) -> Values<'g, K, V> {
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Values { node_iter, guard }
     }
 }
 

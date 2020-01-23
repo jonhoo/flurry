@@ -43,8 +43,22 @@ where
     K: Sync + Send + Copy + Hash + Eq,
 {
     let mut sum = 0;
+    let guard = epoch::pin();
     for i in 0..keys.len() {
-        if map.insert(keys[i], 0).is_none() {
+        if map.insert(keys[i], 0, &guard).is_none() {
+            sum += 1;
+        }
+    }
+    assert_eq!(sum, expect);
+}
+
+fn t4<K>(map: &FlurryHashMap<K, usize>, keys: &[K], expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    for i in 0..keys.len() {
+        if map.contains_key(&keys[i]) {
             sum += 1;
         }
     }
@@ -67,6 +81,58 @@ where
     assert_eq!(sum, expect);
 }
 
+fn t7<K>(map: &FlurryHashMap<K, usize>, k1: &[K], k2: &[K])
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    for i in 0..k1.len() {
+        if map.contains_key(&k1[i]) {
+            sum += 1;
+        }
+        if map.contains_key(&k2[i]) {
+            sum += 1;
+        }
+    }
+    assert_eq!(sum, k1.len());
+}
+
+fn ittest1<K>(map: &FlurryHashMap<K, usize>, expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    let guard = epoch::pin();
+    for _ in map.keys(&guard) {
+        sum += 1;
+    }
+    assert_eq!(sum, expect);
+}
+
+fn ittest2<K>(map: &FlurryHashMap<K, usize>, expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    let guard = epoch::pin();
+    for _ in map.values(&guard) {
+        sum += 1;
+    }
+    assert_eq!(sum, expect);
+}
+
+fn ittest3<K>(map: &FlurryHashMap<K, usize>, expect: usize)
+where
+    K: Sync + Send + Copy + Hash + Eq,
+{
+    let mut sum = 0;
+    let guard = epoch::pin();
+    for _ in map.iter(&guard) {
+        sum += 1;
+    }
+    assert_eq!(sum, expect);
+}
+
 #[test]
 fn everything() {
     let mut rng = rand::thread_rng();
@@ -81,6 +147,12 @@ fn everything() {
     t3(&map, &keys[..], SIZE);
     // put (present)
     t3(&map, &keys[..], 0);
+    // contains_key (present & absent)
+    t7(&map, &keys[..], &absent_keys[..]);
+    // contains_key (present)
+    t4(&map, &keys[..], SIZE);
+    // contains_key (absent)
+    t4(&map, &absent_keys[..], 0);
     // get (present)
     t1(&map, &keys[..], SIZE);
     // get (absent)
@@ -89,4 +161,10 @@ fn everything() {
     t2(&map, &absent_keys[..], 0);
     // remove (present)
     t5(&map, &keys[..], SIZE / 2);
+    // put (half present)
+    t3(&map, &keys[..], SIZE / 2);
+    // iter, keys, values (present)
+    ittest1(&map, SIZE);
+    ittest2(&map, SIZE);
+    ittest3(&map, SIZE);
 }
