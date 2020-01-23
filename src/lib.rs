@@ -243,7 +243,7 @@ const MAX_RESIZERS: isize = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
 const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
 
 static NCPU_INITIALIZER: Once = Once::new();
-static mut NCPU: usize = 0;
+static NCPU: AtomicUsize = AtomicUsize::new(0);
 
 /// Iterator types.
 pub mod iter;
@@ -450,6 +450,7 @@ where
         }
     }
 
+    #[inline]
     /// Maps `key` to `value` in this table.
     ///
     /// The value can be retrieved by calling [`get`] with a key that is equal to the original key.
@@ -1086,6 +1087,18 @@ where
         let node_iter = NodeIter::new(table, guard);
         Values { node_iter, guard }
     }
+
+    #[inline]
+    /// Returns the number of entries in the map.
+    pub fn len(&self) -> usize {
+        self.count.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    /// Returns `true` if the map is empty. Otherwise returns `false`.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
@@ -1265,9 +1278,9 @@ impl<K, V> Table<K, V> {
 #[inline]
 /// Returns the number of physical CPUs in the machine (_O(1)_).
 fn num_cpus() -> usize {
-    NCPU_INITIALIZER.call_once(|| unsafe { NCPU = num_cpus::get_physical() });
+    NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
 
-    unsafe { NCPU }
+    NCPU.load(Ordering::Relaxed)
 }
 
 #[cfg(test)]
