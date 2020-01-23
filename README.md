@@ -67,6 +67,7 @@ want suggestions for how to proceed.
   [`reserve`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.reserve
   [`get_key_value`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.get_key_value
   [`Index`]: https://doc.rust-lang.org/std/ops/trait.Index.html
+  [`drain`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.drain
   [`retain`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.retain
   [`DebugMap`]: https://doc.rust-lang.org/std/fmt/struct.DebugMap.html
   [sharded counters optimization]: https://github.com/jonhoo/flurry/blob/d3dae0465b37b7f12c4f0d58a16f36fb1d8c1596/jsr166/src/ConcurrentHashMap.java#L400-L411
