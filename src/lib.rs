@@ -1128,6 +1128,8 @@ where
     #[inline]
     // TODO: Implement Java's `tryPresize` method to pre-allocate space for
     // the incoming entries
+    // NOTE: `hashbrown::HashMap::extend` provides some good guidance on how
+    // to choose the presizing value based on the iterator lower bound.
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         let guard = crossbeam::epoch::pin();
         (*self).put_all(iter.into_iter(), &guard);
