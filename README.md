@@ -28,6 +28,18 @@ want suggestions for how to proceed.
    measurements.
  - Finish the safety argument for `BinEntry::Moved` (see the `FIXME`
    comment [here][fixme] (and eventually in `remove`)).
+ - Implement [`with_hasher`] and [`with_capacity_and_hasher`].
+ - Implement [`rayon` parallel iterators]. The notes and code in
+   [`iter/plumbing`] may be helpful.
+ - Implement [`drain`] and `IntoIterator` (for both owned and `&`).
+ - Implement [`retain`].
+ - Implement [`clear`] (see the [Java method][java-clear])
+ - Implement [`reserve`].
+ - Implement [`get_key_value`].
+ - Implement [`Index`] (to support `map[key]`). Make sure to look at the
+   bounds that `std`'s `HashMap` uses!
+ - Implement `std::fmt::Debug` properly probably using [`DebugMap`].
+ - Implement `Clone`.
  - Use the [sharded counters optimization] (`LongAdder` and
    `CounterCell` [in Java][counters]) in `add_count`.
  - Add [`computeIfAbsent`] and [friends]. I have a suspicion that
@@ -46,6 +58,17 @@ want suggestions for how to proceed.
   [hashbrown-bench]: https://github.com/rust-lang/hashbrown/blob/master/benches/bench.rs
   [dashmap-bench]: https://github.com/xacrimon/dashmap/tree/master/benches
   [fixme]: https://github.com/jonhoo/flurry/blob/d3dae0465b37b7f12c4f0d58a16f36fb1d8c1596/src/lib.rs#L492
+  [`with_hasher`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.with_hasher
+  [`with_capacity_and_hasher`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.with_capacity_and_hasher
+  [`rayon` parallel iterators]: https://docs.rs/rayon/1/rayon/iter/index.html
+  [`iter/plumbing`]: https://github.com/rayon-rs/rayon/tree/master/src/iter/plumbing
+  [`clear`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.clear
+  [java-clear]: https://github.com/jonhoo/flurry/blob/79f8d608ece6f7d26d9499b74ebfeacfa545d141/jsr166/src/ConcurrentHashMap.java#L1157
+  [`reserve`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.reserve
+  [`get_key_value`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.get_key_value
+  [`Index`]: https://doc.rust-lang.org/std/ops/trait.Index.html
+  [`retain`]: https://doc.rust-lang.org/std/collections/struct.HashMap.html#method.retain
+  [`DebugMap`]: https://doc.rust-lang.org/std/fmt/struct.DebugMap.html
   [sharded counters optimization]: https://github.com/jonhoo/flurry/blob/d3dae0465b37b7f12c4f0d58a16f36fb1d8c1596/jsr166/src/ConcurrentHashMap.java#L400-L411
   [counters]: https://github.com/jonhoo/flurry/blob/d3dae0465b37b7f12c4f0d58a16f36fb1d8c1596/jsr166/src/ConcurrentHashMap.java#L2296-L2311
   [`computeIfAbsent`]: https://github.com/jonhoo/flurry/blob/d3dae0465b37b7f12c4f0d58a16f36fb1d8c1596/jsr166/src/ConcurrentHashMap.java#L1662
