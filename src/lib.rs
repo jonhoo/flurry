@@ -1155,7 +1155,10 @@ where
         let mut iter = iter.into_iter();
 
         if let Some((key, value)) = iter.next() {
+            // safety: we own `map`, so it's not concurrently accessed by
+            // anyone else at this point.
             let guard = unsafe { crossbeam::epoch::unprotected() };
+
             let (lower, _) = iter.size_hint();
             let map = Self::with_capacity(lower.saturating_add(1));
 
@@ -1165,6 +1168,17 @@ where
         } else {
             Self::new()
         }
+    }
+}
+
+impl<'a, K, V> FromIterator<(&'a K, &'a V)> for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Copy + Hash + Eq,
+    V: Sync + Send + Copy,
+{
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = (&'a K, &'a V)>>(iter: T) -> Self {
+        Self::from_iter(iter.into_iter().map(|(&k, &v)| (k, v)))
     }
 }
 
