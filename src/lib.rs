@@ -199,7 +199,7 @@ use node::*;
 
 use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
 use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hash};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
 use std::sync::{
     atomic::{AtomicIsize, AtomicUsize, Ordering},
@@ -325,6 +325,37 @@ where
     }
 }
 
+impl<K, V, S> FlurryHashMap<K, V, S> {
+    /// Creates a new, empty map with the default initial table size (16).
+    /// It uses the given hasher, rather than the default `RandomState`.
+    pub fn new_with_hasher(hasher: S) -> Self {
+        Self {
+            table: Atomic::null(),
+            next_table: Atomic::null(),
+            transfer_index: AtomicIsize::new(0),
+            count: AtomicUsize::new(0),
+            size_ctl: AtomicIsize::new(0),
+            build_hasher: hasher,
+        }
+    }
+
+    /// Creates a new, empty map with an initial table size accommodating the specified number of
+    /// elements without the need to dynamically resize.
+    /// It uses the given hasher, rather than the default `RandomState`.
+    pub fn with_hasher_and_capacity(hasher: S, n: usize) -> Self {
+        if n == 0 {
+            return Self::new_with_hasher(hasher);
+        }
+
+        let mut m = Self::new_with_hasher(hasher);
+        let size = (1.0 + (n as f64) / LOAD_FACTOR) as usize;
+        // NOTE: tableSizeFor in Java
+        let cap = std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two());
+        m.size_ctl = AtomicIsize::new(cap as isize);
+        m
+    }
+}
+
 impl<K, V, S> FlurryHashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -332,7 +363,6 @@ where
     S: BuildHasher,
 {
     fn hash(&self, key: &K) -> u64 {
-        use std::hash::Hasher;
         let mut h = self.build_hasher.build_hasher();
         key.hash(&mut h);
         h.finish()

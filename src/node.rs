@@ -61,7 +61,7 @@ where
                     };
 
                     if n.hash == hash && &n.key == key {
-                        break Shared::from(self as *const _);
+                        break Shared::from(node as *const _);
                     }
                     let next = n.next.load(Ordering::SeqCst, guard);
                     if next.is_null() {

@@ -63,6 +63,37 @@ fn insert_and_get() {
 }
 
 #[test]
+fn insert_in_same_bucket_and_get_distinct_entries() {
+    use std::hash::{BuildHasher, Hasher};
+
+    struct OneBucketState;
+    struct OneBucketHasher;
+    impl BuildHasher for OneBucketState {
+        type Hasher = OneBucketHasher;
+
+        fn build_hasher(&self) -> Self::Hasher {
+            OneBucketHasher
+        }
+    }
+    impl Hasher for OneBucketHasher {
+        fn write(&mut self, _bytes: &[u8]) {}
+        fn finish(&self) -> u64 { 0 }
+    }
+
+    let map = FlurryHashMap::<usize, usize, _>::new_with_hasher(OneBucketState);
+
+    map.insert(42, 0, &epoch::pin());
+    map.insert(50, 20, &epoch::pin());
+    {
+        let guard = epoch::pin();
+        let e = map.get(&42, &guard).unwrap();
+        assert_eq!(e, &0);
+        let e = map.get(&50, &guard).unwrap();
+        assert_eq!(e, &20);
+    }
+}
+
+#[test]
 fn update() {
     let map = FlurryHashMap::<usize, usize>::new();
 
