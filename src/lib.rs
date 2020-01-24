@@ -1184,6 +1184,17 @@ where
     }
 }
 
+impl<'a, K, V> FromIterator<&'a (K, V)> for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Copy + Hash + Eq,
+    V: Sync + Send + Copy,
+{
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
+        Self::from_iter(iter.into_iter().map(|&(k, v)| (k, v)))
+    }
+}
+
 #[derive(Debug)]
 struct Table<K, V> {
     bins: Box<[Atomic<BinEntry<K, V>>]>,
