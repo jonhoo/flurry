@@ -378,21 +378,11 @@ where
         self.get(key, &guard).is_some()
     }
 
-    /// Returns the value to which `key` is mapped.
-    ///
-    /// Returns `None` if this map contains no mapping for the key.
-    ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
-    ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
-    // TODO: implement a guard API of our own
-    pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
+    fn get_node<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g Node<K, V>>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        let h = self.hash(key);
         let table = self.table.load(Ordering::SeqCst, guard);
         if table.is_null() {
             return None;
@@ -404,6 +394,8 @@ where
         if table.bins.len() == 0 {
             return None;
         }
+
+        let h = self.hash(key);
         let bini = table.bini(h);
         let bin = table.bin(bini, guard);
         if bin.is_null() {
@@ -432,7 +424,27 @@ where
         // next epoch after it is removed. since it wasn't removed, and the epoch was pinned, that
         // cannot be until after we drop our guard.
         let node = unsafe { node.deref() };
-        let node = node.as_node().unwrap();
+        Some(
+            node.as_node()
+                .expect("`BinEntry::find` should always return a Node"),
+        )
+    }
+
+    /// Returns the value to which `key` is mapped.
+    ///
+    /// Returns `None` if this map contains no mapping for the key.
+    ///
+    /// To obtain a `Guard`, use [`epoch::pin`].
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    // TODO: implement a guard API of our own
+    pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        let node = self.get_node(key, guard)?;
 
         let v = node.value.load(Ordering::SeqCst, guard);
         assert!(!v.is_null());
@@ -456,6 +468,28 @@ where
     {
         let guard = &crossbeam::epoch::pin();
         self.get(key, guard).map(then)
+    }
+
+    /// Returns the key-value pair corresponding to `key`.
+    ///
+    /// Returns `None` if this map contains no mapping for `key`.
+    ///
+    /// The supplied `key` may be any borrowed form of the
+    /// map's key type, but `Hash` and `Eq` on the borrowed form
+    /// must match those for the key type.
+    pub fn get_key_value<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<(&'g K, &'g V)>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        let node = self.get_node(key, guard)?;
+
+        let v = node.value.load(Ordering::SeqCst, guard);
+        assert!(!v.is_null());
+        // safety: the lifetime of the reference is bound to the guard
+        // supplied which means that the memory will not be modified
+        // until at least after the guard goes out of scope
+        unsafe { v.as_ref() }.map(|v| (&node.key, v))
     }
 
     fn init_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
