@@ -403,6 +403,14 @@ where
         self.get(key, guard).map(then)
     }
 
+    /// Returns the key-value pair corresponding to the supplied key.
+    /// 
+    /// Returns `None` if this map contains no mapping for `key`.
+    pub fn get_key_value<'g>(&'g self, key: &'g K, guard: &'g Guard) -> Option<(&'g K, &'g V)> {
+        self.get(key, guard)
+            .map(|v| (key, v))
+    }
+
     fn init_table<'g>(&self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
         loop {
             let table = self.table.load(Ordering::SeqCst, guard);

@@ -27,6 +27,17 @@ fn get_empty() {
 }
 
 #[test]
+fn get_key_value_empty() {
+    let map = FlurryHashMap::<usize, usize>::new();
+
+    {
+        let guard = epoch::pin();
+        let e = map.get_key_value(&42, &guard);
+        assert!(e.is_none());
+    }
+}
+
+#[test]
 fn remove_empty() {
     let map = FlurryHashMap::<usize, usize>::new();
 
@@ -59,6 +70,19 @@ fn insert_and_get() {
         let guard = epoch::pin();
         let e = map.get(&42, &guard).unwrap();
         assert_eq!(e, &0);
+    }
+}
+
+#[test]
+
+fn insert_and_get_key_value() {
+    let map = FlurryHashMap::<usize, usize>::new();
+
+    map.insert(42, 0, &epoch::pin());
+    {
+        let guard = epoch::pin();
+        let e = map.get_key_value(&42, &guard).unwrap();
+        assert_eq!(e, (&42, &0));
     }
 }
 
@@ -101,6 +125,9 @@ fn concurrent_insert() {
     for i in 0..64 {
         let v = map.get(&i, &guard).unwrap();
         assert!(v == &0 || v == &1);
+
+        let kv = map.get_key_value(&i, &guard).unwrap();
+        assert!(kv == (&i, &0) || kv == (&i, &1));
     }
 }
 
