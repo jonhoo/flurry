@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 
 /// An iterator over a map's entries.
 ///
-/// See [`FlurryHashMap::iter`] for details.
+/// See [`HashMap::iter`] for details.
 #[derive(Debug)]
 pub struct Iter<'g, K, V> {
     pub(crate) node_iter: NodeIter<'g, K, V>,
@@ -24,7 +24,7 @@ impl<'g, K, V> Iterator for Iter<'g, K, V> {
 
 /// An iterator over a map's keys.
 ///
-/// See [`FlurryHashMap::keys`] for details.
+/// See [`HashMap::keys`] for details.
 #[derive(Debug)]
 pub struct Keys<'g, K, V> {
     pub(crate) node_iter: NodeIter<'g, K, V>,
@@ -40,7 +40,7 @@ impl<'g, K, V> Iterator for Keys<'g, K, V> {
 
 /// An iterator over a map's values.
 ///
-/// See [`FlurryHashMap::values`] for details.
+/// See [`HashMap::values`] for details.
 #[derive(Debug)]
 pub struct Values<'g, K, V> {
     pub(crate) node_iter: NodeIter<'g, K, V>,
@@ -60,14 +60,14 @@ impl<'g, K, V> Iterator for Values<'g, K, V> {
 
 #[cfg(test)]
 mod tests {
-    use crate::FlurryHashMap;
+    use crate::HashMap;
     use crossbeam::epoch;
     use std::collections::HashSet;
     use std::iter::FromIterator;
 
     #[test]
     fn iter() {
-        let map = FlurryHashMap::<usize, usize>::new();
+        let map = HashMap::<usize, usize>::new();
 
         let guard = epoch::pin();
         map.insert(1, 42, &guard);
@@ -82,7 +82,7 @@ mod tests {
 
     #[test]
     fn keys() {
-        let map = FlurryHashMap::<usize, usize>::new();
+        let map = HashMap::<usize, usize>::new();
 
         let guard = epoch::pin();
         map.insert(1, 42, &guard);
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn values() {
-        let map = FlurryHashMap::<usize, usize>::new();
+        let map = HashMap::<usize, usize>::new();
 
         let mut guard = epoch::pin();
         map.insert(1, 42, &guard);

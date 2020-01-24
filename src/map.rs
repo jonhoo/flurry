@@ -54,7 +54,7 @@ static NCPU: AtomicUsize = AtomicUsize::new(0);
 /// A concurrent hash table.
 ///
 /// See the [crate-level documentation](index.html) for details.
-pub struct FlurryHashMap<K, V, S = RandomState> {
+pub struct HashMap<K, V, S = RandomState> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
     table: Atomic<Table<K, V>>,
@@ -78,7 +78,7 @@ pub struct FlurryHashMap<K, V, S = RandomState> {
     build_hasher: S,
 }
 
-impl<K, V> Default for FlurryHashMap<K, V, RandomState>
+impl<K, V> Default for HashMap<K, V, RandomState>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -88,7 +88,7 @@ where
     }
 }
 
-impl<K, V> FlurryHashMap<K, V, RandomState>
+impl<K, V> HashMap<K, V, RandomState>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -105,7 +105,7 @@ where
     }
 }
 
-impl<K, V, S: BuildHasher> FlurryHashMap<K, V, S> {
+impl<K, V, S: BuildHasher> HashMap<K, V, S> {
     /// Creates an empty map which will use `hash_builder` to hash keys.
     ///
     /// The created map has the default initial capacity.
@@ -129,7 +129,7 @@ impl<K, V, S: BuildHasher> FlurryHashMap<K, V, S> {
     ///
     /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
     /// (assuming uniformly distributed hashes). If `capacity` is 0, the call will not allocate,
-    /// and is equivalent to [`FlurryHashMap::new`].
+    /// and is equivalent to [`HashMap::new`].
     ///
     /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
     /// to be resistant to attacks that cause many collisions and very poor performance.
@@ -148,7 +148,7 @@ impl<K, V, S: BuildHasher> FlurryHashMap<K, V, S> {
     }
 }
 
-impl<K, V, S> FlurryHashMap<K, V, S>
+impl<K, V, S> HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -1133,7 +1133,7 @@ where
     }
 }
 
-impl<K, V, S> PartialEq for FlurryHashMap<K, V, S>
+impl<K, V, S> PartialEq for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
     V: Sync + Send + PartialEq,
@@ -1150,7 +1150,7 @@ where
     }
 }
 
-impl<K, V, S> Eq for FlurryHashMap<K, V, S>
+impl<K, V, S> Eq for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
     V: Sync + Send + Eq,
@@ -1158,7 +1158,7 @@ where
 {
 }
 
-impl<K, V, S> fmt::Debug for FlurryHashMap<K, V, S>
+impl<K, V, S> fmt::Debug for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Debug + Eq + Hash,
     V: Sync + Send + Debug,
@@ -1170,7 +1170,7 @@ where
     }
 }
 
-impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
+impl<K, V, S> Drop for HashMap<K, V, S> {
     fn drop(&mut self) {
         // safety: we have &mut self _and_ all references we have returned are bound to the
         // lifetime of their borrow of self, so there cannot be any outstanding references to
@@ -1194,7 +1194,7 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     }
 }
 
-impl<K, V, S> Extend<(K, V)> for &FlurryHashMap<K, V, S>
+impl<K, V, S> Extend<(K, V)> for &HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -1211,7 +1211,7 @@ where
     }
 }
 
-impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &FlurryHashMap<K, V, S>
+impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
@@ -1223,7 +1223,7 @@ where
     }
 }
 
-impl<K, V> FromIterator<(K, V)> for FlurryHashMap<K, V, RandomState>
+impl<K, V> FromIterator<(K, V)> for HashMap<K, V, RandomState>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -1248,7 +1248,7 @@ where
     }
 }
 
-impl<'a, K, V> FromIterator<(&'a K, &'a V)> for FlurryHashMap<K, V, RandomState>
+impl<'a, K, V> FromIterator<(&'a K, &'a V)> for HashMap<K, V, RandomState>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
@@ -1259,7 +1259,7 @@ where
     }
 }
 
-impl<'a, K, V> FromIterator<&'a (K, V)> for FlurryHashMap<K, V, RandomState>
+impl<'a, K, V> FromIterator<&'a (K, V)> for HashMap<K, V, RandomState>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
@@ -1270,13 +1270,13 @@ where
     }
 }
 
-impl<K, V, S> Clone for FlurryHashMap<K, V, S>
+impl<K, V, S> Clone for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send + Clone,
     S: BuildHasher + Clone,
 {
-    fn clone(&self) -> FlurryHashMap<K, V, S> {
+    fn clone(&self) -> HashMap<K, V, S> {
         let cloned_map = Self::with_capacity_and_hasher(self.build_hasher.clone(), self.len());
         {
             let guard = epoch::pin();
@@ -1308,42 +1308,42 @@ fn num_cpus() -> usize {
 ///
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.insert((), (), &guard);
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.get(&(), &guard);
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.remove(&(), &guard);
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.iter(&guard).next();
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.keys(&guard).next();
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.values(&guard).next();
 /// drop(map);
 /// drop(r);
@@ -1353,42 +1353,42 @@ fn num_cpus() -> usize {
 ///
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.insert((), (), &guard);
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.get(&(), &guard);
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.remove(&(), &guard);
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.iter(&guard).next();
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.keys(&guard).next();
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
-/// let map = super::FlurryHashMap::default();
+/// let map = super::HashMap::default();
 /// let r = map.values(&guard).next();
 /// drop(guard);
 /// drop(r);

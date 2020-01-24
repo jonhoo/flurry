@@ -7,7 +7,7 @@ const ITER: [(usize, &'static str); 5] = [(1, "A"), (2, "B"), (3, "C"), (4, "D")
 fn test_from_iter() {
     let guard = unsafe { crossbeam::epoch::unprotected() };
     let map1 = from_iter_contron();
-    let map2 = FlurryHashMap::from_iter(ITER.iter());
+    let map2 = HashMap::from_iter(ITER.iter());
 
     // TODO: improve when `Map: Eq`
     let mut fst: Vec<_> = map1.iter(&guard).collect();
@@ -18,9 +18,9 @@ fn test_from_iter() {
     assert_eq!(fst, snd);
 }
 
-fn from_iter_contron() -> FlurryHashMap<usize, &'static str> {
+fn from_iter_contron() -> HashMap<usize, &'static str> {
     let guard = unsafe { crossbeam::epoch::unprotected() };
-    let map = FlurryHashMap::with_capacity(5);
+    let map = HashMap::with_capacity(5);
     assert!(map.is_empty());
 
     for (key, value) in &ITER {
@@ -32,8 +32,8 @@ fn from_iter_contron() -> FlurryHashMap<usize, &'static str> {
     map
 }
 
-fn map5() -> FlurryHashMap<isize, String> {
-    let map = FlurryHashMap::new();
+fn map5() -> HashMap<isize, String> {
+    let map = HashMap::new();
     // TODO: add is_empty check once method exists
     // assert!(map.is_empty());
     let guard = epoch::pin();

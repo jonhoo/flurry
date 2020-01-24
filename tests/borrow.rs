@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 #[test]
 fn get_empty() {
-    let map = FlurryHashMap::<String, usize>::new();
+    let map = HashMap::<String, usize>::new();
 
     {
         let guard = epoch::pin();
@@ -17,7 +17,7 @@ fn get_empty() {
 
 #[test]
 fn remove_empty() {
-    let map = FlurryHashMap::<String, usize>::new();
+    let map = HashMap::<String, usize>::new();
 
     {
         let guard = epoch::pin();
@@ -28,7 +28,7 @@ fn remove_empty() {
 
 #[test]
 fn insert_and_remove() {
-    let map = FlurryHashMap::<String, usize>::new();
+    let map = HashMap::<String, usize>::new();
 
     {
         let guard = epoch::pin();
@@ -41,7 +41,7 @@ fn insert_and_remove() {
 
 #[test]
 fn insert_and_get() {
-    let map = FlurryHashMap::<String, usize>::new();
+    let map = HashMap::<String, usize>::new();
 
     map.insert("foo".to_string(), 0, &epoch::pin());
     {
@@ -53,7 +53,7 @@ fn insert_and_get() {
 
 #[test]
 fn update() {
-    let map = FlurryHashMap::<String, usize>::new();
+    let map = HashMap::<String, usize>::new();
 
     let guard = epoch::pin();
     map.insert("foo".to_string(), 0, &guard);
@@ -68,7 +68,7 @@ fn update() {
 
 #[test]
 fn concurrent_insert() {
-    let map = Arc::new(FlurryHashMap::<String, usize>::new());
+    let map = Arc::new(HashMap::<String, usize>::new());
     let keys = Arc::new((0..64).map(|i| i.to_string()).collect::<Vec<_>>());
 
     let map1 = map.clone();
@@ -98,7 +98,7 @@ fn concurrent_insert() {
 
 #[test]
 fn concurrent_remove() {
-    let map = Arc::new(FlurryHashMap::<String, usize>::new());
+    let map = Arc::new(HashMap::<String, usize>::new());
     let keys = Arc::new((0..64).map(|i| i.to_string()).collect::<Vec<_>>());
 
     {

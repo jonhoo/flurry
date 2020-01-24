@@ -4,12 +4,12 @@ use std::sync::Arc;
 
 #[test]
 fn new() {
-    let _map = FlurryHashMap::<usize, usize>::new();
+    let _map = HashMap::<usize, usize>::new();
 }
 
 #[test]
 fn insert() {
-    let map = FlurryHashMap::<usize, usize>::new();
+    let map = HashMap::<usize, usize>::new();
     let guard = epoch::pin();
     let old = map.insert(42, 0, &guard);
     assert!(old.is_none());
@@ -17,7 +17,7 @@ fn insert() {
 
 #[test]
 fn get_empty() {
-    let map = FlurryHashMap::<usize, usize>::new();
+    let map = HashMap::<usize, usize>::new();
 
     {
         let guard = epoch::pin();
@@ -28,7 +28,7 @@ fn get_empty() {
 
 #[test]
 fn get_key_value_empty() {
-    let map = FlurryHashMap::<usize, usize>::new();
+    let map = HashMap::<usize, usize>::new();
 
     {
         let guard = epoch::pin();
@@ -39,7 +39,7 @@ fn get_key_value_empty() {
 
 #[test]
 fn remove_empty() {
-    let map = FlurryHashMap::<usize, usize>::new();
+    let map = HashMap::<usize, usize>::new();
 
     {
         let guard = epoch::pin();
@@ -50,7 +50,7 @@ fn remove_empty() {
 
 #[test]
 fn insert_and_remove() {
-    let map = FlurryHashMap::<usize, usize>::new();
+    let map = HashMap::<usize, usize>::new();
 
     {
         let guard = epoch::pin();
@@ -63,7 +63,7 @@ fn insert_and_remove() {
 
 #[test]
 fn insert_and_get() {
-    let map = FlurryHashMap::<usize, usize>::new();
+    let map = HashMap::<usize, usize>::new();
 
     map.insert(42, 0, &epoch::pin());
     {
@@ -75,7 +75,7 @@ fn insert_and_get() {
 
 #[test]
 fn insert_and_get_key_value() {
-    let map = FlurryHashMap::<usize, usize>::new();
+    let map = HashMap::<usize, usize>::new();
 
     map.insert(42, 0, &epoch::pin());
     {
@@ -105,7 +105,7 @@ fn insert_in_same_bucket_and_get_distinct_entries() {
         }
     }
 
-    let map = FlurryHashMap::<usize, usize, _>::with_hasher(OneBucketState);
+    let map = HashMap::<usize, usize, _>::with_hasher(OneBucketState);
 
     map.insert(42, 0, &epoch::pin());
     map.insert(50, 20, &epoch::pin());
@@ -120,7 +120,7 @@ fn insert_in_same_bucket_and_get_distinct_entries() {
 
 #[test]
 fn update() {
-    let map = FlurryHashMap::<usize, usize>::new();
+    let map = HashMap::<usize, usize>::new();
 
     let guard = epoch::pin();
     map.insert(42, 0, &guard);
@@ -135,7 +135,7 @@ fn update() {
 
 #[test]
 fn concurrent_insert() {
-    let map = Arc::new(FlurryHashMap::<usize, usize>::new());
+    let map = Arc::new(HashMap::<usize, usize>::new());
 
     let map1 = map.clone();
     let t1 = std::thread::spawn(move || {
@@ -165,7 +165,7 @@ fn concurrent_insert() {
 
 #[test]
 fn concurrent_remove() {
-    let map = Arc::new(FlurryHashMap::<usize, usize>::new());
+    let map = Arc::new(HashMap::<usize, usize>::new());
 
     {
         let guard = epoch::pin();
@@ -208,7 +208,7 @@ fn current_kv_dropped() {
     let dropped1 = Arc::new(0);
     let dropped2 = Arc::new(0);
 
-    let map = FlurryHashMap::<Arc<usize>, Arc<usize>>::new();
+    let map = HashMap::<Arc<usize>, Arc<usize>>::new();
 
     map.insert(dropped1.clone(), dropped2.clone(), &epoch::pin());
     assert_eq!(Arc::strong_count(&dropped1), 2);
@@ -223,16 +223,16 @@ fn current_kv_dropped() {
 
 #[test]
 fn empty_maps_equal() {
-    let map1 = FlurryHashMap::<usize, usize>::new();
-    let map2 = FlurryHashMap::<usize, usize>::new();
+    let map1 = HashMap::<usize, usize>::new();
+    let map2 = HashMap::<usize, usize>::new();
     assert_eq!(map1, map2);
     assert_eq!(map2, map1);
 }
 
 #[test]
 fn different_size_maps_not_equal() {
-    let map1 = FlurryHashMap::<usize, usize>::new();
-    let map2 = FlurryHashMap::<usize, usize>::new();
+    let map1 = HashMap::<usize, usize>::new();
+    let map2 = HashMap::<usize, usize>::new();
     {
         let guard = epoch::pin();
         map1.insert(1, 0, &guard);
@@ -246,8 +246,8 @@ fn different_size_maps_not_equal() {
 
 #[test]
 fn same_values_equal() {
-    let map1 = FlurryHashMap::<usize, usize>::new();
-    let map2 = FlurryHashMap::<usize, usize>::new();
+    let map1 = HashMap::<usize, usize>::new();
+    let map2 = HashMap::<usize, usize>::new();
     {
         let guard = epoch::pin();
         map1.insert(1, 0, &guard);
@@ -260,8 +260,8 @@ fn same_values_equal() {
 
 #[test]
 fn different_values_not_equal() {
-    let map1 = FlurryHashMap::<usize, usize>::new();
-    let map2 = FlurryHashMap::<usize, usize>::new();
+    let map1 = HashMap::<usize, usize>::new();
+    let map2 = HashMap::<usize, usize>::new();
     {
         let guard = epoch::pin();
         map1.insert(1, 0, &guard);
@@ -279,7 +279,7 @@ fn drop_value() {
     let dropped1 = Arc::new(0);
     let dropped2 = Arc::new(1);
 
-    let map = FlurryHashMap::<usize, Arc<usize>>::new();
+    let map = HashMap::<usize, Arc<usize>>::new();
 
     map.insert(42, dropped1.clone(), &epoch::pin());
     assert_eq!(Arc::strong_count(&dropped1), 2);
@@ -298,7 +298,7 @@ fn drop_value() {
 
 #[test]
 fn clone_map_empty() {
-    let map = FlurryHashMap::<&'static str, u32>::new();
+    let map = HashMap::<&'static str, u32>::new();
     let cloned_map = map.clone();
     assert_eq!(map.len(), cloned_map.len());
     assert_eq!(&map, &cloned_map);
@@ -308,7 +308,7 @@ fn clone_map_empty() {
 #[test]
 // Test that same values exists in both maps (original and cloned)
 fn clone_map_filled() {
-    let map = FlurryHashMap::<&'static str, u32>::new();
+    let map = HashMap::<&'static str, u32>::new();
     map.insert("FooKey", 0, &epoch::pin());
     map.insert("BarKey", 10, &epoch::pin());
     let cloned_map = map.clone();
