@@ -40,7 +40,7 @@
 //! updates in other threads. Otherwise the results of these methods reflect transient states that
 //! may be adequate for monitoring or estimation purposes, but not for program control.
 //!
-//! [`Clone`](FlurryHashMap::clone) may not produce a "perfect" clone if the underlying map
+//! Similarly, [`Clone`](FlurryHashMap::clone) may not produce a "perfect" clone if the underlying map
 //! is being concurrently modified.
 //!
 //! # Resizing behavior

@@ -275,8 +275,8 @@ fn clone_map_empty() {
     let map = FlurryHashMap::<&'static str, u32>::new();
     let cloned_map = map.clone();
     assert_eq!(map.len(), cloned_map.len());
+    assert_eq!(&map, &cloned_map);
     assert_eq!(cloned_map.len(), 0);
-    // TODO: use assert_eq once #21 lands
 }
 
 #[test]
@@ -287,15 +287,9 @@ fn clone_map_filled() {
     map.insert("BarKey", 10, &epoch::pin());
     let cloned_map = map.clone();
     assert_eq!(map.len(), cloned_map.len());
-    // TODO: use assert_eq once #21 lands
-    for k in ["FooKey", "BarKey"].iter() {
-        let guard = epoch::pin();
-        let v1 = map.get(k, &guard).unwrap();
-        let v2 = cloned_map.get(k, &guard).unwrap();
-        assert_eq!(v1, v2);
-    }
+    assert_eq!(&map, &cloned_map);
 
     // test that we are not mapping the same tables
     map.insert("NewItem", 100, &epoch::pin());
-    assert_eq!(cloned_map.get(&"NewItem", &epoch::pin()), None);
+    assert_ne!(&map, &cloned_map);
 }
