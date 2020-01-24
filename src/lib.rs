@@ -200,11 +200,16 @@ use node::*;
 use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
+<<<<<<< HEAD
 use std::iter::FromIterator;
 use std::sync::{
     atomic::{AtomicIsize, AtomicUsize, Ordering},
     Once,
 };
+=======
+use std::ops::Index;
+use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+>>>>>>> Change V to Eq in Eq impl, check equality in tests both ways, add values to both maps in different size test
 
 /// The largest possible table capacity.  This value must be
 /// exactly 1<<30 to stay within Java array allocation and indexing
@@ -1270,7 +1275,7 @@ where
 impl<K, V, S> Eq for FlurryHashMap<K, V, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
-    V: Sync + Send + PartialEq,
+    V: Sync + Send + Eq,
     S: BuildHasher,
 {
 }

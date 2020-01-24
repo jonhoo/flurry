@@ -167,6 +167,7 @@ fn empty_maps_equal() {
     let map1 = FlurryHashMap::<usize, usize>::new();
     let map2 = FlurryHashMap::<usize, usize>::new();
     assert_eq!(map1, map2);
+    assert_eq!(map2, map1);
 }
 
 #[test]
@@ -176,9 +177,12 @@ fn different_size_maps_not_equal() {
     {
         let guard = epoch::pin();
         map1.insert(1, 0, &guard);
+        map1.insert(2, 0, &guard);
+        map2.insert(1, 0, &guard);
     }
 
     assert_ne!(map1, map2);
+    assert_ne!(map2, map1);
 }
 
 #[test]
@@ -192,6 +196,7 @@ fn same_values_equal() {
     }
 
     assert_eq!(map1, map2);
+    assert_eq!(map2, map1);
 }
 
 #[test]
@@ -205,6 +210,7 @@ fn different_values_not_equal() {
     }
 
     assert_ne!(map1, map2);
+    assert_ne!(map2, map1);
 }
 
 #[test]
