@@ -468,11 +468,11 @@ where
     }
 
     /// Returns the key-value pair corresponding to `key`.
-    /// 
+    ///
     /// Returns `None` if this map contains no mapping for `key`.
     ///
     /// The supplied `key` may be any borrowed form of the
-    /// map's key type, but `Hash` and `Eq` on the borrowed form 
+    /// map's key type, but `Hash` and `Eq` on the borrowed form
     /// must match those for the key type.
     pub fn get_key_value<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<(&'g K, &'g V)>
     where
