@@ -39,9 +39,8 @@
 //! [`size`](FlurryHashMap::size) are typically useful only when a map is not undergoing concurrent
 //! updates in other threads. Otherwise the results of these methods reflect transient states that
 //! may be adequate for monitoring or estimation purposes, but not for program control.
-//!
-//! Similarly, [`Clone`](FlurryHashMap::clone) may not produce a "perfect" clone if the underlying map
-//! is being concurrently modified.
+//! Similarly, [`Clone`](FlurryHashMap::clone) may not produce a "perfect" clone if the underlying
+//! map is being concurrently modified.
 //!
 //! # Resizing behavior
 //!
@@ -1456,15 +1455,7 @@ where
     S: BuildHasher + Clone,
 {
     fn clone(&self) -> FlurryHashMap<K, V, S> {
-        // TODO: This should be created with the FlurryHashMap::with_capacity_and_hasher once available
-        let cloned_map = Self {
-            table: Atomic::null(),
-            next_table: Atomic::null(),
-            transfer_index: AtomicIsize::new(0),
-            count: AtomicUsize::new(0),
-            size_ctl: AtomicIsize::new(0),
-            build_hasher: self.build_hasher.clone(),
-        };
+        let cloned_map = Self::with_capacity_and_hasher(self.build_hasher.clone(), self.len());
         {
             let guard = epoch::pin();
             for (k, v) in self.iter(&guard) {
