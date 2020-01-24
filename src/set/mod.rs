@@ -2,7 +2,8 @@
 
 use std::hash::Hash;
 
-use crate::epoch;
+use crate::epoch::{self, Guard};
+use crate::iter::Keys;
 use crate::HashMap;
 
 /// A concurrent hash set.
@@ -97,5 +98,27 @@ where
         let guard = epoch::pin();
         let removed = self.map.remove(value, &guard);
         removed.is_some()
+    }
+
+    /// An iterator over the set's values.
+    ///
+    /// See [`FlurryHashMap::keys`] for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::FlurryHashSet;
+    ///
+    /// let set = FlurryHashSet::new();
+    /// set.insert(1);
+    /// set.insert(2);
+    ///
+    /// let guard = flurry::epoch::pin();
+    /// for x in set.iter(&guard) {
+    ///     println!("{}", x);
+    /// }
+    /// ```
+    pub fn iter<'g>(&'g self, guard: &'g Guard) -> Keys<'g, T, ()> {
+        self.map.keys(guard)
     }
 }
