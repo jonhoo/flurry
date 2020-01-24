@@ -74,4 +74,28 @@ where
         let guard = epoch::pin();
         self.map.contains_key(value, &guard)
     }
+
+    /// Removes a value from the set.
+    ///
+    /// If the set did not have this value present, false is returned.
+    ///
+    /// If the set did have this value present, true is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::FlurryHashSet;
+    ///
+    /// let set = FlurryHashSet::new();
+    /// set.insert(2);
+    ///
+    /// assert_eq!(set.remove(&2), true);
+    /// assert!(!set.contains(&2));
+    /// assert_eq!(set.remove(&2), false);
+    /// ```
+    pub fn remove(&self, value: &T) -> bool {
+        let guard = epoch::pin();
+        let removed = self.map.remove(value, &guard);
+        removed.is_some()
+    }
 }
