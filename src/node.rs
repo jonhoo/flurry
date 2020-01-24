@@ -63,7 +63,7 @@ impl<K, V> BinEntry<K, V> {
                     };
 
                     if n.hash == hash && n.key.borrow() == key {
-                        break Shared::from(self as *const _);
+                        break Shared::from(node as *const _);
                     }
                     let next = n.next.load(Ordering::SeqCst, guard);
                     if next.is_null() {

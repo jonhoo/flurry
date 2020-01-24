@@ -201,7 +201,7 @@ use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
 use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
 use std::fmt::{self, Debug, Formatter};
-use std::hash::{BuildHasher, Hash};
+use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
 use std::sync::{
     atomic::{AtomicIsize, AtomicUsize, Ordering},
@@ -300,24 +300,51 @@ where
 {
     /// Creates a new, empty map with the default initial table size (16).
     pub fn new() -> Self {
+        Self::with_hasher(RandomState::new())
+    }
+
+    /// Creates a new, empty map with an initial table size accommodating the specified number of
+    /// elements without the need to dynamically resize.
+    pub fn with_capacity(n: usize) -> Self {
+        Self::with_capacity_and_hasher(RandomState::new(), n)
+    }
+}
+
+impl<K, V, S: BuildHasher> FlurryHashMap<K, V, S> {
+    /// Creates an empty map which will use `hash_builder` to hash keys.
+    ///
+    /// The created map has the default initial capacity.
+    ///
+    /// Warning: `hash_builder` is normally randomly generated, and is designed to
+    /// allow the map to be resistant to attacks that cause many collisions and
+    /// very poor performance. Setting it manually using this
+    /// function can expose a DoS attack vector.
+    pub fn with_hasher(hash_builder: S) -> Self {
         Self {
             table: Atomic::null(),
             next_table: Atomic::null(),
             transfer_index: AtomicIsize::new(0),
             count: AtomicUsize::new(0),
             size_ctl: AtomicIsize::new(0),
-            build_hasher: RandomState::new(),
+            build_hasher: hash_builder,
         }
     }
 
-    /// Creates a new, empty map with an initial table size accommodating the specified number of
-    /// elements without the need to dynamically resize.
-    pub fn with_capacity(n: usize) -> Self {
+    /// Creates an empty map with the specified `capacity`, using `hash_builder` to hash the keys.
+    ///
+    /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
+    /// (assuming uniformly distributed hashes). If `capacity` is 0, the call will not allocate,
+    /// and is equivalent to [`FlurryHashMap::new`].
+    ///
+    /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
+    /// to be resistant to attacks that cause many collisions and very poor performance.
+    /// Setting it manually using this function can expose a DoS attack vector.
+    pub fn with_capacity_and_hasher(hash_builder: S, n: usize) -> Self {
         if n == 0 {
-            return Self::new();
+            return Self::with_hasher(hash_builder);
         }
 
-        let mut m = Self::new();
+        let mut m = Self::with_hasher(hash_builder);
         let size = (1.0 + (n as f64) / LOAD_FACTOR) as usize;
         // NOTE: tableSizeFor in Java
         let cap = std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two());
@@ -333,7 +360,6 @@ where
     S: BuildHasher,
 {
     fn hash<Q: ?Sized + Hash>(&self, key: &Q) -> u64 {
-        use std::hash::Hasher;
         let mut h = self.build_hasher.build_hasher();
         key.hash(&mut h);
         h.finish()
