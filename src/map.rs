@@ -639,6 +639,7 @@ where
             } else if self.size_ctl.compare_and_swap(sc, rs + 2, Ordering::SeqCst) == sc {
                 // a resize is needed, but has not yet started
                 // TODO: figure out why this is rs + 2, not just rs
+                // NOTE: this also applies to `try_presize`
                 self.transfer(table, Shared::null(), guard);
             }
 
@@ -937,12 +938,11 @@ where
         n.leading_zeros() as isize | (1 << (RESIZE_STAMP_BITS - 1)) as isize
     }
 
-    // TODO
+    /// Tries to presize table to accommodate the given number of elements.
     fn try_presize<'g>(&self, size: usize, guard: &'g Guard) {
         let new_capacity = if size >= MAXIMUM_CAPACITY / 2 {
             MAXIMUM_CAPACITY
         } else {
-            // 1.5 * size + 1
             let size = size + (size >> 1) + 1;
 
             std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
@@ -951,40 +951,41 @@ where
         let c = new_capacity as isize; // TODO
 
         loop {
-            let sc = self.size_ctl.load(Ordering::SeqCst);
+            let mut sc = self.size_ctl.load(Ordering::SeqCst);
             if sc < 0 {
                 break;
             }
 
-            let table = self.table.load(Ordering::SeqCst, &guard);
+            let mut table = self.table.load(Ordering::SeqCst, &guard);
 
-            // TODO: clean this up?
-            let n = if table.is_null() {
-                None
-            } else {
-                Some(unsafe { table.deref() }.len())
+            let n = match table.is_null() {
+                true => 0,
+                false => unsafe { table.deref() }.len(),
             };
 
-            if n.is_none() || n.unwrap() == 0 {
+            if n == 0 {
                 let n = sc.max(c) as usize;
-
-                let mut table = self.table.load(Ordering::SeqCst, guard);
 
                 if self.size_ctl.compare_and_swap(sc, -1, Ordering::SeqCst) == sc {
                     if self.table.load(Ordering::SeqCst, guard) == table {
-                        let new_table = Owned::new(Table::new(n));
-                        table = new_table.into_shared(guard);
-                        self.table.store(table, Ordering::SeqCst);
-                        self.size_ctl
-                            .store(n as isize - (n >> 2) as isize, Ordering::SeqCst);
+                        table = Owned::new(Table::new(n)).into_shared(guard);
+                        let old_table = self.table.swap(table, Ordering::SeqCst, &guard);
+
+                        assert!(old_table.is_null());
+                        // TODO
+                        // if !old_table.is_null() {
+                        //      unsafe { guard.defer_destroy(old_table) }
+                        // }
+
+                        sc = n as isize - (n >> 2) as isize;
                     }
 
                     self.size_ctl.store(sc, Ordering::SeqCst);
                 }
-            } else if c <= sc || n.unwrap() >= MAXIMUM_CAPACITY {
+            } else if c <= sc || n >= MAXIMUM_CAPACITY {
                 break;
             } else if table == self.table.load(Ordering::SeqCst, &guard) {
-                let rs: isize = Self::resize_stamp(n.unwrap()) << RESIZE_STAMP_SHIFT;
+                let rs: isize = Self::resize_stamp(n) << RESIZE_STAMP_SHIFT;
                 // TODO: `rs` is postive even though `resize_stamp` says:
                 // "Must be negative when shifted left by RESIZE_STAMP_SHIFT"
                 // and since our size_control field needs to be negative
@@ -1001,8 +1002,10 @@ where
     /// Tries to reserve capacity for at least additional more elements.
     /// The collection may reserve more space to avoid frequent reallocations.
     pub fn reserve(&self, additional: usize) {
+        let absolute = self.len() + additional;
+
         let guard = epoch::pin();
-        self.try_presize(additional, &guard);
+        self.try_presize(absolute, &guard);
     }
 
     /// Removes the key (and its corresponding value) from this map.
