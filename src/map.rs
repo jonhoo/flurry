@@ -937,6 +937,74 @@ where
         n.leading_zeros() as isize | (1 << (RESIZE_STAMP_BITS - 1)) as isize
     }
 
+    // TODO
+    fn try_presize<'g>(&self, size: usize, guard: &'g Guard) {
+        let new_capacity = if size >= MAXIMUM_CAPACITY / 2 {
+            MAXIMUM_CAPACITY
+        } else {
+            // 1.5 * size + 1
+            let size = size + (size >> 1) + 1;
+
+            std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
+        };
+
+        let c = new_capacity as isize; // TODO
+
+        loop {
+            let sc = self.size_ctl.load(Ordering::SeqCst);
+            if sc < 0 {
+                break;
+            }
+
+            let table = self.table.load(Ordering::SeqCst, &guard);
+
+            // TODO: clean this up?
+            let n = if table.is_null() {
+                None
+            } else {
+                Some(unsafe { table.deref() }.len())
+            };
+
+            if n.is_none() || n.unwrap() == 0 {
+                let n = sc.max(c) as usize;
+
+                let mut table = self.table.load(Ordering::SeqCst, guard);
+
+                if self.size_ctl.compare_and_swap(sc, -1, Ordering::SeqCst) == sc {
+                    if self.table.load(Ordering::SeqCst, guard) == table {
+                        let new_table = Owned::new(Table::new(n));
+                        table = new_table.into_shared(guard);
+                        self.table.store(table, Ordering::SeqCst);
+                        self.size_ctl
+                            .store(n as isize - (n >> 2) as isize, Ordering::SeqCst);
+                    }
+
+                    self.size_ctl.store(sc, Ordering::SeqCst);
+                }
+            } else if c <= sc || n.unwrap() >= MAXIMUM_CAPACITY {
+                break;
+            } else if table == self.table.load(Ordering::SeqCst, &guard) {
+                let rs: isize = Self::resize_stamp(n.unwrap()) << RESIZE_STAMP_SHIFT;
+                // TODO: `rs` is postive even though `resize_stamp` says:
+                // "Must be negative when shifted left by RESIZE_STAMP_SHIFT"
+                // and since our size_control field needs to be negative
+                // to indicate a resize this needs to be addressed
+
+                if self.size_ctl.compare_and_swap(sc, rs + 2, Ordering::SeqCst) == sc {
+                    self.transfer(table, Shared::null(), &guard);
+                }
+            }
+        }
+    }
+
+    #[inline]
+    /// Tries to reserve capacity for at least additional more elements.
+    /// The collection may reserve more space to avoid frequent reallocations.
+    pub fn reserve(&self, additional: usize) {
+        let guard = epoch::pin();
+        self.try_presize(additional, &guard);
+    }
+
     /// Removes the key (and its corresponding value) from this map.
     /// This method does nothing if the key is not in the map.
     /// Returns the previous value associated with the given key.
@@ -1127,6 +1195,20 @@ where
     }
 
     #[inline]
+    /// Returns the capacity of the map.
+    pub fn capacity<'g>(&self, guard: &'g Guard) -> usize {
+        let table = self.table.load(Ordering::Relaxed, &guard);
+
+        if table.is_null() {
+            0
+        } else {
+            // Safety: we loaded `table` under the `guard`,
+            // so it must still be valid here
+            unsafe { table.deref() }.len()
+        }
+    }
+
+    #[inline]
     /// Returns `true` if the map is empty. Otherwise returns `false`.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -1201,11 +1283,21 @@ where
     S: BuildHasher,
 {
     #[inline]
-    // TODO: Implement Java's `tryPresize` method to pre-allocate space for
-    // the incoming entries
-    // NOTE: `hashbrown::HashMap::extend` provides some good guidance on how
-    // to choose the presizing value based on the iterator lower bound.
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+        // from `hashbrown::HashMap::extend`:
+        // Keys may be already present or show multiple times in the iterator.
+        // Reserve the entire hint lower bound if the map is empty.
+        // Otherwise reserve half the hint (rounded up), so the map
+        // will only resize twice in the worst case.
+        let iter = iter.into_iter();
+        let reserve = if self.is_empty() {
+            iter.size_hint().0
+        } else {
+            (iter.size_hint().0 + 1) / 2
+        };
+
+        self.reserve(reserve);
+
         let guard = crossbeam_epoch::pin();
         (*self).put_all(iter.into_iter(), &guard);
     }

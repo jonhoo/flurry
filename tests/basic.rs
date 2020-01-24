@@ -134,6 +134,54 @@ fn update() {
 }
 
 #[test]
+fn capacity() {
+    let map = HashMap::<usize, usize>::new();
+    let guard = epoch::pin();
+
+    assert_eq!(map.capacity(&guard), 0);
+    // The table has not yet been allocated
+
+    map.insert(42, 0, &guard);
+
+    assert_eq!(map.capacity(&guard), 16);
+    // The table has been allocated and has default capacity
+
+    for i in 0..16 {
+        map.insert(i, 42, &guard);
+    }
+
+    assert_eq!(map.capacity(&guard), 32);
+    // The table has been resized once (and it's capacity doubled),
+    // since we inserted more elements than it can hold
+}
+
+#[test]
+fn reserve() {
+    let map = HashMap::<usize, usize>::new();
+    let guard = epoch::pin();
+
+    map.insert(42, 0, &guard);
+
+    map.reserve(32);
+
+    let capacity = map.capacity(&guard);
+    print!("{}", format!("capacity: {}\n", capacity));
+    assert!(capacity >= 16 + 32);
+}
+
+#[test]
+fn reserve_uninit() {
+    let map = HashMap::<usize, usize>::new();
+    let guard = epoch::pin();
+
+    map.reserve(32);
+
+    let capacity = map.capacity(&guard);
+    print!("{}", format!("capacity: {}\n", capacity));
+    assert!(capacity >= 32);
+}
+
+#[test]
 fn concurrent_insert() {
     let map = Arc::new(HashMap::<usize, usize>::new());
 
