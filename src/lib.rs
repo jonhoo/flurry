@@ -1280,6 +1280,20 @@ where
 {
 }
 
+impl<K, V, S> Index<K> for FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send,
+    S: BuildHasher,
+{
+    type Output = V;
+
+    fn index(&self, idx: K) -> &Self::Output {
+        let guard = epoch::pin();
+        self.get(&idx, &guard).expect("no entry found for key")
+    }
+}
+
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     fn drop(&mut self) {
         // safety: we have &mut self _and_ all references we have returned are bound to the
