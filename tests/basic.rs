@@ -8,18 +8,6 @@ fn new() {
 }
 
 #[test]
-fn debug_format() {
-    let map = FlurryHashMap::<usize, usize>::new();
-    {
-        let g = epoch::pin();
-        map.insert(1, 0, &g);
-        map.insert(2, 1, &g);
-        map.insert(3, 2, &g);
-        map.insert(4, 3, &g);
-    }
-    assert_eq!("{3: 2, 1: 0, 2: 1, 4: 3}", format!("{:?}", map));
-}
-#[test]
 fn insert() {
     let map = FlurryHashMap::<usize, usize>::new();
     let guard = epoch::pin();
