@@ -39,6 +39,8 @@
 //! [`size`](FlurryHashMap::size) are typically useful only when a map is not undergoing concurrent
 //! updates in other threads. Otherwise the results of these methods reflect transient states that
 //! may be adequate for monitoring or estimation purposes, but not for program control.
+//! Similarly, [`Clone`](FlurryHashMap::clone) may not produce a "perfect" clone if the underlying
+//! map is being concurrently modified.
 //!
 //! # Resizing behavior
 //!
@@ -1477,6 +1479,24 @@ where
     #[inline]
     fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
         Self::from_iter(iter.into_iter().map(|&(k, v)| (k, v)))
+    }
+}
+
+impl<K, V, S> Clone for FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send + Clone,
+    S: BuildHasher + Clone,
+{
+    fn clone(&self) -> FlurryHashMap<K, V, S> {
+        let cloned_map = Self::with_capacity_and_hasher(self.build_hasher.clone(), self.len());
+        {
+            let guard = epoch::pin();
+            for (k, v) in self.iter(&guard) {
+                cloned_map.insert(k.clone(), v.clone(), &guard);
+            }
+        }
+        cloned_map
     }
 }
 

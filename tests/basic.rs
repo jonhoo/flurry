@@ -295,3 +295,27 @@ fn drop_value() {
     // Second NotifyOnDrop was dropped when the map was dropped
     assert_eq!(Arc::strong_count(&dropped2), 1);
 }
+
+#[test]
+fn clone_map_empty() {
+    let map = FlurryHashMap::<&'static str, u32>::new();
+    let cloned_map = map.clone();
+    assert_eq!(map.len(), cloned_map.len());
+    assert_eq!(&map, &cloned_map);
+    assert_eq!(cloned_map.len(), 0);
+}
+
+#[test]
+// Test that same values exists in both maps (original and cloned)
+fn clone_map_filled() {
+    let map = FlurryHashMap::<&'static str, u32>::new();
+    map.insert("FooKey", 0, &epoch::pin());
+    map.insert("BarKey", 10, &epoch::pin());
+    let cloned_map = map.clone();
+    assert_eq!(map.len(), cloned_map.len());
+    assert_eq!(&map, &cloned_map);
+
+    // test that we are not mapping the same tables
+    map.insert("NewItem", 100, &epoch::pin());
+    assert_ne!(&map, &cloned_map);
+}
