@@ -201,7 +201,6 @@ use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
-use std::ops::Index;
 use std::sync::{
     atomic::{AtomicIsize, AtomicUsize, Ordering},
     Once,
@@ -1277,20 +1276,6 @@ where
     V: Sync + Send + Eq,
     S: BuildHasher,
 {
-}
-
-impl<K, V, S> Index<K> for FlurryHashMap<K, V, S>
-where
-    K: Sync + Send + Clone + Eq + Hash,
-    V: Sync + Send,
-    S: BuildHasher,
-{
-    type Output = V;
-
-    fn index(&self, idx: K) -> &Self::Output {
-        let guard = epoch::pin();
-        self.get(&idx, &guard).expect("no entry found for key")
-    }
 }
 
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
