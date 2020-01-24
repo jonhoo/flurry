@@ -403,7 +403,7 @@ where
         self.get(key, guard).map(then)
     }
 
-    fn init_table<'g>(&self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
+    fn init_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
         loop {
             let table = self.table.load(Ordering::SeqCst, guard);
             // safety: we loaded the table while epoch was pinned. table won't be deallocated until
@@ -447,11 +447,17 @@ where
     /// Maps `key` to `value` in this table.
     ///
     /// The value can be retrieved by calling [`get`] with a key that is equal to the original key.
-    pub fn insert<'g>(&self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
+    pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.put(key, value, false, guard)
     }
 
-    fn put<'g>(&self, key: K, value: V, no_replacement: bool, guard: &'g Guard) -> Option<&'g V> {
+    fn put<'g>(
+        &'g self,
+        key: K,
+        value: V,
+        no_replacement: bool,
+        guard: &'g Guard,
+    ) -> Option<&'g V> {
         let h = self.hash(&key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
@@ -638,7 +644,7 @@ where
     }
 
     fn help_transfer<'g>(
-        &self,
+        &'g self,
         table: Shared<'g, Table<K, V>>,
         next_table: *const Table<K, V>,
         guard: &'g Guard,
@@ -753,7 +759,7 @@ where
     }
 
     fn transfer<'g>(
-        &self,
+        &'g self,
         table: Shared<'g, Table<K, V>>,
         mut next_table: Shared<'g, Table<K, V>>,
         guard: &'g Guard,
@@ -1194,7 +1200,7 @@ where
     /// The iterator element type is `(&'g K, &'g V)`.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
-    pub fn iter<'g>(&self, guard: &'g Guard) -> Iter<'g, K, V> {
+    pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V> {
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
         Iter { node_iter, guard }
@@ -1204,7 +1210,7 @@ where
     /// The iterator element type is `&'g K`.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
-    pub fn keys<'g>(&self, guard: &'g Guard) -> Keys<'g, K, V> {
+    pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V> {
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
         Keys { node_iter }
@@ -1214,7 +1220,7 @@ where
     /// The iterator element type is `&'g V`.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
-    pub fn values<'g>(&self, guard: &'g Guard) -> Values<'g, K, V> {
+    pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V> {
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
         Values { node_iter, guard }
@@ -1223,7 +1229,13 @@ where
 
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     fn drop(&mut self) {
-        // safety: we have &mut self, so not concurrently accessed by anyone else
+        // safety: we have &mut self _and_ all references we have returned are bound to the
+        // lifetime of their borrow of self, so there cannot be any outstanding references to
+        // anything in the map.
+        //
+        // NOTE: we _could_ relax the bounds in all the methods that return `&'g ...` to not also
+        // bound `&self` by `'g`, but if we did that, we would need to use a regular `epoch::Guard`
+        // here rather than an unprotected one.
         let guard = unsafe { crossbeam::epoch::unprotected() };
 
         assert!(self.next_table.load(Ordering::SeqCst, guard).is_null());
@@ -1246,7 +1258,9 @@ struct Table<K, V> {
 
 impl<K, V> Table<K, V> {
     fn drop_bins(&mut self) {
-        // safety: we have &mut self, so not concurrently accessed by anyone else
+        // safety: we have &mut self _and_ all references we have returned are bound to the
+        // lifetime of their borrow of self, so there cannot be any outstanding references to
+        // anything in the map.
         let guard = unsafe { crossbeam::epoch::unprotected() };
 
         for bin in Vec::from(std::mem::replace(&mut self.bins, vec![].into_boxed_slice())) {
@@ -1292,9 +1306,9 @@ impl<K, V> Drop for Table<K, V> {
     fn drop(&mut self) {
         // we need to drop any forwarding nodes (since they are heap allocated).
 
-        // safety below:
-        // no-one else is accessing this Table any more, so we own all its contents, which is all
-        // we are going to use this guard for.
+        // safety: we have &mut self _and_ all references we have returned are bound to the
+        // lifetime of their borrow of self, so there cannot be any outstanding references to
+        // anything in the map.
         let guard = unsafe { crossbeam::epoch::unprotected() };
 
         for bin in &self.bins[..] {
@@ -1328,7 +1342,7 @@ impl<K, V> Table<K, V> {
     #[inline]
     #[allow(clippy::type_complexity)]
     fn cas_bin<'g>(
-        &self,
+        &'g self,
         i: usize,
         current: Shared<'_, BinEntry<K, V>>,
         new: Owned<BinEntry<K, V>>,
@@ -1346,5 +1360,36 @@ impl<K, V> Table<K, V> {
     }
 }
 
-#[cfg(test)]
-mod tests {}
+/// It's kind of stupid, but apparently there is no way to write a regular `#[test]` that is _not_
+/// supposed to compile without pulling in `compiletest` as a dependency. See rust-lang/rust#12335.
+/// But it _is_ possible to write `compile_test` tests as doctests, sooooo:
+///
+/// No references outlive the map:
+///
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let ref1 = map.insert((), (), &guard);
+/// let ref2 = map.get(&(), &guard);
+/// let ref3 = map.remove(&(), &guard);
+/// drop(map);
+/// drop(ref1);
+/// drop(ref2);
+/// drop(ref3);
+/// ```
+///
+/// No references outlive the guard:
+///
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let ref1 = map.insert((), (), &guard);
+/// let ref2 = map.get(&(), &guard);
+/// let ref3 = map.remove(&(), &guard);
+/// drop(guard);
+/// drop(ref1);
+/// drop(ref2);
+/// drop(ref3);
+/// ```
+#[allow(dead_code)]
+struct CompileFailTests;
