@@ -40,6 +40,9 @@
 //! updates in other threads. Otherwise the results of these methods reflect transient states that
 //! may be adequate for monitoring or estimation purposes, but not for program control.
 //!
+//! [`Clone`](FlurryHashMap::clone) may not produce a "perfect" clone if the underlying map
+//! is being concurrently modified.
+//!
 //! # Resizing behavior
 //!
 //! The table is dynamically expanded when there are too many collisions (i.e., keys that have
@@ -1446,17 +1449,26 @@ where
     }
 }
 
-impl<K, V> Clone for FlurryHashMap<K, V, RandomState>
+impl<K, V, S> Clone for FlurryHashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send + Clone,
+    S: BuildHasher + Clone,
 {
-    fn clone(&self) -> Self {
-        let cloned_map = FlurryHashMap::with_capacity(self.count.load(Ordering::SeqCst));
+    fn clone(&self) -> FlurryHashMap<K, V, S> {
+        // TODO: This should be created with the FlurryHashMap::with_capacity_and_hasher once available
+        let cloned_map = Self {
+            table: Atomic::null(),
+            next_table: Atomic::null(),
+            transfer_index: AtomicIsize::new(0),
+            count: AtomicUsize::new(0),
+            size_ctl: AtomicIsize::new(0),
+            build_hasher: self.build_hasher.clone(),
+        };
         {
             let guard = epoch::pin();
             for (k, v) in self.iter(&guard) {
-                cloned_map.put(k.clone(), v.clone(), false, &epoch::pin());
+                cloned_map.insert(k.clone(), v.clone(), &guard);
             }
         }
         cloned_map
