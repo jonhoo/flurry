@@ -200,7 +200,11 @@ use node::*;
 use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
-use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::iter::FromIterator;
+use std::sync::{
+    atomic::{AtomicIsize, AtomicUsize, Ordering},
+    Once,
+};
 
 /// The largest possible table capacity.  This value must be
 /// exactly 1<<30 to stay within Java array allocation and indexing
@@ -237,6 +241,9 @@ const MAX_RESIZERS: isize = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
 
 /// The bit shift for recording size stamp in `size_ctl`.
 const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
+
+static NCPU_INITIALIZER: Once = Once::new();
+static NCPU: AtomicUsize = AtomicUsize::new(0);
 
 /// Iterator types.
 pub mod iter;
@@ -304,12 +311,11 @@ where
 
     /// Creates a new, empty map with an initial table size accommodating the specified number of
     /// elements without the need to dynamically resize.
-    ///
-    /// # Panics
-    ///
-    /// If the given capacity is 0.
     pub fn with_capacity(n: usize) -> Self {
-        assert_ne!(n, 0);
+        if n == 0 {
+            return Self::new();
+        }
+
         let mut m = Self::new();
         let size = (1.0 + (n as f64) / LOAD_FACTOR) as usize;
         // NOTE: tableSizeFor in Java
@@ -444,6 +450,7 @@ where
         }
     }
 
+    #[inline]
     /// Maps `key` to `value` in this table.
     ///
     /// The value can be retrieved by calling [`get`] with a key that is equal to the original key.
@@ -643,6 +650,12 @@ where
         }
     }
 
+    fn put_all<'g, I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &'g Guard) {
+        for (key, value) in iter {
+            self.put(key, value, false, guard);
+        }
+    }
+
     fn help_transfer<'g>(
         &'g self,
         table: Shared<'g, Table<K, V>>,
@@ -769,9 +782,10 @@ where
         // this references is still active (marked by the guard), so the target of the references
         // won't be dropped while the guard remains active.
         let n = unsafe { table.deref() }.bins.len();
+        let ncpu = num_cpus();
 
-        // TODO: use num_cpus to help determine stride
-        let stride = MIN_TRANSFER_STRIDE;
+        let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n };
+        let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
 
         if next_table.is_null() {
             // we are initiating a resize
@@ -1225,6 +1239,18 @@ where
         let node_iter = NodeIter::new(table, guard);
         Values { node_iter, guard }
     }
+
+    #[inline]
+    /// Returns the number of entries in the map.
+    pub fn len(&self) -> usize {
+        self.count.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    /// Returns `true` if the map is empty. Otherwise returns `false`.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
@@ -1248,6 +1274,82 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
         // safety: same as above + we own the table
         let mut table = unsafe { table.into_owned() }.into_box();
         table.drop_bins();
+    }
+}
+
+impl<K, V, S> Extend<(K, V)> for &FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+    S: BuildHasher,
+{
+    #[inline]
+    // TODO: Implement Java's `tryPresize` method to pre-allocate space for
+    // the incoming entries
+    // NOTE: `hashbrown::HashMap::extend` provides some good guidance on how
+    // to choose the presizing value based on the iterator lower bound.
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+        let guard = crossbeam::epoch::pin();
+        (*self).put_all(iter.into_iter(), &guard);
+    }
+}
+
+impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Copy + Hash + Eq,
+    V: Sync + Send + Copy,
+    S: BuildHasher,
+{
+    #[inline]
+    fn extend<T: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: T) {
+        self.extend(iter.into_iter().map(|(&key, &value)| (key, value)));
+    }
+}
+
+impl<K, V> FromIterator<(K, V)> for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+{
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let mut iter = iter.into_iter();
+
+        if let Some((key, value)) = iter.next() {
+            // safety: we own `map`, so it's not concurrently accessed by
+            // anyone else at this point.
+            let guard = unsafe { crossbeam::epoch::unprotected() };
+
+            let (lower, _) = iter.size_hint();
+            let map = Self::with_capacity(lower.saturating_add(1));
+
+            map.put(key, value, false, &guard);
+            map.put_all(iter, &guard);
+            map
+        } else {
+            Self::new()
+        }
+    }
+}
+
+impl<'a, K, V> FromIterator<(&'a K, &'a V)> for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Copy + Hash + Eq,
+    V: Sync + Send + Copy,
+{
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = (&'a K, &'a V)>>(iter: T) -> Self {
+        Self::from_iter(iter.into_iter().map(|(&k, &v)| (k, v)))
+    }
+}
+
+impl<'a, K, V> FromIterator<&'a (K, V)> for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Copy + Hash + Eq,
+    V: Sync + Send + Copy,
+{
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
+        Self::from_iter(iter.into_iter().map(|&(k, v)| (k, v)))
     }
 }
 
@@ -1358,6 +1460,14 @@ impl<K, V> Table<K, V> {
     fn store_bin<P: crossbeam::epoch::Pointer<BinEntry<K, V>>>(&self, i: usize, new: P) {
         self.bins[i].store(new, Ordering::Release)
     }
+}
+
+#[inline]
+/// Returns the number of physical CPUs in the machine (_O(1)_).
+fn num_cpus() -> usize {
+    NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
+
+    NCPU.load(Ordering::Relaxed)
 }
 
 /// It's kind of stupid, but apparently there is no way to write a regular `#[test]` that is _not_
