@@ -199,6 +199,7 @@ use node::*;
 
 use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
 use std::collections::hash_map::RandomState;
+use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
 use std::sync::{
@@ -257,7 +258,6 @@ pub mod epoch {
 /// A concurrent hash table.
 ///
 /// See the [crate-level documentation](index.html) for details.
-#[derive(Debug)]
 pub struct FlurryHashMap<K, V, S = RandomState> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
@@ -1276,6 +1276,18 @@ where
     V: Sync + Send + Eq,
     S: BuildHasher,
 {
+}
+
+impl<K, V, S> fmt::Debug for FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Debug + Eq + Hash,
+    V: Sync + Send + Debug,
+    S: BuildHasher,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let guard = epoch::pin();
+        f.debug_map().entries(self.iter(&guard)).finish()
+    }
 }
 
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
