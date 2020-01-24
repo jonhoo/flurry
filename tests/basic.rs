@@ -165,7 +165,6 @@ fn reserve() {
     map.reserve(32);
 
     let capacity = map.capacity(&guard);
-    print!("{}", format!("capacity: {}\n", capacity));
     assert!(capacity >= 16 + 32);
 }
 
@@ -177,7 +176,6 @@ fn reserve_uninit() {
     map.reserve(32);
 
     let capacity = map.capacity(&guard);
-    print!("{}", format!("capacity: {}\n", capacity));
     assert!(capacity >= 32);
 }
 
