@@ -74,7 +74,6 @@ fn insert_and_get() {
 }
 
 #[test]
-
 fn insert_and_get_key_value() {
     let map = FlurryHashMap::<usize, usize>::new();
 
@@ -83,6 +82,39 @@ fn insert_and_get_key_value() {
         let guard = epoch::pin();
         let e = map.get_key_value(&42, &guard).unwrap();
         assert_eq!(e, (&42, &0));
+    }
+}
+
+#[test]
+fn insert_in_same_bucket_and_get_distinct_entries() {
+    use std::hash::{BuildHasher, Hasher};
+
+    struct OneBucketState;
+    struct OneBucketHasher;
+    impl BuildHasher for OneBucketState {
+        type Hasher = OneBucketHasher;
+
+        fn build_hasher(&self) -> Self::Hasher {
+            OneBucketHasher
+        }
+    }
+    impl Hasher for OneBucketHasher {
+        fn write(&mut self, _bytes: &[u8]) {}
+        fn finish(&self) -> u64 {
+            0
+        }
+    }
+
+    let map = FlurryHashMap::<usize, usize, _>::with_hasher(OneBucketState);
+
+    map.insert(42, 0, &epoch::pin());
+    map.insert(50, 20, &epoch::pin());
+    {
+        let guard = epoch::pin();
+        let e = map.get(&42, &guard).unwrap();
+        assert_eq!(e, &0);
+        let e = map.get(&50, &guard).unwrap();
+        assert_eq!(e, &20);
     }
 }
 
@@ -187,6 +219,57 @@ fn current_kv_dropped() {
     // dropping the map should immediately drop (not deferred) all keys and values
     assert_eq!(Arc::strong_count(&dropped1), 1);
     assert_eq!(Arc::strong_count(&dropped2), 1);
+}
+
+#[test]
+fn empty_maps_equal() {
+    let map1 = FlurryHashMap::<usize, usize>::new();
+    let map2 = FlurryHashMap::<usize, usize>::new();
+    assert_eq!(map1, map2);
+    assert_eq!(map2, map1);
+}
+
+#[test]
+fn different_size_maps_not_equal() {
+    let map1 = FlurryHashMap::<usize, usize>::new();
+    let map2 = FlurryHashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map1.insert(1, 0, &guard);
+        map1.insert(2, 0, &guard);
+        map2.insert(1, 0, &guard);
+    }
+
+    assert_ne!(map1, map2);
+    assert_ne!(map2, map1);
+}
+
+#[test]
+fn same_values_equal() {
+    let map1 = FlurryHashMap::<usize, usize>::new();
+    let map2 = FlurryHashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map1.insert(1, 0, &guard);
+        map2.insert(1, 0, &guard);
+    }
+
+    assert_eq!(map1, map2);
+    assert_eq!(map2, map1);
+}
+
+#[test]
+fn different_values_not_equal() {
+    let map1 = FlurryHashMap::<usize, usize>::new();
+    let map2 = FlurryHashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map1.insert(1, 0, &guard);
+        map2.insert(1, 1, &guard);
+    }
+
+    assert_ne!(map1, map2);
+    assert_ne!(map2, map1);
 }
 
 #[test]

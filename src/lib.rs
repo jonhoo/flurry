@@ -198,9 +198,15 @@ mod node;
 use node::*;
 
 use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
+use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hash};
-use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::fmt::{self, Debug, Formatter};
+use std::hash::{BuildHasher, Hash, Hasher};
+use std::iter::FromIterator;
+use std::sync::{
+    atomic::{AtomicIsize, AtomicUsize, Ordering},
+    Once,
+};
 
 /// The largest possible table capacity.  This value must be
 /// exactly 1<<30 to stay within Java array allocation and indexing
@@ -238,6 +244,9 @@ const MAX_RESIZERS: isize = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
 /// The bit shift for recording size stamp in `size_ctl`.
 const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
 
+static NCPU_INITIALIZER: Once = Once::new();
+static NCPU: AtomicUsize = AtomicUsize::new(0);
+
 /// Iterator types.
 pub mod iter;
 use iter::*;
@@ -250,7 +259,6 @@ pub mod epoch {
 /// A concurrent hash table.
 ///
 /// See the [crate-level documentation](index.html) for details.
-#[derive(Debug)]
 pub struct FlurryHashMap<K, V, S = RandomState> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
@@ -292,25 +300,51 @@ where
 {
     /// Creates a new, empty map with the default initial table size (16).
     pub fn new() -> Self {
+        Self::with_hasher(RandomState::new())
+    }
+
+    /// Creates a new, empty map with an initial table size accommodating the specified number of
+    /// elements without the need to dynamically resize.
+    pub fn with_capacity(n: usize) -> Self {
+        Self::with_capacity_and_hasher(RandomState::new(), n)
+    }
+}
+
+impl<K, V, S: BuildHasher> FlurryHashMap<K, V, S> {
+    /// Creates an empty map which will use `hash_builder` to hash keys.
+    ///
+    /// The created map has the default initial capacity.
+    ///
+    /// Warning: `hash_builder` is normally randomly generated, and is designed to
+    /// allow the map to be resistant to attacks that cause many collisions and
+    /// very poor performance. Setting it manually using this
+    /// function can expose a DoS attack vector.
+    pub fn with_hasher(hash_builder: S) -> Self {
         Self {
             table: Atomic::null(),
             next_table: Atomic::null(),
             transfer_index: AtomicIsize::new(0),
             count: AtomicUsize::new(0),
             size_ctl: AtomicIsize::new(0),
-            build_hasher: RandomState::new(),
+            build_hasher: hash_builder,
         }
     }
 
-    /// Creates a new, empty map with an initial table size accommodating the specified number of
-    /// elements without the need to dynamically resize.
+    /// Creates an empty map with the specified `capacity`, using `hash_builder` to hash the keys.
     ///
-    /// # Panics
+    /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
+    /// (assuming uniformly distributed hashes). If `capacity` is 0, the call will not allocate,
+    /// and is equivalent to [`FlurryHashMap::new`].
     ///
-    /// If the given capacity is 0.
-    pub fn with_capacity(n: usize) -> Self {
-        assert_ne!(n, 0);
-        let mut m = Self::new();
+    /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
+    /// to be resistant to attacks that cause many collisions and very poor performance.
+    /// Setting it manually using this function can expose a DoS attack vector.
+    pub fn with_capacity_and_hasher(hash_builder: S, n: usize) -> Self {
+        if n == 0 {
+            return Self::with_hasher(hash_builder);
+        }
+
+        let mut m = Self::with_hasher(hash_builder);
         let size = (1.0 + (n as f64) / LOAD_FACTOR) as usize;
         // NOTE: tableSizeFor in Java
         let cap = std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two());
@@ -325,27 +359,30 @@ where
     V: Sync + Send,
     S: BuildHasher,
 {
-    fn hash(&self, key: &K) -> u64 {
-        use std::hash::Hasher;
+    fn hash<Q: ?Sized + Hash>(&self, key: &Q) -> u64 {
         let mut h = self.build_hasher.build_hasher();
         key.hash(&mut h);
         h.finish()
     }
 
     /// Tests if `key` is a key in this table.
-    pub fn contains_key(&self, key: &K) -> bool {
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
         let guard = crossbeam::epoch::pin();
         self.get(key, &guard).is_some()
     }
 
-    /// Returns the value to which `key` is mapped.
-    ///
-    /// Returns `None` if this map contains no mapping for the key.
-    ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
-    // TODO: implement a guard API of our own
-    pub fn get<'g>(&'g self, key: &K, guard: &'g Guard) -> Option<&'g V> {
-        let h = self.hash(key);
+    fn get_node<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g Node<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
         let table = self.table.load(Ordering::SeqCst, guard);
         if table.is_null() {
             return None;
@@ -357,6 +394,8 @@ where
         if table.bins.len() == 0 {
             return None;
         }
+
+        let h = self.hash(key);
         let bini = table.bini(h);
         let bin = table.bin(bini, guard);
         if bin.is_null() {
@@ -385,7 +424,24 @@ where
         // next epoch after it is removed. since it wasn't removed, and the epoch was pinned, that
         // cannot be until after we drop our guard.
         let node = unsafe { node.deref() };
-        let node = node.as_node().unwrap();
+        node.as_node()
+    }
+
+    /// Returns the value to which `key` is mapped.
+    ///
+    /// Returns `None` if this map contains no mapping for the key.
+    ///
+    /// To obtain a `Guard`, use [`epoch::pin`].
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    // TODO: implement a guard API of our own
+    pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        let node = self.get_node(key, guard)?;
 
         let v = node.value.load(Ordering::SeqCst, guard);
         assert!(!v.is_null());
@@ -398,19 +454,42 @@ where
     /// Obtains the value to which `key` is mapped and passes it through the closure `then`.
     ///
     /// Returns `None` if this map contains no mapping for `key`.
-    pub fn get_and<R, F: FnOnce(&V) -> R>(&self, key: &K, then: F) -> Option<R> {
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    pub fn get_and<Q, R, F>(&self, key: &Q, then: F) -> Option<R>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+        F: FnOnce(&V) -> R,
+    {
         let guard = &crossbeam::epoch::pin();
         self.get(key, guard).map(then)
     }
 
-    /// Returns the key-value pair corresponding to the supplied key.
-    ///
+    /// Returns the key-value pair corresponding to `key`.
+    /// 
     /// Returns `None` if this map contains no mapping for `key`.
-    pub fn get_key_value<'g>(&'g self, key: &'g K, guard: &'g Guard) -> Option<(&'g K, &'g V)> {
-        self.get(key, guard).map(|v| (key, v))
+    ///
+    /// The supplied `key` may be any borrowed form of the
+    /// map's key type, but `Hash` and `Eq` on the borrowed form 
+    /// must match those for the key type.
+    pub fn get_key_value<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<(&'g K, &'g V)>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        let node = self.get_node(key, guard)?;
+
+        let v = node.value.load(Ordering::SeqCst, guard);
+        assert!(!v.is_null());
+        // safety: the lifetime of the reference is bound to the guard
+        // supplied which means that the memory will not be modified
+        // until at least after the guard goes out of scope
+        unsafe { v.as_ref() }.map(|v| (&node.key, v))
     }
 
-    fn init_table<'g>(&self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
+    fn init_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
         loop {
             let table = self.table.load(Ordering::SeqCst, guard);
             // safety: we loaded the table while epoch was pinned. table won't be deallocated until
@@ -451,14 +530,21 @@ where
         }
     }
 
+    #[inline]
     /// Maps `key` to `value` in this table.
     ///
     /// The value can be retrieved by calling [`get`] with a key that is equal to the original key.
-    pub fn insert<'g>(&self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
+    pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.put(key, value, false, guard)
     }
 
-    fn put<'g>(&self, key: K, value: V, no_replacement: bool, guard: &'g Guard) -> Option<&'g V> {
+    fn put<'g>(
+        &'g self,
+        key: K,
+        value: V,
+        no_replacement: bool,
+        guard: &'g Guard,
+    ) -> Option<&'g V> {
         let h = self.hash(&key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
@@ -644,8 +730,14 @@ where
         }
     }
 
+    fn put_all<'g, I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &'g Guard) {
+        for (key, value) in iter {
+            self.put(key, value, false, guard);
+        }
+    }
+
     fn help_transfer<'g>(
-        &self,
+        &'g self,
         table: Shared<'g, Table<K, V>>,
         next_table: *const Table<K, V>,
         guard: &'g Guard,
@@ -760,7 +852,7 @@ where
     }
 
     fn transfer<'g>(
-        &self,
+        &'g self,
         table: Shared<'g, Table<K, V>>,
         mut next_table: Shared<'g, Table<K, V>>,
         guard: &'g Guard,
@@ -770,9 +862,10 @@ where
         // this references is still active (marked by the guard), so the target of the references
         // won't be dropped while the guard remains active.
         let n = unsafe { table.deref() }.bins.len();
+        let ncpu = num_cpus();
 
-        // TODO: use num_cpus to help determine stride
-        let stride = MIN_TRANSFER_STRIDE;
+        let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n };
+        let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
 
         if next_table.is_null() {
             // we are initiating a resize
@@ -1054,7 +1147,14 @@ where
     /// Removes the key (and its corresponding value) from this map.
     /// This method does nothing if the key is not in the map.
     /// Returns the previous value associated with the given key.
-    pub fn remove<'g>(&'g self, key: &K, guard: &'g Guard) -> Option<&'g V> {
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    pub fn remove<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
         let h = self.hash(key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
@@ -1129,7 +1229,7 @@ where
                         // our guard, e is also valid if it was obtained from a next pointer.
                         let n = unsafe { e.deref() }.as_node().unwrap();
                         let next = n.next.load(Ordering::SeqCst, guard);
-                        if n.hash == h && &n.key == key {
+                        if n.hash == h && n.key.borrow() == key {
                             let ev = n.value.load(Ordering::SeqCst, guard);
                             old_val = Some(ev);
 
@@ -1201,7 +1301,7 @@ where
     /// The iterator element type is `(&'g K, &'g V)`.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
-    pub fn iter<'g>(&self, guard: &'g Guard) -> Iter<'g, K, V> {
+    pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V> {
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
         Iter { node_iter, guard }
@@ -1211,7 +1311,7 @@ where
     /// The iterator element type is `&'g K`.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
-    pub fn keys<'g>(&self, guard: &'g Guard) -> Keys<'g, K, V> {
+    pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V> {
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
         Keys { node_iter }
@@ -1221,16 +1321,71 @@ where
     /// The iterator element type is `&'g V`.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
-    pub fn values<'g>(&self, guard: &'g Guard) -> Values<'g, K, V> {
+    pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V> {
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
         Values { node_iter, guard }
+    }
+
+    #[inline]
+    /// Returns the number of entries in the map.
+    pub fn len(&self) -> usize {
+        self.count.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    /// Returns `true` if the map is empty. Otherwise returns `false`.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<K, V, S> PartialEq for FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send + PartialEq,
+    S: BuildHasher,
+{
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        let guard = epoch::pin();
+        self.iter(&guard)
+            .all(|(key, value)| other.get(key, &guard).map_or(false, |v| *value == *v))
+    }
+}
+
+impl<K, V, S> Eq for FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send + Eq,
+    S: BuildHasher,
+{
+}
+
+impl<K, V, S> fmt::Debug for FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Debug + Eq + Hash,
+    V: Sync + Send + Debug,
+    S: BuildHasher,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let guard = epoch::pin();
+        f.debug_map().entries(self.iter(&guard)).finish()
     }
 }
 
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     fn drop(&mut self) {
-        // safety: we have &mut self, so not concurrently accessed by anyone else
+        // safety: we have &mut self _and_ all references we have returned are bound to the
+        // lifetime of their borrow of self, so there cannot be any outstanding references to
+        // anything in the map.
+        //
+        // NOTE: we _could_ relax the bounds in all the methods that return `&'g ...` to not also
+        // bound `&self` by `'g`, but if we did that, we would need to use a regular `epoch::Guard`
+        // here rather than an unprotected one.
         let guard = unsafe { crossbeam::epoch::unprotected() };
 
         assert!(self.next_table.load(Ordering::SeqCst, guard).is_null());
@@ -1246,6 +1401,82 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     }
 }
 
+impl<K, V, S> Extend<(K, V)> for &FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+    S: BuildHasher,
+{
+    #[inline]
+    // TODO: Implement Java's `tryPresize` method to pre-allocate space for
+    // the incoming entries
+    // NOTE: `hashbrown::HashMap::extend` provides some good guidance on how
+    // to choose the presizing value based on the iterator lower bound.
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
+        let guard = crossbeam::epoch::pin();
+        (*self).put_all(iter.into_iter(), &guard);
+    }
+}
+
+impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Copy + Hash + Eq,
+    V: Sync + Send + Copy,
+    S: BuildHasher,
+{
+    #[inline]
+    fn extend<T: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: T) {
+        self.extend(iter.into_iter().map(|(&key, &value)| (key, value)));
+    }
+}
+
+impl<K, V> FromIterator<(K, V)> for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+{
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        let mut iter = iter.into_iter();
+
+        if let Some((key, value)) = iter.next() {
+            // safety: we own `map`, so it's not concurrently accessed by
+            // anyone else at this point.
+            let guard = unsafe { crossbeam::epoch::unprotected() };
+
+            let (lower, _) = iter.size_hint();
+            let map = Self::with_capacity(lower.saturating_add(1));
+
+            map.put(key, value, false, &guard);
+            map.put_all(iter, &guard);
+            map
+        } else {
+            Self::new()
+        }
+    }
+}
+
+impl<'a, K, V> FromIterator<(&'a K, &'a V)> for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Copy + Hash + Eq,
+    V: Sync + Send + Copy,
+{
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = (&'a K, &'a V)>>(iter: T) -> Self {
+        Self::from_iter(iter.into_iter().map(|(&k, &v)| (k, v)))
+    }
+}
+
+impl<'a, K, V> FromIterator<&'a (K, V)> for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Copy + Hash + Eq,
+    V: Sync + Send + Copy,
+{
+    #[inline]
+    fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
+        Self::from_iter(iter.into_iter().map(|&(k, v)| (k, v)))
+    }
+}
+
 #[derive(Debug)]
 struct Table<K, V> {
     bins: Box<[Atomic<BinEntry<K, V>>]>,
@@ -1253,7 +1484,9 @@ struct Table<K, V> {
 
 impl<K, V> Table<K, V> {
     fn drop_bins(&mut self) {
-        // safety: we have &mut self, so not concurrently accessed by anyone else
+        // safety: we have &mut self _and_ all references we have returned are bound to the
+        // lifetime of their borrow of self, so there cannot be any outstanding references to
+        // anything in the map.
         let guard = unsafe { crossbeam::epoch::unprotected() };
 
         for bin in Vec::from(std::mem::replace(&mut self.bins, vec![].into_boxed_slice())) {
@@ -1299,9 +1532,9 @@ impl<K, V> Drop for Table<K, V> {
     fn drop(&mut self) {
         // we need to drop any forwarding nodes (since they are heap allocated).
 
-        // safety below:
-        // no-one else is accessing this Table any more, so we own all its contents, which is all
-        // we are going to use this guard for.
+        // safety: we have &mut self _and_ all references we have returned are bound to the
+        // lifetime of their borrow of self, so there cannot be any outstanding references to
+        // anything in the map.
         let guard = unsafe { crossbeam::epoch::unprotected() };
 
         for bin in &self.bins[..] {
@@ -1335,7 +1568,7 @@ impl<K, V> Table<K, V> {
     #[inline]
     #[allow(clippy::type_complexity)]
     fn cas_bin<'g>(
-        &self,
+        &'g self,
         i: usize,
         current: Shared<'_, BinEntry<K, V>>,
         new: Owned<BinEntry<K, V>>,
@@ -1353,5 +1586,110 @@ impl<K, V> Table<K, V> {
     }
 }
 
-#[cfg(test)]
-mod tests {}
+#[inline]
+/// Returns the number of physical CPUs in the machine (_O(1)_).
+fn num_cpus() -> usize {
+    NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
+
+    NCPU.load(Ordering::Relaxed)
+}
+
+/// It's kind of stupid, but apparently there is no way to write a regular `#[test]` that is _not_
+/// supposed to compile without pulling in `compiletest` as a dependency. See rust-lang/rust#12335.
+/// But it _is_ possible to write `compile_test` tests as doctests, sooooo:
+///
+/// # No references outlive the map.
+///
+/// Note that these have to be _separate_ tests, otherwise you could have, say, `get` break the
+/// contract, but `insert` continue to uphold it, and then the test would still fail to compile
+/// (and so pass).
+///
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.insert((), (), &guard);
+/// drop(map);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.get(&(), &guard);
+/// drop(map);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.remove(&(), &guard);
+/// drop(map);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.iter(&guard).next();
+/// drop(map);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.keys(&guard).next();
+/// drop(map);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.values(&guard).next();
+/// drop(map);
+/// drop(r);
+/// ```
+///
+/// # No references outlive the guard.
+///
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.insert((), (), &guard);
+/// drop(guard);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.get(&(), &guard);
+/// drop(guard);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.remove(&(), &guard);
+/// drop(guard);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.iter(&guard).next();
+/// drop(guard);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.keys(&guard).next();
+/// drop(guard);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.values(&guard).next();
+/// drop(guard);
+/// drop(r);
+/// ```
+#[allow(dead_code)]
+struct CompileFailTests;

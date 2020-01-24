@@ -1,6 +1,7 @@
 use super::Table;
 use crossbeam::epoch::{Atomic, Guard, Shared};
 use parking_lot::Mutex;
+use std::borrow::Borrow;
 use std::sync::atomic::Ordering;
 
 /// Entry in a bin.
@@ -40,16 +41,17 @@ impl<K, V> BinEntry<K, V> {
     }
 }
 
-impl<K, V> BinEntry<K, V>
-where
-    K: Eq,
-{
-    pub(crate) fn find<'g>(
+impl<K, V> BinEntry<K, V> {
+    pub(crate) fn find<'g, Q>(
         &'g self,
         hash: u64,
-        key: &K,
+        key: &Q,
         guard: &'g Guard,
-    ) -> Shared<'g, BinEntry<K, V>> {
+    ) -> Shared<'g, BinEntry<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Eq,
+    {
         match *self {
             BinEntry::Node(_) => {
                 let mut node = self;
@@ -60,8 +62,8 @@ where
                         unreachable!();
                     };
 
-                    if n.hash == hash && &n.key == key {
-                        break Shared::from(self as *const _);
+                    if n.hash == hash && n.key.borrow() == key {
+                        break Shared::from(node as *const _);
                     }
                     let next = n.next.load(Ordering::SeqCst, guard);
                     if next.is_null() {
