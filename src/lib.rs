@@ -310,12 +310,12 @@ where
 }
 
 impl<K, V, S: BuildHasher> FlurryHashMap<K, V, S> {
-    /// Creates an empty HashMap which will use the given hash builder to hash keys.
+    /// Creates an empty map which will use `hash_builder` to hash keys.
     ///
     /// The created map has the default initial capacity.
     ///
-    /// Warning: hash_builder is normally randomly generated, and is designed to
-    /// allow HashMaps to be resistant to attacks that cause many collisions and
+    /// Warning: `hash_builder` is normally randomly generated, and is designed to
+    /// allow the map to be resistant to attacks that cause many collisions and
     /// very poor performance. Setting it manually using this
     /// function can expose a DoS attack vector.
     pub fn with_hasher(hash_builder: S) -> Self {
@@ -329,12 +329,13 @@ impl<K, V, S: BuildHasher> FlurryHashMap<K, V, S> {
         }
     }
 
-    /// Creates an empty HashMap with the specified capacity, using hash_builder to hash the keys.
+    /// Creates an empty map with the specified `capacity`, using `hash_builder` to hash the keys.
     ///
-    /// The hash map will be able to hold at least capacity elements without reallocating. If
-    /// capacity is 0, the hash map will not allocate.
+    /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
+    /// (assuming uniformly distributed hashes). If `capacity` is 0, the call will not allocate,
+    /// and is equivalent to [`FlurryHashMap::new`].
     ///
-    /// Warning: hash_builder is normally randomly generated, and is designed to allow HashMaps
+    /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
     /// to be resistant to attacks that cause many collisions and very poor performance.
     /// Setting it manually using this function can expose a DoS attack vector.
     pub fn with_capacity_and_hasher(hash_builder: S, n: usize) -> Self {
