@@ -1,4 +1,4 @@
-use super::Table;
+use crate::raw::Table;
 use crossbeam::epoch::{Atomic, Guard, Shared};
 use parking_lot::Mutex;
 use std::borrow::Borrow;
@@ -82,7 +82,7 @@ impl<K, V> BinEntry<K, V> {
                 let mut table = unsafe { &*next_table };
 
                 loop {
-                    if table.bins.is_empty() {
+                    if table.is_empty() {
                         return Shared::null();
                     }
                     let bini = table.bini(hash);

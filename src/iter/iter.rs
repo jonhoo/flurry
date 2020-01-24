@@ -1,7 +1,6 @@
+use super::NodeIter;
 use crossbeam::epoch::Guard;
 use std::sync::atomic::Ordering;
-
-use crate::NodeIter;
 
 /// An iterator over a map's entries.
 ///

@@ -1,4 +1,5 @@
-use crate::{BinEntry, Node, Table};
+use crate::node::{BinEntry, Node};
+use crate::raw::Table;
 use crossbeam::epoch::{Guard, Shared};
 use std::sync::atomic::Ordering;
 
@@ -36,7 +37,7 @@ impl<'g, K, V> NodeIter<'g, K, V> {
             // safety: flurry guarantees that a table read under a guard is never dropped or moved
             // until after that guard is dropped.
             let table = unsafe { table.deref() };
-            (Some(table), table.bins.len())
+            (Some(table), table.len())
         };
 
         Self {
@@ -133,7 +134,7 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
             // safety: flurry does not drop or move until after guard drop
             if self.base_index >= self.base_limit
                 || self.table.is_none()
-                || self.table.as_ref().unwrap().bins.len() <= self.index
+                || self.table.as_ref().unwrap().len() <= self.index
             {
                 self.prev = None;
                 return None;
@@ -141,7 +142,7 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
 
             let t = self.table.expect("is_none in if above");
             let i = self.index;
-            let n = t.bins.len();
+            let n = t.len();
             let bin = t.bin(i, self.guard);
             if !bin.is_null() {
                 // safety: flurry does not drop or move until after guard drop
@@ -186,7 +187,7 @@ struct TableStack<'g, K, V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Table;
+    use crate::raw::Table;
     use crossbeam::epoch::{self, Atomic, Owned};
     use parking_lot::Mutex;
 
@@ -199,10 +200,7 @@ mod tests {
 
     #[test]
     fn iter_empty() {
-        let table = Owned::new(Table::<usize, usize> {
-            bins: vec![Atomic::null(); 16].into_boxed_slice(),
-        });
-
+        let table = Owned::new(Table::<usize, usize>::new(16));
         let guard = epoch::pin();
         let table = table.into_shared(&guard);
         let iter = NodeIter::new(table, &guard);
@@ -224,10 +222,7 @@ mod tests {
             lock: Mutex::new(()),
         }));
 
-        let table = Owned::new(Table {
-            bins: bins.into_boxed_slice(),
-        });
-
+        let table = Owned::new(Table::from(bins));
         let guard = epoch::pin();
         let table = table.into_shared(&guard);
         {
@@ -253,19 +248,13 @@ mod tests {
             next: Atomic::null(),
             lock: Mutex::new(()),
         }));
-        let mut deep_table = Owned::new(Table {
-            bins: deep_bins.into_boxed_slice(),
-        });
-
+        let mut deep_table = Owned::new(Table::from(deep_bins));
         // construct the forwarded-from table
         let mut bins = vec![Atomic::null(); 16];
         for bin in &mut bins[8..] {
             *bin = Atomic::new(BinEntry::Moved(&*deep_table as *const _));
         }
-        let table = Owned::new(Table::<usize, usize> {
-            bins: bins.into_boxed_slice(),
-        });
-
+        let table = Owned::new(Table::<usize, usize>::from(bins));
         let guard = epoch::pin();
         let table = table.into_shared(&guard);
         {
