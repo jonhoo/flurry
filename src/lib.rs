@@ -1251,9 +1251,30 @@ impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     }
 }
 
+impl<K, V> Clone for FlurryHashMap<K, V, RandomState> {
+    fn clone(&self) -> Self {
+        Self {
+            table: self.table.clone(),
+            next_table: self.next_table.clone(),
+            transfer_index: AtomicIsize::new(self.transfer_index.load(Ordering::SeqCst)),
+            count: AtomicUsize::new(self.count.load(Ordering::SeqCst)),
+            size_ctl: AtomicIsize::new(self.size_ctl.load(Ordering::SeqCst)),
+            build_hasher: RandomState::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Table<K, V> {
     bins: Box<[Atomic<BinEntry<K, V>>]>,
+}
+
+impl<K, V> Clone for Table<K, V> {
+    fn clone(&self) -> Self {
+        Self {
+           bins: self.bins.clone(),
+        }
+    }
 }
 
 impl<K, V> Table<K, V> {
