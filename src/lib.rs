@@ -424,7 +424,10 @@ where
         // next epoch after it is removed. since it wasn't removed, and the epoch was pinned, that
         // cannot be until after we drop our guard.
         let node = unsafe { node.deref() };
-        Some(node.as_node().expect("`BinEntry::find` should always return a Node"))
+        Some(
+            node.as_node()
+                .expect("`BinEntry::find` should always return a Node"),
+        )
     }
 
     /// Returns the value to which `key` is mapped.
