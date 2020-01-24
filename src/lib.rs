@@ -1446,6 +1446,23 @@ where
     }
 }
 
+impl<K, V> Clone for FlurryHashMap<K, V, RandomState>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send + Clone,
+{
+    fn clone(&self) -> Self {
+        let cloned_map = FlurryHashMap::with_capacity(self.count.load(Ordering::SeqCst));
+        {
+            let guard = epoch::pin();
+            for (k, v) in self.iter(&guard) {
+                cloned_map.put(k.clone(), v.clone(), false, &epoch::pin());
+            }
+        }
+        cloned_map
+    }
+}
+
 #[derive(Debug)]
 struct Table<K, V> {
     bins: Box<[Atomic<BinEntry<K, V>>]>,
