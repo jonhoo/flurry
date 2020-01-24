@@ -218,12 +218,14 @@ mod map;
 mod map_ref;
 mod node;
 mod raw;
+mod set;
 
 /// Iterator types.
 pub mod iter;
 
 pub use map::HashMap;
 pub use map_ref::HashMapRef;
+pub use set::FlurryHashSet;
 
 /// Default hasher for [`HashMap`].
 pub type DefaultHashBuilder = ahash::RandomState;
