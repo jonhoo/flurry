@@ -1,0 +1,15 @@
+# Hold ourselves to a high bar
+coverage:
+  range: 85..100
+  round: down
+  precision: 2
+
+# Tests and Java files aren't important for coverage
+ignore:
+  - "tests"
+  - "jsr166"
+
+# Make less noisy comments
+comment:
+  layout: "files"
+  require_changes: yes
