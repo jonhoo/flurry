@@ -299,55 +299,50 @@ where
 {
     /// Creates a new, empty map with the default initial table size (16).
     pub fn new() -> Self {
-        Self {
-            table: Atomic::null(),
-            next_table: Atomic::null(),
-            transfer_index: AtomicIsize::new(0),
-            count: AtomicUsize::new(0),
-            size_ctl: AtomicIsize::new(0),
-            build_hasher: RandomState::new(),
-        }
+        Self::with_hasher(RandomState::new())
     }
 
     /// Creates a new, empty map with an initial table size accommodating the specified number of
     /// elements without the need to dynamically resize.
     pub fn with_capacity(n: usize) -> Self {
-        if n == 0 {
-            return Self::new();
-        }
-
-        let mut m = Self::new();
-        let size = (1.0 + (n as f64) / LOAD_FACTOR) as usize;
-        // NOTE: tableSizeFor in Java
-        let cap = std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two());
-        m.size_ctl = AtomicIsize::new(cap as isize);
-        m
+        Self::with_capacity_and_hasher(RandomState::new(), n)
     }
 }
 
 impl<K, V, S: BuildHasher> FlurryHashMap<K, V, S> {
-    /// Creates a new, empty map with the default initial table size (16).
-    /// It uses the given hasher, rather than the default `RandomState`.
-    pub fn new_with_hasher(hasher: S) -> Self {
+    /// Creates an empty HashMap which will use the given hash builder to hash keys.
+    ///
+    /// The created map has the default initial capacity.
+    ///
+    /// Warning: hash_builder is normally randomly generated, and is designed to
+    /// allow HashMaps to be resistant to attacks that cause many collisions and
+    /// very poor performance. Setting it manually using this
+    /// function can expose a DoS attack vector.
+    pub fn with_hasher(hash_builder: S) -> Self {
         Self {
             table: Atomic::null(),
             next_table: Atomic::null(),
             transfer_index: AtomicIsize::new(0),
             count: AtomicUsize::new(0),
             size_ctl: AtomicIsize::new(0),
-            build_hasher: hasher,
+            build_hasher: hash_builder,
         }
     }
 
-    /// Creates a new, empty map with an initial table size accommodating the specified number of
-    /// elements without the need to dynamically resize.
-    /// It uses the given hasher, rather than the default `RandomState`.
-    pub fn with_hasher_and_capacity(hasher: S, n: usize) -> Self {
+    /// Creates an empty HashMap with the specified capacity, using hash_builder to hash the keys.
+    ///
+    /// The hash map will be able to hold at least capacity elements without reallocating. If
+    /// capacity is 0, the hash map will not allocate.
+    ///
+    /// Warning: hash_builder is normally randomly generated, and is designed to allow HashMaps
+    /// to be resistant to attacks that cause many collisions and very poor performance.
+    /// Setting it manually using this function can expose a DoS attack vector.
+    pub fn with_capacity_and_hasher(hash_builder: S, n: usize) -> Self {
         if n == 0 {
-            return Self::new_with_hasher(hasher);
+            return Self::with_hasher(hash_builder);
         }
 
-        let mut m = Self::new_with_hasher(hasher);
+        let mut m = Self::with_hasher(hash_builder);
         let size = (1.0 + (n as f64) / LOAD_FACTOR) as usize;
         // NOTE: tableSizeFor in Java
         let cap = std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two());

@@ -82,7 +82,7 @@ fn insert_in_same_bucket_and_get_distinct_entries() {
         }
     }
 
-    let map = FlurryHashMap::<usize, usize, _>::new_with_hasher(OneBucketState);
+    let map = FlurryHashMap::<usize, usize, _>::with_hasher(OneBucketState);
 
     map.insert(42, 0, &epoch::pin());
     map.insert(50, 20, &epoch::pin());
