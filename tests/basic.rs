@@ -77,7 +77,9 @@ fn insert_in_same_bucket_and_get_distinct_entries() {
     }
     impl Hasher for OneBucketHasher {
         fn write(&mut self, _bytes: &[u8]) {}
-        fn finish(&self) -> u64 { 0 }
+        fn finish(&self) -> u64 {
+            0
+        }
     }
 
     let map = FlurryHashMap::<usize, usize, _>::new_with_hasher(OneBucketState);
