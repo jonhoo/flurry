@@ -1,9 +1,7 @@
 use flurry::*;
 use std::iter::FromIterator;
 
-const ITER: [(usize, &'static str); 5] = [
-    (1, "A"), (2, "B"), (3, "C"), (4, "D"), (5, "E")
-];
+const ITER: [(usize, &'static str); 5] = [(1, "A"), (2, "B"), (3, "C"), (4, "D"), (5, "E")];
 
 #[test]
 fn test_from_iter() {
@@ -16,7 +14,7 @@ fn test_from_iter() {
     let mut snd: Vec<_> = map2.iter(&guard).collect();
     fst.sort();
     snd.sort();
- 
+
     assert_eq!(fst, snd);
 }
 
