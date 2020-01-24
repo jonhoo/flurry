@@ -198,6 +198,7 @@ mod node;
 use node::*;
 
 use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
+use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
@@ -331,7 +332,7 @@ where
     V: Sync + Send,
     S: BuildHasher,
 {
-    fn hash(&self, key: &K) -> u64 {
+    fn hash<Q: ?Sized + Hash>(&self, key: &Q) -> u64 {
         use std::hash::Hasher;
         let mut h = self.build_hasher.build_hasher();
         key.hash(&mut h);
@@ -339,7 +340,14 @@ where
     }
 
     /// Tests if `key` is a key in this table.
-    pub fn contains_key(&self, key: &K) -> bool {
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
         let guard = crossbeam::epoch::pin();
         self.get(key, &guard).is_some()
     }
@@ -349,8 +357,15 @@ where
     /// Returns `None` if this map contains no mapping for the key.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
     // TODO: implement a guard API of our own
-    pub fn get<'g>(&'g self, key: &K, guard: &'g Guard) -> Option<&'g V> {
+    pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
         let h = self.hash(key);
         let table = self.table.load(Ordering::SeqCst, guard);
         if table.is_null() {
@@ -404,7 +419,15 @@ where
     /// Obtains the value to which `key` is mapped and passes it through the closure `then`.
     ///
     /// Returns `None` if this map contains no mapping for `key`.
-    pub fn get_and<R, F: FnOnce(&V) -> R>(&self, key: &K, then: F) -> Option<R> {
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    pub fn get_and<Q, R, F>(&self, key: &Q, then: F) -> Option<R>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+        F: FnOnce(&V) -> R,
+    {
         let guard = &crossbeam::epoch::pin();
         self.get(key, guard).map(then)
     }
@@ -1067,7 +1090,14 @@ where
     /// Removes the key (and its corresponding value) from this map.
     /// This method does nothing if the key is not in the map.
     /// Returns the previous value associated with the given key.
-    pub fn remove<'g>(&'g self, key: &K, guard: &'g Guard) -> Option<&'g V> {
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    pub fn remove<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
         let h = self.hash(key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
@@ -1142,7 +1172,7 @@ where
                         // our guard, e is also valid if it was obtained from a next pointer.
                         let n = unsafe { e.deref() }.as_node().unwrap();
                         let next = n.next.load(Ordering::SeqCst, guard);
-                        if n.hash == h && &n.key == key {
+                        if n.hash == h && n.key.borrow() == key {
                             let ev = n.value.load(Ordering::SeqCst, guard);
                             old_val = Some(ev);
 
