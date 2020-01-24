@@ -325,7 +325,7 @@ where
     }
 }
 
-impl<K, V, S> FlurryHashMap<K, V, S> {
+impl<K, V, S: BuildHasher> FlurryHashMap<K, V, S> {
     /// Creates a new, empty map with the default initial table size (16).
     /// It uses the given hasher, rather than the default `RandomState`.
     pub fn new_with_hasher(hasher: S) -> Self {
