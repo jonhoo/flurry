@@ -5,7 +5,7 @@ const ITER: [(usize, &'static str); 5] = [(1, "A"), (2, "B"), (3, "C"), (4, "D")
 
 #[test]
 fn test_from_iter() {
-    let guard = unsafe { crossbeam::epoch::unprotected() };
+    let guard = unsafe { crossbeam_epoch::unprotected() };
     let map1 = from_iter_contron();
     let map2 = HashMap::from_iter(ITER.iter());
 
@@ -19,7 +19,7 @@ fn test_from_iter() {
 }
 
 fn from_iter_contron() -> HashMap<usize, &'static str> {
-    let guard = unsafe { crossbeam::epoch::unprotected() };
+    let guard = unsafe { crossbeam_epoch::unprotected() };
     let map = HashMap::with_capacity(5);
     assert!(map.is_empty());
 

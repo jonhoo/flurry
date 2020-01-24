@@ -1,7 +1,7 @@
 use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
-use crossbeam::epoch::{self, Atomic, Guard, Owned, Shared};
+use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
 use std::borrow::Borrow;
 use std::collections::hash_map::RandomState;
 use std::fmt::{self, Debug, Formatter};
@@ -169,7 +169,7 @@ where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        let guard = crossbeam::epoch::pin();
+        let guard = crossbeam_epoch::pin();
         self.get(key, &guard).is_some()
     }
 
@@ -261,7 +261,7 @@ where
         Q: ?Sized + Hash + Eq,
         F: FnOnce(&V) -> R,
     {
-        let guard = &crossbeam::epoch::pin();
+        let guard = &crossbeam_epoch::pin();
         self.get(key, guard).map(then)
     }
 
@@ -1179,7 +1179,7 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
         // NOTE: we _could_ relax the bounds in all the methods that return `&'g ...` to not also
         // bound `&self` by `'g`, but if we did that, we would need to use a regular `epoch::Guard`
         // here rather than an unprotected one.
-        let guard = unsafe { crossbeam::epoch::unprotected() };
+        let guard = unsafe { crossbeam_epoch::unprotected() };
 
         assert!(self.next_table.load(Ordering::SeqCst, guard).is_null());
         let table = self.table.swap(Shared::null(), Ordering::SeqCst, guard);
@@ -1206,7 +1206,7 @@ where
     // NOTE: `hashbrown::HashMap::extend` provides some good guidance on how
     // to choose the presizing value based on the iterator lower bound.
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
-        let guard = crossbeam::epoch::pin();
+        let guard = crossbeam_epoch::pin();
         (*self).put_all(iter.into_iter(), &guard);
     }
 }
@@ -1234,7 +1234,7 @@ where
         if let Some((key, value)) = iter.next() {
             // safety: we own `map`, so it's not concurrently accessed by
             // anyone else at this point.
-            let guard = unsafe { crossbeam::epoch::unprotected() };
+            let guard = unsafe { crossbeam_epoch::unprotected() };
 
             let (lower, _) = iter.size_hint();
             let map = Self::with_capacity(lower.saturating_add(1));
@@ -1307,42 +1307,42 @@ fn num_cpus() -> usize {
 /// (and so pass).
 ///
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.insert((), (), &guard);
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.get(&(), &guard);
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.remove(&(), &guard);
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.iter(&guard).next();
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.keys(&guard).next();
 /// drop(map);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.values(&guard).next();
 /// drop(map);
@@ -1352,42 +1352,42 @@ fn num_cpus() -> usize {
 /// # No references outlive the guard.
 ///
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.insert((), (), &guard);
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.get(&(), &guard);
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.remove(&(), &guard);
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.iter(&guard).next();
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.keys(&guard).next();
 /// drop(guard);
 /// drop(r);
 /// ```
 /// ```compile_fail
-/// let guard = crossbeam::epoch::pin();
+/// let guard = crossbeam_epoch::pin();
 /// let map = super::HashMap::default();
 /// let r = map.values(&guard).next();
 /// drop(guard);

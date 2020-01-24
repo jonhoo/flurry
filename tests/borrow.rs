@@ -1,4 +1,4 @@
-use crossbeam::epoch;
+use crossbeam_epoch as epoch;
 use flurry::*;
 use std::sync::Arc;
 

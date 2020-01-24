@@ -1,5 +1,5 @@
 use crate::node::*;
-use crossbeam::epoch::{Atomic, Guard, Owned, Shared};
+use crossbeam_epoch::{Atomic, Guard, Owned, Shared};
 use std::fmt::Debug;
 use std::sync::atomic::Ordering;
 
@@ -33,7 +33,7 @@ impl<K, V> Table<K, V> {
         // safety: we have &mut self _and_ all references we have returned are bound to the
         // lifetime of their borrow of self, so there cannot be any outstanding references to
         // anything in the map.
-        let guard = unsafe { crossbeam::epoch::unprotected() };
+        let guard = unsafe { crossbeam_epoch::unprotected() };
 
         for bin in Vec::from(std::mem::replace(&mut self.bins, vec![].into_boxed_slice())) {
             if bin.load(Ordering::SeqCst, guard).is_null() {
@@ -81,7 +81,7 @@ impl<K, V> Drop for Table<K, V> {
         // safety: we have &mut self _and_ all references we have returned are bound to the
         // lifetime of their borrow of self, so there cannot be any outstanding references to
         // anything in the map.
-        let guard = unsafe { crossbeam::epoch::unprotected() };
+        let guard = unsafe { crossbeam_epoch::unprotected() };
 
         for bin in &self.bins[..] {
             let bin = bin.swap(Shared::null(), Ordering::SeqCst, guard);
@@ -121,13 +121,13 @@ impl<K, V> Table<K, V> {
         guard: &'g Guard,
     ) -> Result<
         Shared<'g, BinEntry<K, V>>,
-        crossbeam::epoch::CompareAndSetError<'g, BinEntry<K, V>, Owned<BinEntry<K, V>>>,
+        crossbeam_epoch::CompareAndSetError<'g, BinEntry<K, V>, Owned<BinEntry<K, V>>>,
     > {
         self.bins[i].compare_and_set(current, new, Ordering::AcqRel, guard)
     }
 
     #[inline]
-    pub(crate) fn store_bin<P: crossbeam::epoch::Pointer<BinEntry<K, V>>>(&self, i: usize, new: P) {
+    pub(crate) fn store_bin<P: crossbeam_epoch::Pointer<BinEntry<K, V>>>(&self, i: usize, new: P) {
         self.bins[i].store(new, Ordering::Release)
     }
 }

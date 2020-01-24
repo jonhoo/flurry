@@ -1,5 +1,5 @@
 use super::NodeIter;
-use crossbeam::epoch::Guard;
+use crossbeam_epoch::Guard;
 use std::sync::atomic::Ordering;
 
 /// An iterator over a map's entries.
@@ -61,7 +61,7 @@ impl<'g, K, V> Iterator for Values<'g, K, V> {
 #[cfg(test)]
 mod tests {
     use crate::HashMap;
-    use crossbeam::epoch;
+    use crossbeam_epoch as epoch;
     use std::collections::HashSet;
     use std::iter::FromIterator;
 

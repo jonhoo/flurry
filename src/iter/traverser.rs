@@ -1,6 +1,6 @@
 use crate::node::{BinEntry, Node};
 use crate::raw::Table;
-use crossbeam::epoch::{Guard, Shared};
+use crossbeam_epoch::{Guard, Shared};
 use std::sync::atomic::Ordering;
 
 #[derive(Debug)]
@@ -188,7 +188,7 @@ struct TableStack<'g, K, V> {
 mod tests {
     use super::*;
     use crate::raw::Table;
-    use crossbeam::epoch::{self, Atomic, Owned};
+    use crossbeam_epoch::{self as epoch, Atomic, Owned};
     use parking_lot::Mutex;
 
     #[test]
