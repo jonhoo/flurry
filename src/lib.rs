@@ -225,7 +225,7 @@ pub mod iter;
 
 pub use map::HashMap;
 pub use map_ref::HashMapRef;
-pub use set::FlurryHashSet;
+pub use set::HashSet;
 
 /// Default hasher for [`HashMap`].
 pub type DefaultHashBuilder = ahash::RandomState;

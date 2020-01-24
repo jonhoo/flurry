@@ -1,14 +1,46 @@
-//! A concurrent hash set backed by HashMap.
+//! A concurrent hash set.
+//!
+//! See `HashSet` for details.
 
+use std::borrow::Borrow;
 use std::hash::Hash;
 
 use crate::epoch::{self, Guard};
 use crate::iter::Keys;
 use crate::HashMap;
 
-/// A concurrent hash set.
+/// A concurrent hash set implemented as a `FlurryHashMap` where the value is `()`.
+///
+/// # Examples
+///
+/// ```
+/// use flurry::HashSet;
+///
+/// // Initialize a new hash set.
+/// let books = HashSet::new();
+///
+/// // Add some books
+/// books.insert("Fight Club");
+/// books.insert("Three Men In A Raft");
+/// books.insert("The Book of Dust");
+/// books.insert("The Dry");
+///
+/// // Check for a specific one.
+/// if !books.contains(&"The Drunken Botanist") {
+///     println!("We don't have The Drunken Botanist.");
+/// }
+///
+/// // Remove a book.
+/// books.remove(&"Three Men In A Raft");
+///
+/// // Iterate over everything.
+/// let guard = flurry::epoch::pin();
+/// for book in books.iter(&guard) {
+///     println!("{}", book);
+/// }
+/// ```
 #[derive(Debug)]
-pub struct FlurryHashSet<T: 'static, S = crate::DefaultHashBuilder>
+pub struct HashSet<T: 'static, S = crate::DefaultHashBuilder>
 where
     T: Sync + Send + Clone + Hash + Eq,
     S: std::hash::BuildHasher,
@@ -16,7 +48,7 @@ where
     map: HashMap<T, (), S>,
 }
 
-impl<T> FlurryHashSet<T, crate::DefaultHashBuilder>
+impl<T> HashSet<T, crate::DefaultHashBuilder>
 where
     T: Sync + Send + Clone + Hash + Eq,
 {
@@ -25,9 +57,9 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::FlurryHashSet;
+    /// use flurry::HashSet;
     ///
-    /// let set: FlurryHashSet<i32> = FlurryHashSet::new();
+    /// let set: HashSet<i32> = HashSet::new();
     /// ```
     pub fn new() -> Self {
         Self {
@@ -44,9 +76,9 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::FlurryHashSet;
+    /// use flurry::HashSet;
     ///
-    /// let set = FlurryHashSet::new();
+    /// let set = HashSet::new();
     ///
     /// assert_eq!(set.insert(2), true);
     /// assert_eq!(set.insert(2), false);
@@ -60,23 +92,33 @@ where
 
     /// Returns true if the set contains a value.
     ///
+    /// The value may be any borrowed form of the set's type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the type.
+    ///
     /// # Examples
     ///
     /// ```
-    /// use flurry::FlurryHashSet;
+    /// use flurry::HashSet;
     ///
-    /// let set = FlurryHashSet::new();
+    /// let set = HashSet::new();
     /// set.insert(2);
     ///
     /// assert!(set.contains(&2));
     /// assert!(!set.contains(&1));
     /// ```
-    pub fn contains(&self, value: &T) -> bool {
+    pub fn contains<Q>(&self, value: &Q) -> bool
+    where
+        T: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
         let guard = epoch::pin();
         self.map.contains_key(value, &guard)
     }
 
     /// Removes a value from the set.
+    ///
+    /// The value may be any borrowed form of the set's type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the type.
     ///
     /// If the set did not have this value present, false is returned.
     ///
@@ -85,16 +127,20 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::FlurryHashSet;
+    /// use flurry::HashSet;
     ///
-    /// let set = FlurryHashSet::new();
+    /// let set = HashSet::new();
     /// set.insert(2);
     ///
     /// assert_eq!(set.remove(&2), true);
     /// assert!(!set.contains(&2));
     /// assert_eq!(set.remove(&2), false);
     /// ```
-    pub fn remove(&self, value: &T) -> bool {
+    pub fn remove<Q>(&self, value: &Q) -> bool
+    where
+        T: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
         let guard = epoch::pin();
         let removed = self.map.remove(value, &guard);
         removed.is_some()
@@ -107,9 +153,9 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::FlurryHashSet;
+    /// use flurry::HashSet;
     ///
-    /// let set = FlurryHashSet::new();
+    /// let set = HashSet::new();
     /// set.insert(1);
     /// set.insert(2);
     ///
