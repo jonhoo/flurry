@@ -1253,6 +1253,28 @@ where
     }
 }
 
+impl<K, V, S> PartialEq for FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send + PartialEq,
+    S: BuildHasher,
+{
+    fn eq(&self, other: &Self) -> bool {
+        let guard = epoch::pin();
+
+        self.iter(&guard)
+            .all(|(key, value)| other.get(key, &guard).map_or(false, |v| *value == *v))
+    }
+}
+
+impl<K, V, S> Eq for FlurryHashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send + PartialEq,
+    S: BuildHasher,
+{
+}
+
 impl<K, V, S> Drop for FlurryHashMap<K, V, S> {
     fn drop(&mut self) {
         // safety: we have &mut self _and_ all references we have returned are bound to the
