@@ -1364,32 +1364,98 @@ impl<K, V> Table<K, V> {
 /// supposed to compile without pulling in `compiletest` as a dependency. See rust-lang/rust#12335.
 /// But it _is_ possible to write `compile_test` tests as doctests, sooooo:
 ///
-/// No references outlive the map:
+/// # No references outlive the map.
+///
+/// Note that these have to be _separate_ tests, otherwise you could have, say, `get` break the
+/// contract, but `insert` continue to uphold it, and then the test would still fail to compile
+/// (and so pass).
 ///
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
 /// let map = super::FlurryHashMap::default();
-/// let ref1 = map.insert((), (), &guard);
-/// let ref2 = map.get(&(), &guard);
-/// let ref3 = map.remove(&(), &guard);
+/// let r = map.insert((), (), &guard);
 /// drop(map);
-/// drop(ref1);
-/// drop(ref2);
-/// drop(ref3);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.get(&(), &guard);
+/// drop(map);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.remove(&(), &guard);
+/// drop(map);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.iter(&guard).next();
+/// drop(map);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.keys(&guard).next();
+/// drop(map);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.values(&guard).next();
+/// drop(map);
+/// drop(r);
 /// ```
 ///
-/// No references outlive the guard:
+/// # No references outlive the guard.
 ///
 /// ```compile_fail
 /// let guard = crossbeam::epoch::pin();
 /// let map = super::FlurryHashMap::default();
-/// let ref1 = map.insert((), (), &guard);
-/// let ref2 = map.get(&(), &guard);
-/// let ref3 = map.remove(&(), &guard);
+/// let r = map.insert((), (), &guard);
 /// drop(guard);
-/// drop(ref1);
-/// drop(ref2);
-/// drop(ref3);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.get(&(), &guard);
+/// drop(guard);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.remove(&(), &guard);
+/// drop(guard);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.iter(&guard).next();
+/// drop(guard);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.keys(&guard).next();
+/// drop(guard);
+/// drop(r);
+/// ```
+/// ```compile_fail
+/// let guard = crossbeam::epoch::pin();
+/// let map = super::FlurryHashMap::default();
+/// let r = map.values(&guard).next();
+/// drop(guard);
+/// drop(r);
 /// ```
 #[allow(dead_code)]
 struct CompileFailTests;
