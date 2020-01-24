@@ -1272,7 +1272,7 @@ struct Table<K, V> {
 impl<K, V> Clone for Table<K, V> {
     fn clone(&self) -> Self {
         Self {
-           bins: self.bins.clone(),
+            bins: self.bins.clone(),
         }
     }
 }
