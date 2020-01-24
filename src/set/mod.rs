@@ -20,6 +20,14 @@ where
     T: Sync + Send + Clone + Hash + Eq,
 {
     /// Creates a new, empty set with the default initial table size (16).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::FlurryHashSet;
+    ///
+    /// let set: FlurryHashSet<i32> = FlurryHashSet::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             map: HashMap::<T, ()>::new(),
@@ -31,6 +39,18 @@ where
     /// If the set did not have this value present, true is returned.
     ///
     /// If the set did have this value present, false is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::FlurryHashSet;
+    ///
+    /// let set = FlurryHashSet::new();
+    ///
+    /// assert_eq!(set.insert(2), true);
+    /// assert_eq!(set.insert(2), false);
+    /// assert!(set.contains(&2));
+    /// ```
     pub fn insert(&self, value: T) -> bool {
         let guard = epoch::pin();
         let old = self.map.insert(value, (), &guard);
@@ -38,6 +58,18 @@ where
     }
 
     /// Returns true if the set contains a value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::FlurryHashSet;
+    ///
+    /// let set = FlurryHashSet::new();
+    /// set.insert(2);
+    ///
+    /// assert!(set.contains(&2));
+    /// assert!(!set.contains(&1));
+    /// ```
     pub fn contains(&self, value: &T) -> bool {
         let guard = epoch::pin();
         self.map.contains_key(value, &guard)
