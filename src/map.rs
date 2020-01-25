@@ -532,9 +532,17 @@ where
         }
     }
 
-    /// Maps `key` to `value` in this table.
-    ///
-    /// The value can be retrieved by calling [`get`] with a key that is equal to the original key.
+    /// If the value for the specified `key` is present, attempts to
+    /// compute a new mapping given the key and its current mapped value.
+    /// 
+    /// The new mapping is computed by the `remapping_function`, which may
+    /// return `None` to signalize that the mapping should be removed.
+    /// The entire method invocation is performed atomically.
+    /// The supplied function is invoked exactly once per invocation of
+    /// this method if the key is present, else not at all.  Some
+    /// attempted update operations on this map by other threads may be
+    /// blocked while computation is in progress, so the computation
+    /// should be short and simple.
     pub fn compute_if_present<'g, Q, F>(
         &'g self,
         key: &Q,
@@ -549,14 +557,6 @@ where
         let h = self.hash(&key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
-
-        // let mut node = Owned::new(BinEntry::Node(Node {
-        //     key,
-        //     value: Atomic::null(),
-        //     hash: h,
-        //     next: Atomic::null(),
-        //     lock: parking_lot::Mutex::new(()),
-        // }));
 
         loop {
             // safety: see argument below for !is_null case
@@ -590,7 +590,7 @@ where
             let bin = t.bin(bini, guard);
             if bin.is_null() {
                 // fast path -- bin is empty so key is not present
-                return None; // X?? break
+                return None;
             }
 
             // slow path -- bin is non-empty
@@ -651,7 +651,6 @@ where
                             let current_value = unsafe { current_value.deref() };
 
                             let new_value = remapping_function(&n.key, current_value);
-                            //https://youtu.be/yQFWmGaFBjk?t=10800
                             if let Some(value) = new_value {
                                 // safety: we own value and have never shared it
                                 let now_garbage = n.value.swap(
