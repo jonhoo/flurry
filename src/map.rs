@@ -940,58 +940,107 @@ where
 
     /// Tries to presize table to accommodate the given number of elements.
     fn try_presize<'g>(&self, size: usize, guard: &'g Guard) {
-        let new_capacity = if size >= MAXIMUM_CAPACITY / 2 {
+        let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
             MAXIMUM_CAPACITY
         } else {
+            // round the requested_capacity to the next power of to from 1.5 * size + 1
+            // TODO: find out if this is neccessary
             let size = size + (size >> 1) + 1;
 
             std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
-        };
-
-        let c = new_capacity as isize; // TODO
+        } as isize;
 
         loop {
-            let mut sc = self.size_ctl.load(Ordering::SeqCst);
-            if sc < 0 {
+            let size_ctl = self.size_ctl.load(Ordering::SeqCst);
+            if size_ctl < 0 {
                 break;
             }
 
-            let mut table = self.table.load(Ordering::SeqCst, &guard);
+            let table = self.table.load(Ordering::SeqCst, &guard);
 
-            let n = match table.is_null() {
+            // The current capacity == the number of bins in the current table
+            let current_capactity = match table.is_null() {
                 true => 0,
                 false => unsafe { table.deref() }.len(),
             };
 
-            if n == 0 {
-                let n = sc.max(c) as usize;
+            if current_capactity == 0 {
+                // the table has not yet been initialized, so we can just create it
+                // with as many bins as were requested
 
-                if self.size_ctl.compare_and_swap(sc, -1, Ordering::SeqCst) == sc {
-                    if self.table.load(Ordering::SeqCst, guard) == table {
-                        table = Owned::new(Table::new(n)).into_shared(guard);
-                        let old_table = self.table.swap(table, Ordering::SeqCst, &guard);
+                // since the map is uninitialized, size_ctl describes the initial capacity
+                let initial_capacity = size_ctl;
 
-                        assert!(old_table.is_null());
-                        // TODO
-                        // if !old_table.is_null() {
-                        //      unsafe { guard.defer_destroy(old_table) }
-                        // }
+                // the new capacity is either the requested capacity or the initial capacity (size_ctl)
+                let new_capacity = requested_capacity.max(initial_capacity) as usize;
 
-                        sc = n as isize - (n >> 2) as isize;
-                    }
-
-                    self.size_ctl.store(sc, Ordering::SeqCst);
+                // try to aquire the initialization "lock" to indicate that we are initializing the table.
+                if self
+                    .size_ctl
+                    .compare_and_swap(size_ctl, -1, Ordering::SeqCst)
+                    != size_ctl
+                {
+                    // somebody else is already initializing the table (or has already finished).
+                    continue;
                 }
-            } else if c <= sc || n >= MAXIMUM_CAPACITY {
+
+                // we got the initialization `lock`; Make sure the table is still unitialized
+                // (or is the same table with 0 bins we read earlier, althought that should not be the case)
+                if self.table.load(Ordering::SeqCst, guard) != table {
+                    // NOTE: this could probably be `!self.table.load(...).is_null()`
+                    // if we decide that tables can never have 0 bins.
+
+                    // the table is already initialized; Write the `size_ctl` value it had back to it's
+                    // `size_ctl` field to release the initialization "lock"
+                    self.size_ctl.store(size_ctl, Ordering::SeqCst);
+                    continue;
+                }
+
+                // create a table with `new_capacity` empty bins
+                let new_table = Owned::new(Table::new(new_capacity)).into_shared(guard);
+
+                // store the new table to `self.table`
+                let old_table = self.table.swap(new_table, Ordering::SeqCst, &guard);
+
+                // old_table should be `null`, since we don't ever initialize a table with 0 bins
+                // and this branch only happens if table has not yet been initialized or it's length is 0.
+                assert!(old_table.is_null());
+
+                // TODO: if we allow tables with 0 bins. `defer_destroy` `old_table` if it's not `null`:
+                // if !old_table.is_null() {
+                //     // TODO: safety argument, for why this is okay
+                //     unsafe { guard.defer_destroy(old_table) }
+                // }
+
+                // resize the table once it's load factor reaches 75%
+                let new_load_to_resize_at = new_capacity as isize - (new_capacity >> 2) as isize;
+
+                // store the next load at which the table should resize to it's size_ctl field
+                // and thus release the initialization "lock"
+                self.size_ctl.store(new_load_to_resize_at, Ordering::SeqCst);
+            } else if requested_capacity <= size_ctl || current_capactity >= MAXIMUM_CAPACITY {
+                // Either the `requested_capacity` was smaller than or equal to the load we would resize at (size_ctl)
+                // and we don't need to resize, since our load factor will still be acceptable if we don't
+
+                // Or it was larger than the `MAXIMUM_CAPACITY` of the map and we refuse
+                // to resize to an invalid capacity
                 break;
             } else if table == self.table.load(Ordering::SeqCst, &guard) {
-                let rs: isize = Self::resize_stamp(n) << RESIZE_STAMP_SHIFT;
-                // TODO: `rs` is postive even though `resize_stamp` says:
+                // The table is initialized, try to resize it to the requested capacity
+
+                let rs: isize = Self::resize_stamp(current_capactity) << RESIZE_STAMP_SHIFT;
+                // TODO: see #29: `rs` is postive even though `resize_stamp` says:
                 // "Must be negative when shifted left by RESIZE_STAMP_SHIFT"
                 // and since our size_control field needs to be negative
                 // to indicate a resize this needs to be addressed
 
-                if self.size_ctl.compare_and_swap(sc, rs + 2, Ordering::SeqCst) == sc {
+                if self
+                    .size_ctl
+                    .compare_and_swap(size_ctl, rs + 2, Ordering::SeqCst)
+                    == size_ctl
+                {
+                    // someone else already started to resize the table
+                    // TODO: can we `self.help_transfer`?
                     self.transfer(table, Shared::null(), &guard);
                 }
             }
