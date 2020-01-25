@@ -246,6 +246,46 @@ fn concurrent_remove() {
 }
 
 #[test]
+fn concurrent_compute_if_present() {
+    let map = Arc::new(HashMap::<usize, usize>::new());
+
+    {
+        let guard = epoch::pin();
+        for i in 0..64 {
+            map.insert(i, i, &guard);
+        }
+    }
+
+    let map1 = map.clone();
+    let t1 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        for i in 0..64 {
+            if let Some(v) = map1.compute_if_present(&i, |_, _| None, &guard) {
+                assert_eq!(v, &i);
+            }
+        }
+    });
+    let map2 = map.clone();
+    let t2 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        for i in 0..64 {
+            if let Some(v) = map2.compute_if_present(&i, |_, _| None, &guard) {
+                assert_eq!(v, &i);
+            }
+        }
+    });
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    // after joining the threads, the map should be empty
+    let guard = epoch::pin();
+    for i in 0..64 {
+        assert!(map.get(&i, &guard).is_none());
+    }
+}
+
+#[test]
 fn current_kv_dropped() {
     let dropped1 = Arc::new(0);
     let dropped2 = Arc::new(0);
