@@ -1,5 +1,6 @@
 use super::NodeIter;
 use crossbeam_epoch::Guard;
+use std::hash::{BuildHasher, Hash};
 use std::sync::atomic::Ordering;
 
 /// An iterator over a map's entries.
@@ -58,6 +59,70 @@ impl<'g, K, V> Iterator for Values<'g, K, V> {
     }
 }
 
+/// A draining iterator over a map's entries.
+#[derive(Debug)]
+pub struct Drain<'g, K, V, S>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send,
+    S: BuildHasher,
+{
+    pub(crate) node_iter: NodeIter<'g, K, V>,
+    pub(crate) map: &'g crate::HashMap<K, V, S>,
+    pub(crate) guard: &'g Guard,
+}
+
+impl<'g, K, V, S> Iterator for Drain<'g, K, V, S>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send,
+    S: BuildHasher,
+{
+    type Item = (K, V);
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let node = self.node_iter.next()?;
+
+            if let Some(value) = self.map.remove(&node.key, self.guard) {
+                return Some((node.key.clone(), unsafe {
+                    std::ptr::read(value as *const V)
+                }));
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+/// An owned iterator over a map's entries.
+pub struct IntoIter<'g, K, V, S>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send,
+    S: BuildHasher,
+{
+    pub(crate) node_iter: NodeIter<'g, K, V>,
+    pub(crate) map: crate::HashMap<K, V, S>,
+    pub(crate) guard: &'g Guard,
+}
+
+impl<'g, K, V, S> Iterator for IntoIter<'g, K, V, S>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send,
+    S: BuildHasher,
+{
+    type Item = (K, V);
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.node_iter.next()?;
+
+        let key = node.key.clone();
+        let value = node.value.load(Ordering::SeqCst, self.guard);
+        let value = unsafe { std::ptr::read(value.as_ref().unwrap() as *const V) };
+
+        return Some((key, value));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::HashMap;
@@ -108,5 +173,41 @@ mod tests {
             map.values(&guard).collect::<HashSet<&usize>>(),
             HashSet::from_iter(vec![&42, &84])
         );
+    }
+
+    #[test]
+    fn drain() {
+        let map: HashMap<usize, usize> = HashMap::new();
+        let mut expected: HashSet<(usize, usize)> = HashSet::new();
+        let mut guard = epoch::pin();
+        for i in 0..=100 {
+            let key = i;
+            let value = 100 - i;
+            map.insert(key, value, &guard);
+            expected.insert((key, value));
+        }
+        guard.repin();
+
+        let result: HashSet<(usize, usize)> = map.drain(&guard).collect();
+        assert_eq!(result, expected);
+
+        assert_eq!(map.len(), 0);
+    }
+
+    #[test]
+    fn into_iter() {
+        let map: HashMap<usize, usize> = HashMap::new();
+        let mut expected: HashSet<(usize, usize)> = HashSet::new();
+        let mut guard = epoch::pin();
+        for i in 0..=100 {
+            let key = i;
+            let value = 100 - i;
+            map.insert(key, value, &guard);
+            expected.insert((key, value));
+        }
+        guard.repin();
+
+        let result: HashSet<(usize, usize)> = map.into_iter().collect();
+        assert_eq!(result, expected);
     }
 }

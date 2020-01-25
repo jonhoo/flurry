@@ -1,4 +1,4 @@
 mod iter;
 mod traverser;
-pub use iter::{Iter, Keys, Values};
+pub use iter::{Drain, IntoIter, Iter, Keys, Values};
 pub(crate) use traverser::NodeIter;

@@ -1120,6 +1120,17 @@ where
         Values { node_iter, guard }
     }
 
+    /// Clears the map, returning all key-value pairs as an iterator. Keeps the allocated memory for reuse.
+    pub fn drain<'g>(&'g self, guard: &'g Guard) -> Drain<'g, K, V, S> {
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Drain {
+            guard,
+            map: self,
+            node_iter,
+        }
+    }
+
     #[inline]
     /// Returns the number of entries in the map.
     pub fn len(&self) -> usize {
@@ -1220,6 +1231,26 @@ where
     #[inline]
     fn extend<T: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: T) {
         self.extend(iter.into_iter().map(|(&key, &value)| (key, value)));
+    }
+}
+
+impl<K, V, S> IntoIterator for HashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Hash + Eq + 'static,
+    V: Sync + Send + 'static,
+    S: BuildHasher + 'static,
+{
+    type Item = (K, V);
+    type IntoIter = IntoIter<'static, K, V, S>;
+    fn into_iter(self) -> Self::IntoIter {
+        let guard = unsafe { epoch::unprotected() };
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        IntoIter {
+            guard,
+            map: self,
+            node_iter,
+        }
     }
 }
 
