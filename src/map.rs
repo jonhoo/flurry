@@ -461,7 +461,7 @@ where
                         let n = unsafe { p.deref() }.as_node().unwrap();
                         if n.hash == h && &n.key == key {
                             // the key already exists in the map!
-                            let current_value = head.value.load(Ordering::SeqCst, guard);
+                            let current_value = n.value.load(Ordering::SeqCst, guard);
 
                             // safety: since the value is present now, and we've held a guard from
                             // the beginning of the search, the value cannot be dropped until the
