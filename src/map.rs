@@ -12,12 +12,18 @@ use std::sync::{
     Once,
 };
 
+macro_rules! isize_bits {
+    () => {
+        std::mem::size_of::<isize>() * 8
+    };
+}
+
 /// The largest possible table capacity.  This value must be
 /// exactly 1<<30 to stay within Java array allocation and indexing
 /// bounds for power of two table sizes, and is further required
 /// because the top two bits of 32bit hash fields are used for
 /// control purposes.
-const MAXIMUM_CAPACITY: usize = 1 << 30;
+const MAXIMUM_CAPACITY: usize = 1 << 30; // TODO: use isize_bits!()
 
 /// The default initial table capacity.  Must be a power of 2
 /// (i.e., at least 1) and at most `MAXIMUM_CAPACITY`.
@@ -32,14 +38,15 @@ const MIN_TRANSFER_STRIDE: isize = 16;
 
 /// The number of bits used for generation stamp in `size_ctl`.
 /// Must be at least 6 for 32bit arrays.
-const RESIZE_STAMP_BITS: usize = 16;
+const RESIZE_STAMP_BITS: usize = isize_bits!() / 2;
 
 /// The maximum number of threads that can help resize.
-/// Must fit in `32 - RESIZE_STAMP_BITS` bits.
-const MAX_RESIZERS: isize = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
+/// Must fit in `32 - RESIZE_STAMP_BITS` bits for 32 bit architectures
+/// and `64 - RESIZE_STAMP_BITS` bits for 64 bit architectures
+const MAX_RESIZERS: isize = (1 << (isize_bits!() - RESIZE_STAMP_BITS)) - 1;
 
 /// The bit shift for recording size stamp in `size_ctl`.
-const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
+const RESIZE_STAMP_SHIFT: usize = isize_bits!() - RESIZE_STAMP_BITS;
 
 static NCPU_INITIALIZER: Once = Once::new();
 static NCPU: AtomicUsize = AtomicUsize::new(0);
@@ -940,7 +947,7 @@ where
     /// Returns the stamp bits for resizing a table of size n.
     /// Must be negative when shifted left by RESIZE_STAMP_SHIFT.
     fn resize_stamp(n: usize) -> isize {
-        n.leading_zeros() as isize | (1 << (RESIZE_STAMP_BITS - 1)) as isize
+        n.leading_zeros() as isize | (1_isize << (RESIZE_STAMP_BITS - 1))
     }
 
     /// Tries to presize table to accommodate the given number of elements.
@@ -1252,8 +1259,9 @@ where
     }
 
     #[inline]
+    #[cfg(test)]
     /// Returns the capacity of the map.
-    pub fn capacity<'g>(&self, guard: &'g Guard) -> usize {
+    fn capacity<'g>(&self, guard: &'g Guard) -> usize {
         let table = self.table.load(Ordering::Relaxed, &guard);
 
         if table.is_null() {
@@ -1443,6 +1451,61 @@ fn num_cpus() -> usize {
     NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
 
     NCPU.load(Ordering::Relaxed)
+}
+
+#[test]
+fn capacity() {
+    let map = HashMap::<usize, usize>::new();
+    let guard = epoch::pin();
+
+    assert_eq!(map.capacity(&guard), 0);
+    // The table has not yet been allocated
+
+    map.insert(42, 0, &guard);
+
+    assert_eq!(map.capacity(&guard), 16);
+    // The table has been allocated and has default capacity
+
+    for i in 0..16 {
+        map.insert(i, 42, &guard);
+    }
+
+    assert_eq!(map.capacity(&guard), 32);
+    // The table has been resized once (and it's capacity doubled),
+    // since we inserted more elements than it can hold
+}
+
+#[test]
+fn reserve() {
+    let map = HashMap::<usize, usize>::new();
+    let guard = epoch::pin();
+
+    map.insert(42, 0, &guard);
+
+    map.reserve(32);
+
+    let capacity = map.capacity(&guard);
+    assert!(capacity >= 16 + 32);
+}
+
+#[test]
+fn reserve_uninit() {
+    let map = HashMap::<usize, usize>::new();
+    let guard = epoch::pin();
+
+    map.reserve(32);
+
+    let capacity = map.capacity(&guard);
+    assert!(capacity >= 32);
+}
+
+#[test]
+fn resize_stamp_negative() {
+    let resize_stamp = HashMap::<usize, usize>::resize_stamp(1);
+    assert!(resize_stamp << RESIZE_STAMP_SHIFT < 0);
+
+    let resize_stamp = HashMap::<usize, usize>::resize_stamp(MAXIMUM_CAPACITY);
+    assert!(resize_stamp << RESIZE_STAMP_SHIFT < 0);
 }
 
 /// It's kind of stupid, but apparently there is no way to write a regular `#[test]` that is _not_
