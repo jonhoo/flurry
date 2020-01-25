@@ -85,37 +85,68 @@ fn insert_and_get_key_value() {
     }
 }
 
+use std::hash::{BuildHasher, Hasher};
+
+struct OneBucketState;
+struct OneBucketHasher;
+impl BuildHasher for OneBucketState {
+    type Hasher = OneBucketHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        OneBucketHasher
+    }
+}
+impl Hasher for OneBucketHasher {
+    fn write(&mut self, _bytes: &[u8]) {}
+    fn finish(&self) -> u64 {
+        0
+    }
+}
+
 #[test]
-fn insert_in_same_bucket_and_get_distinct_entries() {
-    use std::hash::{BuildHasher, Hasher};
+fn one_bucket() {
+    let guard = epoch::pin();
+    let map = HashMap::<&'static str, usize, _>::with_hasher(OneBucketState);
 
-    struct OneBucketState;
-    struct OneBucketHasher;
-    impl BuildHasher for OneBucketState {
-        type Hasher = OneBucketHasher;
+    // we want to check that all operations work regardless on whether
+    // we are operating on the head of a bucket, the tail of the bucket,
+    // or somewhere in the middle.
+    let v = map.insert("head", 0, &guard);
+    assert_eq!(v, None);
+    let v = map.insert("middle", 10, &guard);
+    assert_eq!(v, None);
+    let v = map.insert("tail", 100, &guard);
+    assert_eq!(v, None);
+    let e = map.get("head", &guard).unwrap();
+    assert_eq!(e, &0);
+    let e = map.get("middle", &guard).unwrap();
+    assert_eq!(e, &10);
+    let e = map.get("tail", &guard).unwrap();
+    assert_eq!(e, &100);
 
-        fn build_hasher(&self) -> Self::Hasher {
-            OneBucketHasher
-        }
-    }
-    impl Hasher for OneBucketHasher {
-        fn write(&mut self, _bytes: &[u8]) {}
-        fn finish(&self) -> u64 {
-            0
-        }
-    }
-
-    let map = HashMap::<usize, usize, _>::with_hasher(OneBucketState);
-
-    map.insert(42, 0, &epoch::pin());
-    map.insert(50, 20, &epoch::pin());
-    {
-        let guard = epoch::pin();
-        let e = map.get(&42, &guard).unwrap();
-        assert_eq!(e, &0);
-        let e = map.get(&50, &guard).unwrap();
-        assert_eq!(e, &20);
-    }
+    // check that replacing the keys returns the correct old value
+    let v = map.insert("head", 1, &guard);
+    assert_eq!(v, Some(&0));
+    let v = map.insert("middle", 11, &guard);
+    assert_eq!(v, Some(&10));
+    let v = map.insert("tail", 101, &guard);
+    assert_eq!(v, Some(&100));
+    // and updated the right value
+    let e = map.get("head", &guard).unwrap();
+    assert_eq!(e, &1);
+    let e = map.get("middle", &guard).unwrap();
+    assert_eq!(e, &11);
+    let e = map.get("tail", &guard).unwrap();
+    assert_eq!(e, &101);
+    // and that remove produces the right value
+    // note that we must remove them in a particular order
+    // so that we test all three node positions
+    let v = map.remove("middle", &guard);
+    assert_eq!(v, Some(&11));
+    let v = map.remove("tail", &guard);
+    assert_eq!(v, Some(&101));
+    let v = map.remove("head", &guard);
+    assert_eq!(v, Some(&1));
 }
 
 #[test]
