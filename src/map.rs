@@ -652,9 +652,9 @@ where
                             // safety: since the value is present now, and we've held a guard from
                             // the beginning of the search, the value cannot be dropped until the
                             // next epoch, which won't arrive until after we drop our guard.
-                            let current_value = unsafe { current_value.deref() };
+                            let new_value =
+                                remapping_function(&n.key, unsafe { current_value.deref() });
 
-                            let new_value = remapping_function(&n.key, current_value);
                             if let Some(value) = new_value {
                                 let now_garbage =
                                     n.value.swap(Owned::new(value), Ordering::SeqCst, guard);
@@ -706,6 +706,7 @@ where
                                 // in either case, mark the BinEntry as garbage, since it was just removed
                                 // safety: see remove
                                 unsafe { guard.defer_destroy(p) };
+                                unsafe { guard.defer_destroy(current_value) };
                                 break None;
                             }
                         }
