@@ -198,14 +198,17 @@ mod tests {
     fn concurent_drain() {
         use std::sync::*;
 
+        #[allow(non_snake_case)]
+        let N = 1000;
+
         let map = Arc::new(HashMap::new());
 
         let mut expected: HashSet<(usize, usize)> = HashSet::new();
         {
             let guard = epoch::pin();
-            for i in 0..=100 {
+            for i in 0..=N {
                 let key = i;
-                let value = 100 - i;
+                let value = N - i;
                 map.insert(key, value, &guard);
                 expected.insert((key, value));
             }
@@ -216,9 +219,9 @@ mod tests {
         let map_clone = map.clone();
         let barrier_clone = barrier.clone();
         let a = std::thread::spawn(move || {
-            barrier_clone.wait();
             let guard = epoch::pin();
 
+            barrier_clone.wait();
             let drain = map_clone.drain(&guard);
             let result: HashSet<(usize, usize)> = drain.collect();
 
@@ -228,12 +231,11 @@ mod tests {
         let map_clone = map.clone();
         let barrier_clone = barrier.clone();
         let b = std::thread::spawn(move || {
-            barrier_clone.wait();
             let guard = epoch::pin();
-
             let mut result: HashSet<(usize, usize)> = HashSet::new();
 
-            for i in 0..=100 {
+            barrier_clone.wait();
+            for i in 0..=N {
                 if let Some(item) = map_clone.remove(&i, &guard) {
                     result.insert((i, *item));
                 }
