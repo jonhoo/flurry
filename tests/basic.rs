@@ -139,7 +139,7 @@ fn compute_if_present() {
 
     let guard = epoch::pin();
     map.insert(42, 0, &guard);
-    let old = map.compute_if_present(42, |_, v| Some(v + 1), &guard);
+    let old = map.compute_if_present(&42, |_, v| Some(v + 1), &guard);
     assert_eq!(old, Some(&0));
     {
         let guard = epoch::pin();
@@ -153,7 +153,7 @@ fn compute_if_present_empty() {
     let map = HashMap::<usize, usize>::new();
 
     let guard = epoch::pin();
-    let old = map.compute_if_present(42, |_, v| Some(v + 1), &guard);
+    let old = map.compute_if_present(&42, |_, v| Some(v + 1), &guard);
     assert!(old.is_none());
     {
         let guard = epoch::pin();
@@ -167,7 +167,7 @@ fn compute_if_present_remove() {
 
     let guard = epoch::pin();
     map.insert(42, 0, &guard);
-    let old = map.compute_if_present(42, |_, _| None, &guard);
+    let old = map.compute_if_present(&42, |_, _| None, &guard);
     assert_eq!(old, Some(&0));
     {
         let guard = epoch::pin();

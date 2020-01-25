@@ -535,14 +535,16 @@ where
     /// Maps `key` to `value` in this table.
     ///
     /// The value can be retrieved by calling [`get`] with a key that is equal to the original key.
-    pub fn compute_if_present<'g, F>(
+    pub fn compute_if_present<'g, Q, F>(
         &'g self,
-        key: K,
+        key: &Q,
         remapping_function: F,
         guard: &'g Guard,
     ) -> Option<&'g V>
     where
-        F: Fn(&K, &V) -> Option<V>,
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+        F: FnOnce(&K, &V) -> Option<V>,
     {
         let h = self.hash(&key);
 
@@ -639,7 +641,7 @@ where
                         let n = unsafe { p.deref() }.as_node().unwrap();
                         // TODO: This Ordering can probably be relaxed due to the Mutex
                         let next = n.next.load(Ordering::SeqCst, guard);
-                        if n.hash == h && &n.key == &key {
+                        if n.hash == h && n.key.borrow() == key {
                             // the key already exists in the map!
                             let current_value = head.value.load(Ordering::SeqCst, guard);
 
@@ -648,7 +650,7 @@ where
                             // next epoch, which won't arrive until after we drop our guard.
                             let current_value = unsafe { current_value.deref() };
 
-                            let new_value = remapping_function(&key, current_value);
+                            let new_value = remapping_function(&n.key, current_value);
                             //https://youtu.be/yQFWmGaFBjk?t=10800
                             if let Some(value) = new_value {
                                 // safety: we own value and have never shared it
