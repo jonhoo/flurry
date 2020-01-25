@@ -631,7 +631,7 @@ where
 
                     // TODO: TreeBin & ReservationNode
 
-                    let mut delta = 0;
+                    let mut removed_node = false;
                     let mut bin_count = 1;
                     let mut p = bin;
                     let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
@@ -687,7 +687,7 @@ where
                                     n.value.load(Ordering::SeqCst, guard).deref()
                                 });
                             } else {
-                                delta = -1;
+                                removed_node = true;
                                 // remove the BinEntry containing the removed key value pair from the bucket
                                 if !pred.is_null() {
                                     // either by changing the pointer of the previous BinEntry, if present
@@ -720,11 +720,9 @@ where
                     };
                     drop(head_lock);
 
-                    // TODO: TREEIFY_THRESHOLD
-
-                    if delta != 0 {
+                    if removed_node {
                         // decrement count
-                        self.add_count(delta, Some(bin_count), guard);
+                        self.add_count(-1, Some(bin_count), guard);
                     }
                     guard.flush();
                     return new_val;
