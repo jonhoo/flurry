@@ -196,7 +196,9 @@ mod tests {
 
     #[test]
     fn concurent_drain() {
-        let map = std::sync::Arc::new(HashMap::new());
+        use std::sync::*;
+
+        let map = Arc::new(HashMap::new());
 
         let mut expected: HashSet<(usize, usize)> = HashSet::new();
         {
@@ -209,25 +211,30 @@ mod tests {
             }
         }
 
-        let map_a = map.clone();
-        let map_b = map.clone();
+        let barrier = Arc::new(Barrier::new(2));
 
+        let map_clone = map.clone();
+        let barrier_clone = barrier.clone();
         let a = std::thread::spawn(move || {
+            barrier_clone.wait();
             let guard = epoch::pin();
 
-            let drain = map_a.drain(&guard);
+            let drain = map_clone.drain(&guard);
             let result: HashSet<(usize, usize)> = drain.collect();
 
             result
         });
 
+        let map_clone = map.clone();
+        let barrier_clone = barrier.clone();
         let b = std::thread::spawn(move || {
+            barrier_clone.wait();
             let guard = epoch::pin();
 
             let mut result: HashSet<(usize, usize)> = HashSet::new();
 
             for i in 0..=100 {
-                if let Some(item) = map_b.remove(&i, &guard) {
+                if let Some(item) = map_clone.remove(&i, &guard) {
                     result.insert((i, *item));
                 }
             }
