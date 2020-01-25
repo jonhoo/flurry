@@ -238,6 +238,9 @@ mod tests {
         let result_a = a.join().unwrap();
         let result_b = b.join().unwrap();
 
+        assert!(!result_a.is_empty());
+        assert!(!result_b.is_empty());
+
         assert!(result_a.intersection(&result_b).next().is_none());
 
         let union: HashSet<(usize, usize)> = result_a.union(&result_b).cloned().collect();
