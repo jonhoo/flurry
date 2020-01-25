@@ -139,8 +139,8 @@ fn compute_if_present() {
 
     let guard = epoch::pin();
     map.insert(42, 0, &guard);
-    let old = map.compute_if_present(&42, |_, v| Some(v + 1), &guard);
-    assert_eq!(old, Some(&0));
+    let new = map.compute_if_present(&42, |_, v| Some(v + 1), &guard);
+    assert_eq!(new, Some(&1));
     {
         let guard = epoch::pin();
         let e = map.get(&42, &guard).unwrap();
@@ -153,8 +153,8 @@ fn compute_if_present_empty() {
     let map = HashMap::<usize, usize>::new();
 
     let guard = epoch::pin();
-    let old = map.compute_if_present(&42, |_, v| Some(v + 1), &guard);
-    assert!(old.is_none());
+    let new = map.compute_if_present(&42, |_, v| Some(v + 1), &guard);
+    assert!(new.is_none());
     {
         let guard = epoch::pin();
         assert!(map.get(&42, &guard).is_none());
@@ -167,8 +167,8 @@ fn compute_if_present_remove() {
 
     let guard = epoch::pin();
     map.insert(42, 0, &guard);
-    let old = map.compute_if_present(&42, |_, _| None, &guard);
-    assert_eq!(old, Some(&0));
+    let new = map.compute_if_present(&42, |_, _| None, &guard);
+    assert!(new.is_none());
     {
         let guard = epoch::pin();
         assert!(map.get(&42, &guard).is_none());
@@ -260,18 +260,16 @@ fn concurrent_compute_if_present() {
     let t1 = std::thread::spawn(move || {
         let guard = epoch::pin();
         for i in 0..64 {
-            if let Some(v) = map1.compute_if_present(&i, |_, _| None, &guard) {
-                assert_eq!(v, &i);
-            }
+            let new = map1.compute_if_present(&i, |_, _| None, &guard);
+            assert!(new.is_none());
         }
     });
     let map2 = map.clone();
     let t2 = std::thread::spawn(move || {
         let guard = epoch::pin();
         for i in 0..64 {
-            if let Some(v) = map2.compute_if_present(&i, |_, _| None, &guard) {
-                assert_eq!(v, &i);
-            }
+            let new = map2.compute_if_present(&i, |_, _| None, &guard);
+            assert!(new.is_none());
         }
     });
 
