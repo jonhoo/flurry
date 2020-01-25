@@ -195,6 +195,57 @@ mod tests {
     }
 
     #[test]
+    fn concurent_drain() {
+        let map = std::sync::Arc::new(HashMap::new());
+
+        let mut expected: HashSet<(usize, usize)> = HashSet::new();
+        {
+            let guard = epoch::pin();
+            for i in 0..=100 {
+                let key = i;
+                let value = 100 - i;
+                map.insert(key, value, &guard);
+                expected.insert((key, value));
+            }
+        }
+
+        let map_a = map.clone();
+        let map_b = map.clone();
+
+        let a = std::thread::spawn(move || {
+            let guard = epoch::pin();
+
+            let drain = map_a.drain(&guard);
+            let result: HashSet<(usize, usize)> = drain.collect();
+
+            result
+        });
+
+        let b = std::thread::spawn(move || {
+            let guard = epoch::pin();
+
+            let mut result: HashSet<(usize, usize)> = HashSet::new();
+
+            for i in 0..=100 {
+                if let Some(item) = map_b.remove(&i, &guard) {
+                    result.insert((i, *item));
+                }
+            }
+
+            result
+        });
+
+        let result_a = a.join().unwrap();
+        let result_b = b.join().unwrap();
+
+        assert!(result_a.intersection(&result_b).next().is_none());
+
+        let union: HashSet<(usize, usize)> = result_a.union(&result_b).cloned().collect();
+
+        assert_eq!(union, expected);
+    }
+
+    #[test]
     fn into_iter() {
         let map: HashMap<usize, usize> = HashMap::new();
         let mut expected: HashSet<(usize, usize)> = HashSet::new();
