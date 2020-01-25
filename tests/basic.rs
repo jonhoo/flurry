@@ -134,6 +134,48 @@ fn update() {
 }
 
 #[test]
+fn compute_if_present() {
+    let map = HashMap::<usize, usize>::new();
+
+    let guard = epoch::pin();
+    map.insert(42, 0, &guard);
+    let old = map.compute_if_present(42, |_, v| Some(v + 1), &guard);
+    assert_eq!(old, Some(&0));
+    {
+        let guard = epoch::pin();
+        let e = map.get(&42, &guard).unwrap();
+        assert_eq!(e, &1);
+    }
+}
+
+#[test]
+fn compute_if_present_empty() {
+    let map = HashMap::<usize, usize>::new();
+
+    let guard = epoch::pin();
+    let old = map.compute_if_present(42, |_, v| Some(v + 1), &guard);
+    assert!(old.is_none());
+    {
+        let guard = epoch::pin();
+        assert!(map.get(&42, &guard).is_none());
+    }
+}
+
+#[test]
+fn compute_if_present_remove() {
+    let map = HashMap::<usize, usize>::new();
+
+    let guard = epoch::pin();
+    map.insert(42, 0, &guard);
+    let old = map.compute_if_present(42, |_, _| None, &guard);
+    assert_eq!(old, Some(&0));
+    {
+        let guard = epoch::pin();
+        assert!(map.get(&42, &guard).is_none());
+    }
+}
+
+#[test]
 fn concurrent_insert() {
     let map = Arc::new(HashMap::<usize, usize>::new());
 
