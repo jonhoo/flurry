@@ -713,8 +713,8 @@ where
 
                     // TODO: TREEIFY_THRESHOLD
 
-                    if old_val.is_none() {
-                        // increment count
+                    if delta != 0 {
+                        // decrement count
                         self.add_count(delta, Some(bin_count), guard);
                     }
                     guard.flush();
