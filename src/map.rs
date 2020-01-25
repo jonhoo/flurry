@@ -695,6 +695,10 @@ where
                                     // or by setting the next node as the first BinEntry if there is no previous entry
                                     t.store_bin(bini, next);
                                 }
+
+                                // in either case, mark the BinEntry as garbage, since it was just removed
+                                // safety: see remove
+                                unsafe { guard.defer_destroy(p) };
                             }
                             break Some(current_value);
                         }
