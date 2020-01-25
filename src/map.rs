@@ -26,7 +26,7 @@ const DEFAULT_CAPACITY: usize = 16;
 /// The load factor for this table. Overrides of this value in
 /// constructors affect only the initial table capacity.  The
 /// actual floating point value isn't normally used -- it is
-/// simpler to use expressions such as `n - (n >>> 2)` for
+/// simpler to use expressions such as `n - (n >> 2)` for
 /// the associated resizing threshold.
 const LOAD_FACTOR: f64 = 0.75;
 
@@ -318,6 +318,7 @@ where
                     let new_table = Owned::new(Table::new(n));
                     table = new_table.into_shared(guard);
                     self.table.store(table, Ordering::SeqCst);
+                    // sc = ¾ n = n - n/4 = n - (n >> 2)
                     sc = n as isize - (n >> 2) as isize;
                 }
                 self.size_ctl.store(sc, Ordering::SeqCst);
