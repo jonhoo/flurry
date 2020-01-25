@@ -543,7 +543,7 @@ where
     /// attempted update operations on this map by other threads may be
     /// blocked while computation is in progress, so the computation
     /// should be short and simple.
-    /// 
+    ///
     /// Returns the new value associated with the specified `key`, or `None`
     /// if no value for the specified `key` is present.
     pub fn compute_if_present<'g, Q, F>(
@@ -655,8 +655,6 @@ where
 
                             let new_value = remapping_function(&n.key, current_value);
                             if let Some(value) = new_value {
-                                //let value = Atomic::new(value);
-                                // safety: we own value and have never shared it
                                 let now_garbage =
                                     n.value.swap(Owned::new(value), Ordering::SeqCst, guard);
                                 // NOTE: now_garbage == current_value
@@ -681,11 +679,13 @@ where
                                 //    `value` field (which is what we swapped), so freeing
                                 //    now_garbage is fine.
                                 unsafe { guard.defer_destroy(now_garbage) };
-                                
+
                                 // safety: since the value is present now, and we've held a guard from
                                 // the beginning of the search, the value cannot be dropped until the
                                 // next epoch, which won't arrive until after we drop our guard.
-                                break Some(unsafe { n.value.load(Ordering::SeqCst, guard).deref() })
+                                break Some(unsafe {
+                                    n.value.load(Ordering::SeqCst, guard).deref()
+                                });
                             } else {
                                 delta = -1;
                                 // remove the BinEntry containing the removed key value pair from the bucket
