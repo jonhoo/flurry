@@ -1474,38 +1474,41 @@ fn capacity() {
     // The table has been resized once (and it's capacity doubled),
     // since we inserted more elements than it can hold
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn reserve() {
+        let map = HashMap::<usize, usize>::new();
+        let guard = epoch::pin();
 
-#[test]
-fn reserve() {
-    let map = HashMap::<usize, usize>::new();
-    let guard = epoch::pin();
+        map.insert(42, 0, &guard);
 
-    map.insert(42, 0, &guard);
+        map.reserve(32);
 
-    map.reserve(32);
+        let capacity = map.capacity(&guard);
+        assert!(capacity >= 16 + 32);
+    }
 
-    let capacity = map.capacity(&guard);
-    assert!(capacity >= 16 + 32);
-}
+    #[test]
+    fn reserve_uninit() {
+        let map = HashMap::<usize, usize>::new();
+        let guard = epoch::pin();
 
-#[test]
-fn reserve_uninit() {
-    let map = HashMap::<usize, usize>::new();
-    let guard = epoch::pin();
+        map.reserve(32);
 
-    map.reserve(32);
+        let capacity = map.capacity(&guard);
+        assert!(capacity >= 32);
+    }
 
-    let capacity = map.capacity(&guard);
-    assert!(capacity >= 32);
-}
+    #[test]
+    fn resize_stamp_negative() {
+        let resize_stamp = HashMap::<usize, usize>::resize_stamp(1);
+        assert!(resize_stamp << RESIZE_STAMP_SHIFT < 0);
 
-#[test]
-fn resize_stamp_negative() {
-    let resize_stamp = HashMap::<usize, usize>::resize_stamp(1);
-    assert!(resize_stamp << RESIZE_STAMP_SHIFT < 0);
-
-    let resize_stamp = HashMap::<usize, usize>::resize_stamp(MAXIMUM_CAPACITY);
-    assert!(resize_stamp << RESIZE_STAMP_SHIFT < 0);
+        let resize_stamp = HashMap::<usize, usize>::resize_stamp(MAXIMUM_CAPACITY);
+        assert!(resize_stamp << RESIZE_STAMP_SHIFT < 0);
+    }
 }
 
 /// It's kind of stupid, but apparently there is no way to write a regular `#[test]` that is _not_
