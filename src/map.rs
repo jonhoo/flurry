@@ -534,7 +534,7 @@ where
 
     /// If the value for the specified `key` is present, attempts to
     /// compute a new mapping given the key and its current mapped value.
-    /// 
+    ///
     /// The new mapping is computed by the `remapping_function`, which may
     /// return `None` to signalize that the mapping should be removed.
     /// The entire method invocation is performed atomically.
@@ -627,7 +627,7 @@ where
                     // note that there can still be readers in the bin!
 
                     // TODO: TreeBin & ReservationNode
-                    
+
                     let mut delta = 0;
                     let mut bin_count = 1;
                     let mut p = bin;
@@ -653,11 +653,8 @@ where
                             let new_value = remapping_function(&n.key, current_value);
                             if let Some(value) = new_value {
                                 // safety: we own value and have never shared it
-                                let now_garbage = n.value.swap(
-                                    Owned::new(value),
-                                    Ordering::SeqCst,
-                                    guard,
-                                );
+                                let now_garbage =
+                                    n.value.swap(Owned::new(value), Ordering::SeqCst, guard);
                                 // NOTE: now_garbage == current_value
 
                                 // safety: need to guarantee that now_garbage is no longer
