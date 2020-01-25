@@ -23,13 +23,6 @@ const MAXIMUM_CAPACITY: usize = 1 << 30;
 /// (i.e., at least 1) and at most `MAXIMUM_CAPACITY`.
 const DEFAULT_CAPACITY: usize = 16;
 
-/// The load factor for this table. Overrides of this value in
-/// constructors affect only the initial table capacity.  The
-/// actual floating point value isn't normally used -- it is
-/// simpler to use expressions such as `n - (n >> 2)` for
-/// the associated resizing threshold.
-const LOAD_FACTOR: f64 = 0.75;
-
 /// Minimum number of rebinnings per transfer step. Ranges are
 /// subdivided to allow multiple resizer threads.  This value
 /// serves as a lower bound to avoid resizers encountering
@@ -50,6 +43,13 @@ const RESIZE_STAMP_SHIFT: usize = 32 - RESIZE_STAMP_BITS;
 
 static NCPU_INITIALIZER: Once = Once::new();
 static NCPU: AtomicUsize = AtomicUsize::new(0);
+
+macro_rules! load_factor {
+    ($n: expr) => {
+        // ¾ n = n - n/4 = n - (n >> 2)
+        $n - ($n >> 2)
+    };
+}
 
 /// A concurrent hash table.
 ///
@@ -105,7 +105,12 @@ where
     }
 }
 
-impl<K, V, S: BuildHasher> HashMap<K, V, S> {
+impl<K, V, S> HashMap<K, V, S>
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+    S: BuildHasher,
+{
     /// Creates an empty map which will use `hash_builder` to hash keys.
     ///
     /// The created map has the default initial capacity.
@@ -134,17 +139,17 @@ impl<K, V, S: BuildHasher> HashMap<K, V, S> {
     /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
     /// to be resistant to attacks that cause many collisions and very poor performance.
     /// Setting it manually using this function can expose a DoS attack vector.
-    pub fn with_capacity_and_hasher(hash_builder: S, n: usize) -> Self {
-        if n == 0 {
+    pub fn with_capacity_and_hasher(hash_builder: S, capacity: usize) -> Self {
+        if capacity == 0 {
             return Self::with_hasher(hash_builder);
         }
 
-        let mut m = Self::with_hasher(hash_builder);
-        let size = (1.0 + (n as f64) / LOAD_FACTOR) as usize;
-        // NOTE: tableSizeFor in Java
-        let cap = std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two());
-        m.size_ctl = AtomicIsize::new(cap as isize);
-        m
+        let map = Self::with_hasher(hash_builder);
+
+        // safety: we are creating this map, so no other thread can access it,
+        // while we are initializing it.
+        map.try_presize(capacity, unsafe { epoch::unprotected() });
+        map
     }
 }
 
@@ -318,8 +323,7 @@ where
                     let new_table = Owned::new(Table::new(n));
                     table = new_table.into_shared(guard);
                     self.table.store(table, Ordering::SeqCst);
-                    // sc = ¾ n = n - n/4 = n - (n >> 2)
-                    sc = n as isize - (n >> 2) as isize;
+                    sc = load_factor!(n as isize)
                 }
                 self.size_ctl.store(sc, Ordering::SeqCst);
                 break table;
@@ -1013,8 +1017,8 @@ where
                 //     unsafe { guard.defer_destroy(old_table) }
                 // }
 
-                // resize the table once it's load factor reaches 75%
-                let new_load_to_resize_at = new_capacity as isize - (new_capacity >> 2) as isize;
+                // resize the table once it is 75% full
+                let new_load_to_resize_at = load_factor!(new_capacity as isize);
 
                 // store the next load at which the table should resize to it's size_ctl field
                 // and thus release the initialization "lock"
