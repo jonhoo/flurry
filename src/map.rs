@@ -387,10 +387,8 @@ where
             //
             //  3. if table is set by a Moved node (below) through help_transfer, it will _either_
             //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
-            //     pointer from inside the Moved. how do we know that that is safe?
-            //
-            //     we must demonstrate that if a Moved(t) is _read_, then t must still be valid.
-            //     FIXME
+            //     pointer from inside the Moved. to see that if a Moved(t) is _read_, then t must
+            //     still be valid, see the safety comment on BinEntry::Moved.
             let t = unsafe { table.deref() };
 
             let bini = t.bini(h);
@@ -1098,10 +1096,8 @@ where
             //     only queues a drop for the next epoch after removing the table.
             //
             //  2. if table is set by a Moved node (below) through help_transfer, it will use the
-            //     `next_table` raw pointer from inside the Moved. how do we know that that is safe?
-            //
-            //     we must demonstrate that if a Moved(t) is _read_, then t must still be valid.
-            //     FIXME cf. put
+            //     `next_table` raw pointer from inside the Moved. to see that if a Moved(t) is
+            //     _read_, then t must still be valid, see the safety comment on BinEntry::Moved.
             let t = unsafe { table.deref() };
             let n = t.len() as u64;
             if n == 0 {
