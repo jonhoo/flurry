@@ -1091,6 +1091,30 @@ where
         None
     }
 
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    pub fn retain<F>(&mut self, mut f: F)
+        where
+            F: FnMut(&K, &V) -> bool
+    {
+        let guard = epoch::pin();
+        // filter the keys which need to be removed
+        let invalid_keys : Vec<&K> = self.iter(&guard)
+            .filter_map(
+                |(k, v)| {
+                    match f(k, v) {
+                        true  => None,
+                        false => Some(k)
+                    }
+                }
+            ).collect();
+        // removed selected keys
+        for k in invalid_keys {
+            self.remove(k, &guard);
+        }
+    }
+
     /// An iterator visiting all key-value pairs in arbitrary order.
     /// The iterator element type is `(&'g K, &'g V)`.
     ///

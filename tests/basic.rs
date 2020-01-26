@@ -350,3 +350,32 @@ fn clone_map_filled() {
     map.insert("NewItem", 100, &epoch::pin());
     assert_ne!(&map, &cloned_map);
 }
+
+#[test]
+fn retain_empty() {
+    let mut map = HashMap::<&'static str, u32>::new();
+    map.retain(|_, _| false);
+    assert_eq!(map.len(), 0);
+}
+
+#[test]
+fn retain_all_false() {
+    let mut map : HashMap::<u32, u32> = (0..10 as u32).map(|x| (x, x)).collect();
+    map.retain(|_, _| false);
+    assert_eq!(map.len(), 0);
+}
+
+#[test]
+fn retain_all_true() {
+    let size = 10usize;
+    let mut map : HashMap::<usize, usize> = (0..size).map(|x| (x, x)).collect();
+    map.retain(|_, _| true);
+    assert_eq!(map.len(), size);
+}
+
+#[test]
+fn retain_some() {
+    let mut map : HashMap::<u32, u32> = (0..10).map(|x| (x, x)).collect();
+    map.retain(|_, v| *v >= 5);
+    assert_eq!(map.len(), 5);
+}
