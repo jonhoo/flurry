@@ -199,7 +199,7 @@ mod tests {
         use std::sync::*;
 
         #[allow(non_snake_case)]
-        let N = 1000;
+        let N = 50_000;
 
         let map = Arc::new(HashMap::new());
 
