@@ -593,10 +593,8 @@ where
             //
             //  3. if table is set by a Moved node (below) through help_transfer, it will _either_
             //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
-            //     pointer from inside the Moved. how do we know that that is safe?
-            //
-            //     we must demonstrate that if a Moved(t) is _read_, then t must still be valid.
-            //     FIXME
+            //     pointer from inside the Moved. to see that if a Moved(t) is _read_, then t must
+            //     still be valid, see the safety comment on BinEntry::Moved.
             let t = unsafe { table.deref() };
 
             let bini = t.bini(h);
@@ -713,7 +711,24 @@ where
                                 }
 
                                 // in either case, mark the BinEntry as garbage, since it was just removed
-                                // safety: see remove
+                                // safety: need to guarantee that the old value is no longer
+                                // reachable. more specifically, no thread that executes _after_
+                                // this line can ever get a reference to val.
+                                //
+                                // here are the possible cases:
+                                //
+                                //  - another thread already has a reference to the old value.
+                                //    they must have read it before the call to store_bin.
+                                //    because of this, that thread must be pinned to an epoch <=
+                                //    the epoch of our guard. since the garbage is placed in our
+                                //    epoch, it won't be freed until the _next_ epoch, at which
+                                //    point, that thread must have dropped its guard, and with it,
+                                //    any reference to the value.
+                                //  - another thread is about to get a reference to this value.
+                                //    they execute _after_ the store_bin, and therefore do _not_ get a
+                                //    reference to the old value. there are no other ways to get to a
+                                //    value except through its Node's `value` field (which is now gone
+                                //    together with the node), so freeing the old value is fine.
                                 unsafe { guard.defer_destroy(p) };
                                 unsafe { guard.defer_destroy(current_value) };
                                 break None;
