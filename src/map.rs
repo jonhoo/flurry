@@ -1512,12 +1512,19 @@ where
     }
 }
 
+#[cfg(not(miri))]
 #[inline]
 /// Returns the number of physical CPUs in the machine (_O(1)_).
 fn num_cpus() -> usize {
     NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
 
     NCPU.load(Ordering::Relaxed)
+}
+
+#[cfg(miri)]
+#[inline]
+const fn num_cpus() -> usize {
+    1
 }
 
 #[test]

@@ -29,6 +29,45 @@ jobs:
        condition: ne(variables.CACHE_RESTORED, 'true')
      - script: cargo deny check
        displayName: cargo deny
+ - job: miri
+   displayName: "Run miri on test suite"
+   dependsOn: deny
+   continueOnError: true # since miri sometimes isn't on nightly
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+       parameters:
+         rust: nightly
+         components:
+           - miri
+     # ignore leaks due to https://github.com/crossbeam-rs/crossbeam/issues/464
+     - bash: yes | cargo miri -Zmiri-ignore-leaks test
+       displayName: cargo miri test
+ - job: asan
+   dependsOn: deny
+   displayName: "Run address sanitizer on test suite"
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+       parameters:
+         rust: nightly
+     - script: |
+           env ASAN_OPTIONS="detect_odr_violation=0" RUSTFLAGS="-Z sanitizer=address" cargo test --release --features sanitize
+       displayName: cargo -Z sanitizer=address test
+ - job: lsan
+   dependsOn: deny
+   displayName: "Run leak sanitizer on test suite"
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+       parameters:
+         rust: nightly
+     - script: |
+           env RUSTFLAGS="-Z sanitizer=leak" cargo test --release --features sanitize
+       displayName: cargo -Z sanitizer=leak test
 
 resources:
   repositories:
