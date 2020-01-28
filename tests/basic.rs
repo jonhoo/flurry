@@ -1,4 +1,4 @@
-use crossbeam_epoch as epoch;
+use crossbeam_epoch::{self as epoch, Shared};
 use flurry::*;
 use std::sync::Arc;
 
@@ -34,6 +34,42 @@ fn get_key_value_empty() {
         let guard = epoch::pin();
         let e = map.get_key_value(&42, &guard);
         assert!(e.is_none());
+    }
+}
+
+#[test]
+fn replace_empty() {
+    let map = HashMap::<usize, usize>::new();
+
+    {
+        let guard = epoch::pin();
+        let old = map.replace_node(&42, None, None, &guard);
+        assert!(old.is_none());
+    }
+}
+
+#[test]
+fn replace_existing() {
+    let map = HashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, 42, &guard);
+        let old = map.replace_node(&42, Some(10), None, &guard);
+        assert!(old.is_none());
+        assert_eq!(*map.get(&42, &guard).unwrap(), 10);
+    }
+}
+
+#[test]
+fn replace_old_value_non_matching() {
+    let map = HashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, 42, &guard);
+        // TODO: fit test with an actual non valid old_value
+        let old = map.replace_node(&42, None, None, &guard);
+        assert!(old.is_none());
+        assert_eq!(*map.get(&42, &guard).unwrap(), 42);
     }
 }
 

@@ -945,6 +945,26 @@ where
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
     pub fn remove<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
+        where
+            K: Borrow<Q>,
+            Q: ?Sized + Hash + Eq,
+    {
+        self.replace_node(key, None, None, guard)
+    }
+
+    /// Replaces node value with v, conditional upon match of cv.
+    /// If resulting value does not exists it removes the key (and its corresponding value) from this map.
+    /// This method does nothing if the key is not in the map.
+    /// Returns the previous value associated with the given key.
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    pub fn replace_node<'g, Q>(
+        &'g self,
+        key: &Q,
+        new_value : Option<V>,
+        old_value : Option<Shared<'g, V>>,
+        guard: &'g Guard) -> Option<&'g V>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -1025,28 +1045,34 @@ where
                         let next = n.next.load(Ordering::SeqCst, guard);
                         if n.hash == h && n.key.borrow() == key {
                             let ev = n.value.load(Ordering::SeqCst, guard);
-                            old_val = Some(ev);
+                            // found the node but we have a new value to replace the old one
+                            if let Some(nv) = new_value {
+                                n.value.store(Owned::new(nv), Ordering::SeqCst);
+                                break;
+                            // just remove the node if the value is the one we expected at method call
+                            } else if old_value.is_none() || old_value.unwrap() == ev {
+                                old_val = Some(ev);
+                                // remove the BinEntry containing the removed key value pair from the bucket
+                               if !pred.is_null() {
+                                    // either by changing the pointer of the previous BinEntry, if present
+                                    // safety: as above
+                                    unsafe { pred.deref() }
+                                        .as_node()
+                                        .unwrap()
+                                        .next
+                                        .store(next, Ordering::SeqCst);
+                                } else {
+                                    // or by setting the next node as the first BinEntry if there is no previous entry
+                                    t.store_bin(i, next);
+                                }
 
-                            // remove the BinEntry containing the removed key value pair from the bucket
-                            if !pred.is_null() {
-                                // either by changing the pointer of the previous BinEntry, if present
-                                // safety: as above
-                                unsafe { pred.deref() }
-                                    .as_node()
-                                    .unwrap()
-                                    .next
-                                    .store(next, Ordering::SeqCst);
-                            } else {
-                                // or by setting the next node as the first BinEntry if there is no previous entry
-                                t.store_bin(i, next);
+                                // in either case, mark the BinEntry as garbage, since it was just removed
+                                // safety: as for val below / in put
+                                unsafe { guard.defer_destroy(e) };
+
+                                // since the key was found and only one node exists per key, we can break here
+                                break;
                             }
-
-                            // in either case, mark the BinEntry as garbage, since it was just removed
-                            // safety: as for val below / in put
-                            unsafe { guard.defer_destroy(e) };
-
-                            // since the key was found and only one node exists per key, we can break here
-                            break;
                         }
                         pred = e;
                         if next.is_null() {
@@ -1099,19 +1125,12 @@ where
             F: FnMut(&K, &V) -> bool
     {
         let guard = epoch::pin();
-        // filter the keys which need to be removed
-        let invalid_keys : Vec<&K> = self.iter(&guard)
-            .filter_map(
-                |(k, v)| {
-                    match f(k, v) {
-                        true  => None,
-                        false => Some(k)
-                    }
-                }
-            ).collect();
         // removed selected keys
-        for k in invalid_keys {
-            self.remove(k, &guard);
+        for (k, v) in self.iter(&guard) {
+            if !f(k, v) {
+                // TODO: right now this removing the element by key without checking the value. The value should be used somehow in old_value
+                self.replace_node(k, None, None, &guard);
+            }
         }
     }
 
