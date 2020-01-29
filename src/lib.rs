@@ -36,10 +36,10 @@
 //! Operations that inspect the map as a whole, rather than a single key, operate on a snapshot of
 //! the underlying table. For example, iterators return elements reflecting the state of the hash
 //! table at some point at or since the creation of the iterator. Aggregate status methods like
-//! [`size`](HashMap::size) are typically useful only when a map is not undergoing concurrent
+//! [`len`](HashMap::len) are typically useful only when a map is not undergoing concurrent
 //! updates in other threads. Otherwise the results of these methods reflect transient states that
 //! may be adequate for monitoring or estimation purposes, but not for program control.
-//! Similarly, [`Clone`](HashMap::clone) may not produce a "perfect" clone if the underlying
+//! Similarly, [`Clone`](std::clone::Clone) may not produce a "perfect" clone if the underlying
 //! map is being concurrently modified.
 //!
 //! # Resizing behavior
