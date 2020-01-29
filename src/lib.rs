@@ -464,15 +464,11 @@ where
         let mut delta = 0;
         let mut idx = 0usize;
 
-        let table = self.table.load(Ordering::SeqCst, guard);
-        if table.is_null() {
-            // TODO: proper handling here?
-            return;
-        }
+        let mut table = self.table.load(Ordering::SeqCst, guard);
 
         // Safety: self.table is a valid pointer because we checked it above.
-        let mut tab = unsafe { table.deref() };
-        while idx < tab.bins.len() {
+        while !table.is_null() && idx < unsafe { table.deref() }.bins.len() {
+            let tab = unsafe { table.deref() };
             let node = tab.bin(idx, guard);
             if node.is_null() {
                 idx = idx + 1;
@@ -483,18 +479,12 @@ where
             let node = unsafe { node.deref() };
             match node {
                 BinEntry::Moved(next_table) => {
-                    tab = match self.help_transfer(table, *next_table, guard) {
-                        s if s.is_null() => unsafe { s.deref() },
-                        _ => todo!("proper handling here?"),
-                    };
+                    table = self.help_transfer(table, *next_table, guard);
                     idx = 0;
                 }
-                BinEntry::Node(_) => {
-                    // TODO: start synchronized block
-                    let mut p: Option<&Node<K, V>> = match tab.bin(0, guard) {
-                        s if s.is_null() => None,
-                        s => unsafe { s.deref() }.as_node(),
-                    };
+                BinEntry::Node(ref node) => {
+                    let lock = node.lock.lock();
+                    let mut p: Option<&Node<K, V>> = Some(node);
                     while p.is_some() {
                         delta = delta - 1;
                         p = match p.unwrap().next.load(Ordering::SeqCst, guard) {
@@ -502,11 +492,15 @@ where
                             s => unsafe { s.deref() }.as_node(),
                         };
                     }
-                    idx = idx + 1;
                     tab.store_bin(idx, Shared::null());
-                    // TODO: end synchronized block
+                    idx = idx + 1;
+                    drop(lock);
                 }
             };
+        }
+
+        if delta != 0 {
+            self.add_count(delta, None, guard);
         }
     }
 
