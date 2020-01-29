@@ -1,5 +1,5 @@
 use super::NodeIter;
-use crossbeam_epoch::Guard;
+use crossbeam_epoch::{self as epoch, Guard, Shared};
 use std::hash::{BuildHasher, Hash};
 use std::sync::atomic::Ordering;
 
@@ -78,15 +78,13 @@ where
     V: Sync + Send,
     S: BuildHasher,
 {
-    type Item = (K, V);
+    type Item = (&'g K, &'g V);
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let node = self.node_iter.next()?;
 
             if let Some(value) = self.map.remove(&node.key, self.guard) {
-                return Some((node.key.clone(), unsafe {
-                    std::ptr::read(value as *const V)
-                }));
+                return Some((&node.key, value));
             }
         }
     }
@@ -94,32 +92,88 @@ where
 
 #[derive(Debug)]
 /// An owned iterator over a map's entries.
-pub struct IntoIter<'g, K, V, S>
+pub struct IntoIter<K, V>
 where
     K: Sync + Send + Clone + Eq + Hash,
     V: Sync + Send,
-    S: BuildHasher,
 {
-    pub(crate) node_iter: NodeIter<'g, K, V>,
-    pub(crate) map: crate::HashMap<K, V, S>,
-    pub(crate) guard: &'g Guard,
+    pub(crate) table: Option<Box<crate::raw::Table<K, V>>>,
+    pub(crate) bini: usize,
 }
 
-impl<'g, K, V, S> Iterator for IntoIter<'g, K, V, S>
+impl<K, V> Iterator for IntoIter<K, V>
 where
     K: Sync + Send + Clone + Eq + Hash,
     V: Sync + Send,
-    S: BuildHasher,
 {
     type Item = (K, V);
     fn next(&mut self) -> Option<Self::Item> {
-        let node = self.node_iter.next()?;
+        if self.table.is_none() {
+            return None;
+        }
 
-        let key = node.key.clone();
-        let value = node.value.load(Ordering::SeqCst, self.guard);
-        let value = unsafe { std::ptr::read(value.as_ref().unwrap() as *const V) };
+        let table = self.table.as_mut().unwrap();
 
-        return Some((key, value));
+        let guard = unsafe { epoch::unprotected() };
+
+        let bin = loop {
+            if self.bini >= table.len() {
+                return None;
+            }
+
+            let bin = table.bin(self.bini, guard);
+
+            if !bin.is_null() {
+                break bin;
+            }
+
+            self.bini += 1;
+        };
+
+        // safety: we own the map, so no other thread can have removed `bin`
+        let node = unsafe { bin.deref() }.as_node().unwrap();
+        let next = node.next.load(Ordering::SeqCst, &guard);
+
+        if next.is_null() {
+            // last item in the linked list. Set the bin to `null`;
+            table.store_bin(self.bini, Shared::null());
+            // since we know that this bin is now empty we can increment `bini` so
+            // that we do not have to load it again on the next call to `next`
+            self.bini += 1;
+
+            // take the node's value
+            let value = node.value.swap(Shared::null(), Ordering::SeqCst, &guard);
+            // safety: we just took the last item from this bin and thus have exclusive acess to it
+            let value = unsafe { std::ptr::read(value.as_ref().unwrap() as *const V) };
+            // TODO: test if this actually `drop`s exactly once
+
+            return Some((node.key.clone(), value));
+        } else {
+            let next = unsafe { next.deref() }.as_node().unwrap();
+
+            // remove `next` from the linked list
+            node.next
+                .store(next.next.load(Ordering::SeqCst, &guard), Ordering::SeqCst);
+
+            let value = next.value.swap(Shared::null(), Ordering::SeqCst, &guard);
+            // safety: we just removed `next` from the linked list and thus have exclusive acess to it
+            let value = unsafe { std::ptr::read(value.as_ref().unwrap() as *const V) };
+            // TODO: test if this actually `drop`s exactly once
+
+            return Some((next.key.clone(), value));
+        }
+    }
+}
+
+impl<K, V> Drop for IntoIter<K, V>
+where
+    K: Sync + Send + Clone + Eq + Hash,
+    V: Sync + Send,
+{
+    fn drop(&mut self) {
+        if let Some(table) = self.table.as_mut() {
+            table.drop_bins();
+        }
     }
 }
 
@@ -188,7 +242,10 @@ mod tests {
         }
         guard.repin();
 
-        let result: HashSet<(usize, usize)> = map.drain(&guard).collect();
+        let result = map
+            .drain(&guard)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<HashSet<(usize, usize)>>();
         assert_eq!(result, expected);
 
         assert_eq!(map.len(), 0);
@@ -203,7 +260,7 @@ mod tests {
 
         let map = Arc::new(HashMap::new());
 
-        let mut expected: HashSet<(usize, usize)> = HashSet::new();
+        let mut expected = HashSet::<(usize, usize)>::new();
         {
             let guard = epoch::pin();
             for i in 0..=N {
@@ -223,7 +280,9 @@ mod tests {
 
             barrier_clone.wait();
             let drain = map_clone.drain(&guard);
-            let result: HashSet<(usize, usize)> = drain.collect();
+            let result = drain
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<HashSet<(usize, usize)>>();
 
             result
         });
@@ -272,5 +331,12 @@ mod tests {
 
         let result: HashSet<(usize, usize)> = map.into_iter().collect();
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn into_iter_uninit() {
+        let map: HashMap<usize, usize> = HashMap::new();
+
+        assert_eq!(map.into_iter().count(), 0);
     }
 }

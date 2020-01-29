@@ -1237,20 +1237,31 @@ where
 
 impl<K, V, S> IntoIterator for HashMap<K, V, S>
 where
-    K: Sync + Send + Clone + Hash + Eq + 'static,
-    V: Sync + Send + 'static,
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
     S: BuildHasher + 'static,
 {
     type Item = (K, V);
-    type IntoIter = IntoIter<'static, K, V, S>;
+    type IntoIter = IntoIter<K, V>;
     fn into_iter(self) -> Self::IntoIter {
         let guard = unsafe { epoch::unprotected() };
-        let table = self.table.load(Ordering::SeqCst, guard);
-        let node_iter = NodeIter::new(table, guard);
+
+        assert!(self.next_table.load(Ordering::SeqCst, guard).is_null());
+
+        let table = self.table.swap(Shared::null(), Ordering::SeqCst, guard);
+        if table.is_null() {
+            return IntoIter {
+                table: None,
+                bini: 0,
+            };
+        }
+
+        // safety: we own `self`
+        let table = unsafe { table.into_owned() }.into_box();
+
         IntoIter {
-            guard,
-            map: self,
-            node_iter,
+            table: Some(table),
+            bini: 0,
         }
     }
 }
