@@ -458,8 +458,7 @@ where
         self.put(key, value, false, guard)
     }
 
-    /// placeholder
-    /// TODO: Add documentation
+    /// Removes all entries from this map.
     pub fn clear<'g>(&'g self, guard: &'g Guard) {
         // Negative number of deletions
         let mut delta = 0;
