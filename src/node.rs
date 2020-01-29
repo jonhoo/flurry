@@ -1,8 +1,8 @@
 use crate::raw::Table;
-use crossbeam_epoch::{Atomic, Guard, Shared};
-use parking_lot::Mutex;
 use core::borrow::Borrow;
 use core::sync::atomic::Ordering;
+use crossbeam_epoch::{Atomic, Guard, Shared};
+use parking_lot::Mutex;
 
 /// Entry in a bin.
 ///

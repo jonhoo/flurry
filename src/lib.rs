@@ -211,7 +211,7 @@ pub use map::HashMap;
 
 /// Types needed to safely access shared data concurrently.
 pub mod epoch {
-    pub use crossbeam_epoch::Guard;
     #[cfg(feature = "std")]
     pub use crossbeam_epoch::pin;
+    pub use crossbeam_epoch::Guard;
 }

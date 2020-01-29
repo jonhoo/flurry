@@ -1,7 +1,7 @@
 use crate::node::{BinEntry, Node};
 use crate::raw::Table;
-use crossbeam_epoch::{Guard, Shared};
 use core::sync::atomic::Ordering;
+use crossbeam_epoch::{Guard, Shared};
 
 #[derive(Debug)]
 pub(crate) struct NodeIter<'g, K, V> {
