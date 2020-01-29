@@ -1179,8 +1179,11 @@ where
                                 // found the node but we have a new value to replace the old one
                                 if let Some(nv) = new_value {
                                     n.value.store(Owned::new(nv), Ordering::SeqCst);
+                                    // we are just replacing entry value and we do not want to remove the node
+                                    // so we stop iterating here
                                     break;
                                 }
+                                // we remember the old value so that we can return it and mark it for deletion below
                                 old_val = Some(ev);
                                 // remove the BinEntry containing the removed key value pair from the bucket
                                 if !pred.is_null() {
@@ -1199,10 +1202,9 @@ where
                                 // in either case, mark the BinEntry as garbage, since it was just removed
                                 // safety: as for val below / in put
                                 unsafe { guard.defer_destroy(e) };
-
-                                // since the key was found and only one node exists per key, we can break here
-                                break;
                             }
+                            // since the key was found and only one node exists per key, we can break here
+                            break;
                         }
                         pred = e;
                         if next.is_null() {
@@ -1251,8 +1253,9 @@ where
     ///
     /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
     ///
-    /// This method relies on [`HashMap::replace_node`] and do not force entries deletion if the
-    /// entry value is updated concurrently.
+    /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
+    /// modified before the removal takes place, the entry will not be removed.
+    /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
     pub fn retain<F>(&mut self, mut f: F)
     where
         F: FnMut(&K, &V) -> bool,
@@ -1271,7 +1274,8 @@ where
     ///
     /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
     ///
-    /// This method force entry deletion even if if it is updated concurrently.
+    /// This method always deletes any key/value pair that `f` returns `false` for,
+    /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
     pub fn retain_force<F>(&mut self, mut f: F)
     where
         F: FnMut(&K, &V) -> bool,
@@ -1280,7 +1284,7 @@ where
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
-                self.remove(k, &guard);
+                self.replace_node(k, None, None, &guard);
             }
         }
     }
