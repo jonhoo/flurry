@@ -458,9 +458,11 @@ where
         self.put(key, value, false, guard)
     }
 
+    /// placeholder
+    /// TODO: Add documentation
     pub fn clear<'g>(&'g self, guard: &'g Guard) {
         // Negative number of deletions
-        let delta = 0;
+        let mut delta = 0;
         let mut idx = 0usize;
 
         let table = self.table.load(Ordering::SeqCst, guard);
@@ -472,7 +474,6 @@ where
         // Safety: self.table is a valid pointer because we checked it above.
         let tab = unsafe { table.deref() };
         while idx < tab.bins.len() {
-            let hash = 0u64;
             let node = tab.bin(idx, guard);
             if node.is_null() {
                 idx = idx + 1;
@@ -488,14 +489,14 @@ where
                 }
                 BinEntry::Node(_) => {
                     // TODO: start synchronized block
-                    let f = tab.bin(idx, guard);
-                    let p: Shared<'g, Node<K, V>> =
-                        todo!("get node as written in 1173 in the java source");
-                    while !p.is_null() {
+                    let mut p: Option<&Node<K, V>> = unsafe { tab.bin(0, guard).deref() }.as_node();
+                    while p.is_some() {
                         delta = delta - 1;
-                        p = unsafe { p.deref() }.next.load(Ordering::SeqCst, guard);
+                        p = unsafe { p.unwrap().next.load(Ordering::SeqCst, guard).deref() }
+                            .as_node();
                     }
-                    // TODO: implement this: setTabAt(tab, i++, null);
+                    idx = idx + 1;
+                    tab.store_bin(idx, Shared::null());
                     // TODO: end synchronized block
                 }
             };
