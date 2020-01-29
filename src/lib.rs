@@ -489,15 +489,13 @@ where
                 BinEntry::Node(_) => {
                     // TODO: start synchronized block
                     let f = tab.bin(idx, guard);
-                    if !f.is_null() && unsafe { f.deref() } == node {
-                        let p: Node<K, V> = todo!("get node as written in 1173 in the java source");
-                        let p = Shared::from(p);
-                        while !p.is_null() {
-                            delta = delta - 1;
-                            p = unsafe { p.deref() }.next.load(Ordering::SeqCst, guard);
-                        }
-                        // TODO: implement this: setTabAt(tab, i++, null);
+                    let p: Shared<'g, Node<K, V>> =
+                        todo!("get node as written in 1173 in the java source");
+                    while !p.is_null() {
+                        delta = delta - 1;
+                        p = unsafe { p.deref() }.next.load(Ordering::SeqCst, guard);
                     }
+                    // TODO: implement this: setTabAt(tab, i++, null);
                     // TODO: end synchronized block
                 }
             };
