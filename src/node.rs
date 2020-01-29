@@ -1,6 +1,7 @@
-use super::Table;
-use crossbeam::epoch::{Atomic, Guard, Shared};
+use crate::raw::Table;
+use crossbeam_epoch::{Atomic, Guard, Shared};
 use parking_lot::Mutex;
+use std::borrow::Borrow;
 use std::sync::atomic::Ordering;
 
 /// Entry in a bin.
@@ -9,6 +10,36 @@ use std::sync::atomic::Ordering;
 #[derive(Debug)]
 pub(crate) enum BinEntry<K, V> {
     Node(Node<K, V>),
+    // safety: the pointer t to the next table inside Moved(t) is a valid pointer if the Moved(t)
+    // entry was read after loading `map::HashMap.table` while the guard used to load that table is
+    // still alive:
+    //
+    // When loading the current table of the HashMap with a guard g, the current epoch will be
+    // pinned by g. This happens _before_ the resize which put the Moved entry into the current
+    // table finishes, as otherwise a different table would have been loaded (see
+    // `map::HashMap::transfer`).
+    //
+    // Hence, for the Moved(t) read from the loaded table:
+    //
+    //   - When trying to access t during the current resize, t points to map::HashMap.next_table
+    //     and is thus valid.
+    //
+    //   - After the current resize and before another resize, `t == map::HashMap.table` as the
+    //     "next table" t pointed to during the resize has become the current table. Thus t is
+    //     still valid.
+    //
+    //   - The above is true until a subsequent resize ends, at which point `map::HashMap.table´ is
+    //     set to another new table != t and t is `epoch::Guard::defer_destroy`ed (again, see
+    //     `map::HashMap::transfer`). At this point, t is not referenced by the map anymore.
+    //     However, the guard g used to load the table is still pinning the epoch at the time of
+    //     the call to `defer_destroy`. Thus, t remains valid for at least the lifetime of g.
+    //
+    //   - After releasing g, either the current resize is finished and operations on the map
+    //     cannot access t anymore as a more recent table will be loaded as the current table
+    //     (see once again `map::HashMap::transfer`), or the argument is as above.
+    //
+    // Since finishing a resize is the only time a table is `defer_destroy`ed, the above covers
+    // all cases.
     Moved(*const Table<K, V>),
 }
 
@@ -40,16 +71,17 @@ impl<K, V> BinEntry<K, V> {
     }
 }
 
-impl<K, V> BinEntry<K, V>
-where
-    K: Eq,
-{
-    pub(crate) fn find<'g>(
+impl<K, V> BinEntry<K, V> {
+    pub(crate) fn find<'g, Q>(
         &'g self,
         hash: u64,
-        key: &K,
+        key: &Q,
         guard: &'g Guard,
-    ) -> Shared<'g, BinEntry<K, V>> {
+    ) -> Shared<'g, BinEntry<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Eq,
+    {
         match *self {
             BinEntry::Node(_) => {
                 let mut node = self;
@@ -60,12 +92,12 @@ where
                         unreachable!();
                     };
 
-                    if n.hash == hash && &n.key == key {
-                        break Shared::from(self as *const _);
+                    if n.hash == hash && n.key.borrow() == key {
+                        return Shared::from(node as *const _);
                     }
                     let next = n.next.load(Ordering::SeqCst, guard);
                     if next.is_null() {
-                        break Shared::null();
+                        return Shared::null();
                     }
                     // safety: next will only be dropped, if we are dropped. we won't be dropped until epoch
                     // passes, which is protected by guard.
@@ -80,7 +112,7 @@ where
                 let mut table = unsafe { &*next_table };
 
                 loop {
-                    if table.bins.is_empty() {
+                    if table.is_empty() {
                         return Shared::null();
                     }
                     let bini = table.bini(hash);

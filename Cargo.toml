@@ -1,6 +1,6 @@
 [package]
 name = "flurry"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2018"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 license = "MIT OR Apache-2.0"
@@ -20,7 +20,9 @@ codecov = { repository = "jonhoo/flurry", branch = "master", service = "github" 
 maintenance = { status = "experimental" }
 
 [dependencies]
-crossbeam = "0.7"
+crossbeam-epoch = "0.8"
 parking_lot = "0.10"
-rand = "0.7"
 num_cpus = "1.12.0"
+
+[dev-dependencies]
+rand = "0.7"

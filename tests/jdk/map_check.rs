@@ -1,4 +1,4 @@
-use crossbeam::epoch;
+use crossbeam_epoch as epoch;
 use flurry::*;
 use rand::prelude::*;
 use std::hash::Hash;
@@ -6,7 +6,7 @@ use std::hash::Hash;
 const SIZE: usize = 50_000;
 const ABSENT_SIZE: usize = 1 << 17;
 
-fn t1<K, V>(map: &FlurryHashMap<K, V>, keys: &[K], expect: usize)
+fn t1<K, V>(map: &HashMap<K, V>, keys: &[K], expect: usize)
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -24,7 +24,7 @@ where
     assert_eq!(sum, expect * iters);
 }
 
-fn t2<K>(map: &FlurryHashMap<K, usize>, keys: &[K], expect: usize)
+fn t2<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
     K: Sync + Send + Copy + Hash + Eq + std::fmt::Display,
 {
@@ -38,7 +38,7 @@ where
     assert_eq!(sum, expect);
 }
 
-fn t3<K>(map: &FlurryHashMap<K, usize>, keys: &[K], expect: usize)
+fn t3<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
     K: Sync + Send + Copy + Hash + Eq,
 {
@@ -52,7 +52,7 @@ where
     assert_eq!(sum, expect);
 }
 
-fn t4<K>(map: &FlurryHashMap<K, usize>, keys: &[K], expect: usize)
+fn t4<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
     K: Sync + Send + Copy + Hash + Eq,
 {
@@ -65,7 +65,7 @@ where
     assert_eq!(sum, expect);
 }
 
-fn t5<K>(map: &FlurryHashMap<K, usize>, keys: &[K], expect: usize)
+fn t5<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
     K: Sync + Send + Copy + Hash + Eq,
 {
@@ -81,7 +81,7 @@ where
     assert_eq!(sum, expect);
 }
 
-fn t7<K>(map: &FlurryHashMap<K, usize>, k1: &[K], k2: &[K])
+fn t7<K>(map: &HashMap<K, usize>, k1: &[K], k2: &[K])
 where
     K: Sync + Send + Copy + Hash + Eq,
 {
@@ -97,7 +97,7 @@ where
     assert_eq!(sum, k1.len());
 }
 
-fn ittest1<K>(map: &FlurryHashMap<K, usize>, expect: usize)
+fn ittest1<K>(map: &HashMap<K, usize>, expect: usize)
 where
     K: Sync + Send + Copy + Hash + Eq,
 {
@@ -109,7 +109,7 @@ where
     assert_eq!(sum, expect);
 }
 
-fn ittest2<K>(map: &FlurryHashMap<K, usize>, expect: usize)
+fn ittest2<K>(map: &HashMap<K, usize>, expect: usize)
 where
     K: Sync + Send + Copy + Hash + Eq,
 {
@@ -121,7 +121,7 @@ where
     assert_eq!(sum, expect);
 }
 
-fn ittest3<K>(map: &FlurryHashMap<K, usize>, expect: usize)
+fn ittest3<K>(map: &HashMap<K, usize>, expect: usize)
 where
     K: Sync + Send + Copy + Hash + Eq,
 {
@@ -137,7 +137,7 @@ where
 fn everything() {
     let mut rng = rand::thread_rng();
 
-    let map = FlurryHashMap::new();
+    let map = HashMap::new();
     let mut keys: Vec<_> = (0..ABSENT_SIZE + SIZE).collect();
     keys.shuffle(&mut rng);
     let absent_keys = &keys[0..ABSENT_SIZE];
