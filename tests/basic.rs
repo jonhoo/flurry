@@ -8,6 +8,21 @@ fn new() {
 }
 
 #[test]
+fn clear() {
+    let map = FlurryHashMap::<usize, usize>::new();
+    let guard = epoch::pin();
+    {
+        map.insert(0, 1, &guard);
+        map.insert(1, 1, &guard);
+        map.insert(2, 1, &guard);
+        map.insert(3, 1, &guard);
+        map.insert(4, 1, &guard);
+    }
+    map.clear(&guard);
+    assert!(map.len() == 0);
+}
+
+#[test]
 fn insert() {
     let map = FlurryHashMap::<usize, usize>::new();
     let guard = epoch::pin();

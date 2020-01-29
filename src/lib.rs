@@ -491,11 +491,16 @@ where
                 }
                 BinEntry::Node(_) => {
                     // TODO: start synchronized block
-                    let mut p: Option<&Node<K, V>> = unsafe { tab.bin(0, guard).deref() }.as_node();
+                    let mut p: Option<&Node<K, V>> = match tab.bin(0, guard) {
+                        s if s.is_null() => None,
+                        s => unsafe { s.deref() }.as_node(),
+                    };
                     while p.is_some() {
                         delta = delta - 1;
-                        p = unsafe { p.unwrap().next.load(Ordering::SeqCst, guard).deref() }
-                            .as_node();
+                        p = match p.unwrap().next.load(Ordering::SeqCst, guard) {
+                            s if s.is_null() => None,
+                            s => unsafe { s.deref() }.as_node(),
+                        };
                     }
                     idx = idx + 1;
                     tab.store_bin(idx, Shared::null());
