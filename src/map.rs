@@ -2,19 +2,17 @@ use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
-use std::borrow::Borrow;
+use core::borrow::Borrow;
 use std::collections::hash_map::RandomState;
-use std::fmt::{self, Debug, Formatter};
-use std::hash::{BuildHasher, Hash, Hasher};
-use std::iter::FromIterator;
-use std::sync::{
-    atomic::{AtomicIsize, AtomicUsize, Ordering},
-    Once,
-};
+use core::fmt::{self, Debug, Formatter};
+use core::hash::{BuildHasher, Hash, Hasher};
+use core::iter::FromIterator;
+use core::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
+use std::sync::Once;
 
 macro_rules! isize_bits {
     () => {
-        std::mem::size_of::<isize>() * 8
+       core::mem::size_of::<isize>() * 8
     };
 }
 
@@ -583,7 +581,7 @@ where
     fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard) {
         // TODO: implement the Java CounterCell business here
 
-        use std::cmp;
+        use core::cmp;
         let mut count = match n.cmp(&0) {
             cmp::Ordering::Greater => {
                 let n = n as usize;
@@ -672,7 +670,7 @@ where
         let ncpu = num_cpus();
 
         let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n };
-        let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
+        let stride = core::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
 
         if next_table.is_null() {
             // we are initiating a resize
@@ -957,7 +955,7 @@ where
             // TODO: find out if this is neccessary
             let size = size + (size >> 1) + 1;
 
-            std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
+            core::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
         } as isize;
 
         loop {

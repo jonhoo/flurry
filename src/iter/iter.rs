@@ -1,6 +1,6 @@
 use super::NodeIter;
 use crossbeam_epoch::Guard;
-use std::sync::atomic::Ordering;
+use core::sync::atomic::Ordering;
 
 /// An iterator over a map's entries.
 ///
@@ -63,7 +63,7 @@ mod tests {
     use crate::HashMap;
     use crossbeam_epoch as epoch;
     use std::collections::HashSet;
-    use std::iter::FromIterator;
+    use core::iter::FromIterator;
 
     #[test]
     fn iter() {
