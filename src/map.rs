@@ -341,7 +341,7 @@ where
     #[inline]
     /// Maps `key` to `value` in this table.
     ///
-    /// The value can be retrieved by calling [`get`] with a key that is equal to the original key.
+    /// The value can be retrieved by calling [`HashMap::get`] with a key that is equal to the original key.
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.put(key, value, false, guard)
     }
@@ -1078,6 +1078,27 @@ where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
+        self.replace_node(key, None, None, guard)
+    }
+
+    /// Replaces node value with v, conditional upon match of cv.
+    /// If resulting value does not exist it removes the key (and its corresponding value) from this map.
+    /// This method does nothing if the key is not in the map.
+    /// Returns the previous value associated with the given key.
+    ///
+    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
+    /// form must match those for the key type.
+    fn replace_node<'g, Q>(
+        &'g self,
+        key: &Q,
+        new_value: Option<V>,
+        observed_value: Option<Shared<'g, V>>,
+        guard: &'g Guard,
+    ) -> Option<&'g V>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
         let h = self.hash(key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
@@ -1152,26 +1173,36 @@ where
                         let next = n.next.load(Ordering::SeqCst, guard);
                         if n.hash == h && n.key.borrow() == key {
                             let ev = n.value.load(Ordering::SeqCst, guard);
-                            old_val = Some(ev);
 
-                            // remove the BinEntry containing the removed key value pair from the bucket
-                            if !pred.is_null() {
-                                // either by changing the pointer of the previous BinEntry, if present
-                                // safety: as above
-                                unsafe { pred.deref() }
-                                    .as_node()
-                                    .unwrap()
-                                    .next
-                                    .store(next, Ordering::SeqCst);
-                            } else {
-                                // or by setting the next node as the first BinEntry if there is no previous entry
-                                t.store_bin(i, next);
+                            // just remove the node if the value is the one we expected at method call
+                            if observed_value.map(|ov| ov == ev).unwrap_or(true) {
+                                // found the node but we have a new value to replace the old one
+                                if let Some(nv) = new_value {
+                                    n.value.store(Owned::new(nv), Ordering::SeqCst);
+                                    // we are just replacing entry value and we do not want to remove the node
+                                    // so we stop iterating here
+                                    break;
+                                }
+                                // we remember the old value so that we can return it and mark it for deletion below
+                                old_val = Some(ev);
+                                // remove the BinEntry containing the removed key value pair from the bucket
+                                if !pred.is_null() {
+                                    // either by changing the pointer of the previous BinEntry, if present
+                                    // safety: as above
+                                    unsafe { pred.deref() }
+                                        .as_node()
+                                        .unwrap()
+                                        .next
+                                        .store(next, Ordering::SeqCst);
+                                } else {
+                                    // or by setting the next node as the first BinEntry if there is no previous entry
+                                    t.store_bin(i, next);
+                                }
+
+                                // in either case, mark the BinEntry as garbage, since it was just removed
+                                // safety: as for val below / in put
+                                unsafe { guard.defer_destroy(e) };
                             }
-
-                            // in either case, mark the BinEntry as garbage, since it was just removed
-                            // safety: as for val below / in put
-                            unsafe { guard.defer_destroy(e) };
-
                             // since the key was found and only one node exists per key, we can break here
                             break;
                         }
@@ -1216,6 +1247,46 @@ where
             }
         }
         None
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    ///
+    /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
+    /// modified before the removal takes place, the entry will not be removed.
+    /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
+    pub fn retain<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        let guard = epoch::pin();
+        // removed selected keys
+        for (k, v) in self.iter(&guard) {
+            if !f(k, v) {
+                let old_value: Shared<'_, V> = Shared::from(v as *const V);
+                self.replace_node(k, None, Some(old_value), &guard);
+            }
+        }
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    ///
+    /// This method always deletes any key/value pair that `f` returns `false` for,
+    /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
+    pub fn retain_force<F>(&mut self, mut f: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        let guard = epoch::pin();
+        // removed selected keys
+        for (k, v) in self.iter(&guard) {
+            if !f(k, v) {
+                self.replace_node(k, None, None, &guard);
+            }
+        }
     }
 
     /// An iterator visiting all key-value pairs in arbitrary order.
@@ -1604,5 +1675,54 @@ mod tests {
 /// drop(guard);
 /// drop(r);
 /// ```
+
+#[test]
+fn replace_empty() {
+    let map = HashMap::<usize, usize>::new();
+
+    {
+        let guard = epoch::pin();
+        let old = map.replace_node(&42, None, None, &guard);
+        assert!(old.is_none());
+    }
+}
+
+#[test]
+fn replace_existing() {
+    let map = HashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, 42, &guard);
+        let old = map.replace_node(&42, Some(10), None, &guard);
+        assert!(old.is_none());
+        assert_eq!(*map.get(&42, &guard).unwrap(), 10);
+    }
+}
+
+#[test]
+fn replace_existing_observed_value_matching() {
+    let map = HashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, 42, &guard);
+        let observed_value = Shared::from(map.get(&42, &guard).unwrap() as *const _);
+        let old = map.replace_node(&42, Some(10), Some(observed_value), &guard);
+        assert!(old.is_none());
+        assert_eq!(*map.get(&42, &guard).unwrap(), 10);
+    }
+}
+
+#[test]
+fn replace_existing_observed_value_non_matching() {
+    let map = HashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, 42, &guard);
+        let old = map.replace_node(&42, Some(10), Some(Shared::null()), &guard);
+        assert!(old.is_none());
+        assert_eq!(*map.get(&42, &guard).unwrap(), 42);
+    }
+}
+
 #[allow(dead_code)]
 struct CompileFailTests;
