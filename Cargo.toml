@@ -32,6 +32,7 @@ chashmap = "2.2"
 dashmap = "3.2"
 cht = "0.1"
 contrie = "0.1"
+hashbrown = "0.6"
 
 [[bench]]
 name = "flurry" 
@@ -55,4 +56,8 @@ harness = false
 
 [[bench]]
 name = "rwlock_std"
+harness = false
+
+[[bench]]
+name = "hashbrown"
 harness = false
