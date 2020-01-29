@@ -88,7 +88,7 @@ impl<K, V, S> Default for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
-    S: BuildHasher + Default
+    S: BuildHasher + Default,
 {
     fn default() -> Self {
         Self::new()
@@ -99,7 +99,7 @@ impl<K, V, S> HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
-    S: BuildHasher + Default
+    S: BuildHasher + Default,
 {
     /// Creates a new, empty map with the default initial table size (16).
     pub fn new() -> Self {
@@ -1452,7 +1452,7 @@ impl<K, V, S> FromIterator<(K, V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
-    S: BuildHasher + Default
+    S: BuildHasher + Default,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
@@ -1478,7 +1478,7 @@ impl<'a, K, V, S> FromIterator<(&'a K, &'a V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
-    S: BuildHasher + Default
+    S: BuildHasher + Default,
 {
     #[inline]
     fn from_iter<T: IntoIterator<Item = (&'a K, &'a V)>>(iter: T) -> Self {
@@ -1490,7 +1490,7 @@ impl<'a, K, V, S> FromIterator<&'a (K, V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
-    S: BuildHasher + Default
+    S: BuildHasher + Default,
 {
     #[inline]
     fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
