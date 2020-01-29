@@ -312,7 +312,10 @@ where
             let mut sc = self.size_ctl.load(Ordering::SeqCst);
             if sc < 0 {
                 // we lost the initialization race; just spin
+                #[cfg(not(feature = "std"))]
                 core::sync::atomic::spin_loop_hint();
+                #[cfg(feature = "std")]
+                std::thread::yield_now();
                 continue;
             }
 
