@@ -205,18 +205,9 @@ mod map;
 mod node;
 mod raw;
 
-#[macro_use]
-extern crate cfg_if;
 #[cfg(feature = "std")]
-extern crate core;
+use std as alloc;
 
-cfg_if! {
-    if #[cfg(feature = "alloc")] {
-        extern crate alloc;
-    } else if #[cfg(feature = "std")] {
-        extern crate std as alloc;
-    }
-}
 /// Iterator types.
 pub mod iter;
 
