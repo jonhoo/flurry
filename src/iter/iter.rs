@@ -134,34 +134,25 @@ where
         let node = unsafe { bin.deref() }.as_node().unwrap();
         let next = node.next.load(Ordering::SeqCst, &guard);
 
+        // replace the `head` of the linked list of this bin with the next item in the list
+        // or `null` if there is none
+        table.swap_bin(self.bini, next, &guard);
+
         if next.is_null() {
-            // last item in the linked list. Set the bin to `null`;
-            table.store_bin(self.bini, Shared::null());
             // since we know that this bin is now empty we can increment `bini` so
             // that we do not have to load it again on the next call to `next`
             self.bini += 1;
-
-            // take the node's value
-            let value = node.value.swap(Shared::null(), Ordering::SeqCst, &guard);
-            // safety: we just took the last item from this bin and thus have exclusive acess to it
-            let value = unsafe { std::ptr::read(value.as_ref().unwrap() as *const V) };
-            // TODO: test if this actually `drop`s exactly once
-
-            return Some((node.key.clone(), value));
-        } else {
-            let next = unsafe { next.deref() }.as_node().unwrap();
-
-            // remove `next` from the linked list
-            node.next
-                .store(next.next.load(Ordering::SeqCst, &guard), Ordering::SeqCst);
-
-            let value = next.value.swap(Shared::null(), Ordering::SeqCst, &guard);
-            // safety: we just removed `next` from the linked list and thus have exclusive acess to it
-            let value = unsafe { std::ptr::read(value.as_ref().unwrap() as *const V) };
-            // TODO: test if this actually `drop`s exactly once
-
-            return Some((next.key.clone(), value));
         }
+
+        // take the node's value
+        let value = node.value.swap(Shared::null(), Ordering::SeqCst, &guard);
+
+        // safety: we just took removed node from the linked list and thus have exclusive acess to it
+        let value = unsafe { std::ptr::read(value.as_ref().unwrap() as *const V) };
+
+        // TODO: test if this actually `drop`s exactly once
+
+        return Some((node.key.clone(), value));
     }
 }
 

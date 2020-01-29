@@ -130,4 +130,14 @@ impl<K, V> Table<K, V> {
     pub(crate) fn store_bin<P: crossbeam_epoch::Pointer<BinEntry<K, V>>>(&self, i: usize, new: P) {
         self.bins[i].store(new, Ordering::Release)
     }
+
+    #[inline]
+    pub(crate) fn swap_bin<'g>(
+        &'g self,
+        i: usize,
+        new: Shared<BinEntry<K, V>>,
+        guard: &'g Guard,
+    ) -> Shared<'g, BinEntry<K, V>> {
+        self.bins[i].swap(new, Ordering::SeqCst, guard)
+    }
 }
