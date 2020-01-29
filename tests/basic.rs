@@ -235,6 +235,46 @@ fn concurrent_remove() {
 }
 
 #[test]
+fn concurrent_resize_and_get() {
+    let map = Arc::new(HashMap::<usize, usize>::new());
+    {
+        let guard = epoch::pin();
+        for i in 0..32 {
+            map.insert(i, i, &guard);
+        }
+    }
+
+    let map1 = map.clone();
+    // t1 is inserting a lot of new keys, triggering resizes
+    let t1 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        for i in 32..1024 {
+            assert!(map1.insert(i, i, &guard).is_none());
+        }
+    });
+    let map2 = map.clone();
+    // t2 is retrieving existing keys a lot, attempting to encounter a BinEntry::Moved
+    let t2 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        for _ in 0..32 {
+            for i in 0..32 {
+                let v = map2.get(&i, &guard).unwrap();
+                assert_eq!(v, &i);
+            }
+        }
+    });
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    let guard = epoch::pin();
+    for i in 0..1024 {
+        let (k, v) = map.get_key_value(&i, &guard).unwrap();
+        assert_eq!(k, v);
+    }
+}
+
+#[test]
 fn current_kv_dropped() {
     let dropped1 = Arc::new(0);
     let dropped2 = Arc::new(0);
