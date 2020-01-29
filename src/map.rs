@@ -341,7 +341,7 @@ where
     #[inline]
     /// Maps `key` to `value` in this table.
     ///
-    /// The value can be retrieved by calling [`get`] with a key that is equal to the original key.
+    /// The value can be retrieved by calling [`HashMap::get`] with a key that is equal to the original key.
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.put(key, value, false, guard)
     }
