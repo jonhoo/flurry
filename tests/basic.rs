@@ -1,4 +1,4 @@
-use crossbeam_epoch::{self as epoch};
+use crossbeam_epoch as epoch;
 use flurry::*;
 use std::sync::Arc;
 
@@ -349,6 +349,101 @@ fn clone_map_filled() {
     // test that we are not mapping the same tables
     map.insert("NewItem", 100, &epoch::pin());
     assert_ne!(&map, &cloned_map);
+}
+
+#[test]
+fn default() {
+    let map: HashMap<usize, usize> = Default::default();
+
+    let guard = epoch::pin();
+    map.insert(42, 0, &guard);
+
+    assert_eq!(map.get(&42, &guard), Some(&0));
+}
+
+#[test]
+fn get_and() {
+    let map: HashMap<usize, usize> = HashMap::new();
+
+    let guard = epoch::pin();
+    map.insert(42, 32, &guard);
+
+    assert_eq!(map.get_and(&42, |value| *value + 10), Some(42));
+}
+
+#[test]
+fn debug() {
+    let map: HashMap<usize, usize> = HashMap::new();
+
+    let guard = epoch::pin();
+    map.insert(42, 0, &guard);
+    map.insert(16, 8, &guard);
+
+    let formatted = format!("{:?}", map);
+
+    assert!(formatted == "{42: 0, 16: 8}" || formatted == "{16: 8, 42: 0}");
+}
+
+#[test]
+fn extend() {
+    let map: HashMap<usize, usize> = HashMap::new();
+
+    let guard = epoch::pin();
+
+    let mut entries: Vec<(usize, usize)> = vec![(42, 0), (16, 6), (38, 42)];
+    entries.sort();
+
+    (&map).extend(entries.clone().into_iter());
+
+    let mut collected: Vec<(usize, usize)> = map
+        .iter(&guard)
+        .map(|(key, value)| (*key, *value))
+        .collect();
+    collected.sort();
+
+    assert_eq!(entries, collected);
+}
+
+#[test]
+fn extend_ref() {
+    let map: HashMap<usize, usize> = HashMap::new();
+
+    let mut entries: Vec<(&usize, &usize)> = vec![(&42, &0), (&16, &6), (&38, &42)];
+    entries.sort();
+
+    (&map).extend(entries.clone().into_iter());
+
+    let guard = epoch::pin();
+    let mut collected: Vec<(&usize, &usize)> = map.iter(&guard).collect();
+    collected.sort();
+
+    assert_eq!(entries, collected);
+}
+
+#[test]
+fn from_iter_ref() {
+    use std::iter::FromIterator;
+
+    let mut entries: Vec<(&usize, &usize)> = vec![(&42, &0), (&16, &6), (&38, &42)];
+    entries.sort();
+
+    let map: HashMap<usize, usize> = HashMap::from_iter(entries.clone().into_iter());
+
+    let guard = epoch::pin();
+    let mut collected: Vec<(&usize, &usize)> = map.iter(&guard).collect();
+    collected.sort();
+
+    assert_eq!(entries, entries)
+}
+
+#[test]
+fn from_iter_empty() {
+    use std::iter::FromIterator;
+
+    let entries: Vec<(usize, usize)> = Vec::new();
+    let map: HashMap<usize, usize> = HashMap::from_iter(entries.into_iter());
+
+    assert_eq!(map.len(), 0)
 }
 
 #[test]

@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering;
 
 /// An iterator over a map's entries.
 ///
-/// See [`HashMap::iter`] for details.
+/// See [`HashMap::iter`](crate::HashMap::iter) for details.
 #[derive(Debug)]
 pub struct Iter<'g, K, V> {
     pub(crate) node_iter: NodeIter<'g, K, V>,
@@ -24,7 +24,7 @@ impl<'g, K, V> Iterator for Iter<'g, K, V> {
 
 /// An iterator over a map's keys.
 ///
-/// See [`HashMap::keys`] for details.
+/// See [`HashMap::keys`](crate::HashMap::keys) for details.
 #[derive(Debug)]
 pub struct Keys<'g, K, V> {
     pub(crate) node_iter: NodeIter<'g, K, V>,
@@ -40,7 +40,7 @@ impl<'g, K, V> Iterator for Keys<'g, K, V> {
 
 /// An iterator over a map's values.
 ///
-/// See [`HashMap::values`] for details.
+/// See [`HashMap::values`](crate::HashMap::values) for details.
 #[derive(Debug)]
 pub struct Values<'g, K, V> {
     pub(crate) node_iter: NodeIter<'g, K, V>,
