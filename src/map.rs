@@ -307,10 +307,16 @@ where
             // try to allocate the table
             let mut sc = self.size_ctl.load(Ordering::SeqCst);
             if sc < 0 {
-                // we lost the initialization race; just spin
                 #[cfg(not(feature = "std"))]
+                // for there to be a race, there must be another thread running
+                // concurrently with us. That thread cannot be blocked on us,
+                // since we are not in any mutually-exclusive section. So our
+                // goal is just to not waste cycles and give it some time to
+                // complete. It is not a requirement that we fully yield.
                 core::sync::atomic::spin_loop_hint();
+
                 #[cfg(feature = "std")]
+                // we lost the initialization race; just spin
                 std::thread::yield_now();
                 continue;
             }
