@@ -20,6 +20,7 @@ codecov = { repository = "jonhoo/flurry", branch = "master", service = "github" 
 maintenance = { status = "experimental" }
 
 [dependencies]
+cfg-if = "0.1"
 parking_lot = "0.10"
 num_cpus = "1.12.0"
 

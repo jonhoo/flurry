@@ -199,11 +199,24 @@
     intra_doc_link_resolution_failure
 )]
 #![warn(rust_2018_idioms)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 mod map;
 mod node;
 mod raw;
 
+#[macro_use]
+extern crate cfg_if;
+#[cfg(feature = "std")]
+extern crate core;
+
+cfg_if! {
+    if #[cfg(feature = "alloc")] {
+        extern crate alloc;
+    } else if #[cfg(feature = "std")] {
+        extern crate std as alloc;
+    }
+}
 /// Iterator types.
 pub mod iter;
 
