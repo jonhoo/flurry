@@ -3,6 +3,7 @@ use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
 use core::borrow::Borrow;
+#[cfg(feature="std")]
 use std::collections::hash_map::RandomState;
 use core::fmt::{self, Debug, Formatter};
 use core::hash::{BuildHasher, Hash, Hasher};
@@ -83,6 +84,7 @@ pub struct HashMap<K, V, S = RandomState> {
     build_hasher: S,
 }
 
+#[cfg(feature="std")]
 impl<K, V> Default for HashMap<K, V, RandomState>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -93,6 +95,7 @@ where
     }
 }
 
+#[cfg(feature="std")]
 impl<K, V> HashMap<K, V, RandomState>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -309,7 +312,7 @@ where
             let mut sc = self.size_ctl.load(Ordering::SeqCst);
             if sc < 0 {
                 // we lost the initialization race; just spin
-                std::thread::yield_now();
+                core::sync::atomic::spin_loop_hint(); 
                 continue;
             }
 
@@ -1445,6 +1448,7 @@ where
     }
 }
 
+#[cfg(feature="std")]
 impl<K, V> FromIterator<(K, V)> for HashMap<K, V, RandomState>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -1470,6 +1474,7 @@ where
     }
 }
 
+#[cfg(feature="std")]
 impl<'a, K, V> FromIterator<(&'a K, &'a V)> for HashMap<K, V, RandomState>
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -1481,6 +1486,7 @@ where
     }
 }
 
+#[cfg(feature="std")]
 impl<'a, K, V> FromIterator<&'a (K, V)> for HashMap<K, V, RandomState>
 where
     K: Sync + Send + Copy + Hash + Eq,
