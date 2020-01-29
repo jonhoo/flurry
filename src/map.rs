@@ -85,30 +85,32 @@ pub struct HashMap<K, V, S = RandomState> {
     build_hasher: S,
 }
 
-impl<K, V> Default for HashMap<K, V, RandomState>
+impl<K, V, S> Default for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
+    S: BuildHasher + Default,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K, V> HashMap<K, V, RandomState>
+impl<K, V, S> HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
+    S: BuildHasher + Default,
 {
     /// Creates a new, empty map with the default initial table size (16).
     pub fn new() -> Self {
-        Self::with_hasher(RandomState::new())
+        Self::with_hasher(S::default())
     }
 
     /// Creates a new, empty map with an initial table size accommodating the specified number of
     /// elements without the need to dynamically resize.
     pub fn with_capacity(n: usize) -> Self {
-        Self::with_capacity_and_hasher(RandomState::new(), n)
+        Self::with_capacity_and_hasher(S::default(), n)
     }
 }
 
@@ -1448,10 +1450,11 @@ where
     }
 }
 
-impl<K, V> FromIterator<(K, V)> for HashMap<K, V, RandomState>
+impl<K, V, S> FromIterator<(K, V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
+    S: BuildHasher + Default,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
@@ -1473,10 +1476,11 @@ where
     }
 }
 
-impl<'a, K, V> FromIterator<(&'a K, &'a V)> for HashMap<K, V, RandomState>
+impl<'a, K, V, S> FromIterator<(&'a K, &'a V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
+    S: BuildHasher + Default,
 {
     #[inline]
     fn from_iter<T: IntoIterator<Item = (&'a K, &'a V)>>(iter: T) -> Self {
@@ -1484,10 +1488,11 @@ where
     }
 }
 
-impl<'a, K, V> FromIterator<&'a (K, V)> for HashMap<K, V, RandomState>
+impl<'a, K, V, S> FromIterator<&'a (K, V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
+    S: BuildHasher + Default,
 {
     #[inline]
     fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
@@ -1549,6 +1554,7 @@ fn capacity() {
     // The table has been resized once (and it's capacity doubled),
     // since we inserted more elements than it can hold
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
