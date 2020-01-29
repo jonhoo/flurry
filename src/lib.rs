@@ -458,6 +458,52 @@ where
         self.put(key, value, false, guard)
     }
 
+    pub fn clear<'g>(&'g self, guard: &'g Guard) {
+        // Negative number of deletions
+        let delta = 0;
+        let mut idx = 0usize;
+
+        let table = self.table.load(Ordering::SeqCst, guard);
+        if table.is_null() {
+            // TODO: proper handling here?
+            return;
+        }
+
+        // Safety: self.table is a valid pointer because we checked it above.
+        let tab = unsafe { table.deref() };
+        while idx < tab.bins.len() {
+            let hash = 0u64;
+            let node = tab.bin(idx, guard);
+            if node.is_null() {
+                idx = idx + 1;
+                continue;
+            }
+            // Safety: node is a valid pointer because we checked
+            // it in the above if stmt.
+            let node = unsafe { node.deref() };
+            match node {
+                BinEntry::Moved(_) => {
+                    // tab = helpTransfer
+                    idx = 0;
+                }
+                BinEntry::Node(_) => {
+                    // TODO: start synchronized block
+                    let f = tab.bin(idx, guard);
+                    if !f.is_null() && unsafe { f.deref() } == node {
+                        let p: Node<K, V> = todo!("get node as written in 1173 in the java source");
+                        let p = Shared::from(p);
+                        while !p.is_null() {
+                            delta = delta - 1;
+                            p = unsafe { p.deref() }.next.load(Ordering::SeqCst, guard);
+                        }
+                        // TODO: implement this: setTabAt(tab, i++, null);
+                    }
+                    // TODO: end synchronized block
+                }
+            };
+        }
+    }
+
     fn put<'g>(
         &'g self,
         key: K,
