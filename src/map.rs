@@ -1273,8 +1273,8 @@ where
     ///
     /// This method force entry deletion even if if it is updated concurrently.
     pub fn retain_force<F>(&mut self, mut f: F)
-        where
-            F: FnMut(&K, &V) -> bool,
+    where
+        F: FnMut(&K, &V) -> bool,
     {
         let guard = epoch::pin();
         // removed selected keys
