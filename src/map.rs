@@ -11,18 +11,14 @@ use std::sync::{
     Once,
 };
 
-macro_rules! isize_bits {
-    () => {
-        std::mem::size_of::<isize>() * 8
-    };
-}
+const ISIZE_BITS: usize = core::mem::size_of::<isize>() * 8;
 
 /// The largest possible table capacity.  This value must be
 /// exactly 1<<30 to stay within Java array allocation and indexing
 /// bounds for power of two table sizes, and is further required
 /// because the top two bits of 32bit hash fields are used for
 /// control purposes.
-const MAXIMUM_CAPACITY: usize = 1 << 30; // TODO: use isize_bits!()
+const MAXIMUM_CAPACITY: usize = 1 << 30; // TODO: use ISIZE_BITS
 
 /// The default initial table capacity.  Must be a power of 2
 /// (i.e., at least 1) and at most `MAXIMUM_CAPACITY`.
@@ -37,15 +33,15 @@ const MIN_TRANSFER_STRIDE: isize = 16;
 
 /// The number of bits used for generation stamp in `size_ctl`.
 /// Must be at least 6 for 32bit arrays.
-const RESIZE_STAMP_BITS: usize = isize_bits!() / 2;
+const RESIZE_STAMP_BITS: usize = ISIZE_BITS / 2;
 
 /// The maximum number of threads that can help resize.
 /// Must fit in `32 - RESIZE_STAMP_BITS` bits for 32 bit architectures
 /// and `64 - RESIZE_STAMP_BITS` bits for 64 bit architectures
-const MAX_RESIZERS: isize = (1 << (isize_bits!() - RESIZE_STAMP_BITS)) - 1;
+const MAX_RESIZERS: isize = (1 << (ISIZE_BITS - RESIZE_STAMP_BITS)) - 1;
 
 /// The bit shift for recording size stamp in `size_ctl`.
-const RESIZE_STAMP_SHIFT: usize = isize_bits!() - RESIZE_STAMP_BITS;
+const RESIZE_STAMP_SHIFT: usize = ISIZE_BITS - RESIZE_STAMP_BITS;
 
 static NCPU_INITIALIZER: Once = Once::new();
 static NCPU: AtomicUsize = AtomicUsize::new(0);
