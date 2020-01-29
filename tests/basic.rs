@@ -471,8 +471,10 @@ fn retain_all_true() {
 #[test]
 fn retain_some() {
     let mut map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
+    let expected_map: HashMap<u32, u32> = (5..10).map(|x| (x, x)).collect();
     map.retain(|_, v| *v >= 5);
     assert_eq!(map.len(), 5);
+    assert_eq!(map, expected_map);
 }
 
 #[test]
@@ -485,6 +487,8 @@ fn retain_force_empty() {
 #[test]
 fn retain_force_some() {
     let mut map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
+    let expected_map: HashMap<u32, u32> = (5..10).map(|x| (x, x)).collect();
     map.retain_force(|_, v| *v >= 5);
     assert_eq!(map.len(), 5);
+    assert_eq!(map, expected_map);
 }
