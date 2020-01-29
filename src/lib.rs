@@ -472,7 +472,7 @@ where
         }
 
         // Safety: self.table is a valid pointer because we checked it above.
-        let tab = unsafe { table.deref() };
+        let mut tab = unsafe { table.deref() };
         while idx < tab.bins.len() {
             let node = tab.bin(idx, guard);
             if node.is_null() {
@@ -483,8 +483,11 @@ where
             // it in the above if stmt.
             let node = unsafe { node.deref() };
             match node {
-                BinEntry::Moved(_) => {
-                    // TODO: tab = helpTransfer
+                BinEntry::Moved(next_table) => {
+                    tab = match self.help_transfer(table, *next_table, guard) {
+                        s if s.is_null() => unsafe { s.deref() },
+                        _ => todo!("proper handling here?"),
+                    };
                     idx = 0;
                 }
                 BinEntry::Node(_) => {
