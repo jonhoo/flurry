@@ -945,26 +945,27 @@ where
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
     pub fn remove<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
-        where
-            K: Borrow<Q>,
-            Q: ?Sized + Hash + Eq,
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
     {
         self.replace_node(key, None, None, guard)
     }
 
     /// Replaces node value with v, conditional upon match of cv.
-    /// If resulting value does not exists it removes the key (and its corresponding value) from this map.
+    /// If resulting value does not exist it removes the key (and its corresponding value) from this map.
     /// This method does nothing if the key is not in the map.
     /// Returns the previous value associated with the given key.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
-    pub fn replace_node<'g, Q>(
+    fn replace_node<'g, Q>(
         &'g self,
         key: &Q,
-        new_value : Option<V>,
-        old_value : Option<Shared<'g, V>>,
-        guard: &'g Guard) -> Option<&'g V>
+        new_value: Option<V>,
+        observed_value: Option<Shared<'g, V>>,
+        guard: &'g Guard,
+    ) -> Option<&'g V>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -1045,15 +1046,17 @@ where
                         let next = n.next.load(Ordering::SeqCst, guard);
                         if n.hash == h && n.key.borrow() == key {
                             let ev = n.value.load(Ordering::SeqCst, guard);
-                            // found the node but we have a new value to replace the old one
-                            if let Some(nv) = new_value {
-                                n.value.store(Owned::new(nv), Ordering::SeqCst);
-                                break;
+
                             // just remove the node if the value is the one we expected at method call
-                            } else if old_value.is_none() || old_value.unwrap() == ev {
+                            if observed_value.map(|ov| ov == ev).unwrap_or(true) {
+                                // found the node but we have a new value to replace the old one
+                                if let Some(nv) = new_value {
+                                    n.value.store(Owned::new(nv), Ordering::SeqCst);
+                                    break;
+                                }
                                 old_val = Some(ev);
                                 // remove the BinEntry containing the removed key value pair from the bucket
-                               if !pred.is_null() {
+                                if !pred.is_null() {
                                     // either by changing the pointer of the previous BinEntry, if present
                                     // safety: as above
                                     unsafe { pred.deref() }
@@ -1120,16 +1123,37 @@ where
     /// Retains only the elements specified by the predicate.
     ///
     /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    ///
+    /// This method relies on [`HashMap::replace_node`] and do not force entries deletion if the
+    /// entry value is updated concurrently.
     pub fn retain<F>(&mut self, mut f: F)
-        where
-            F: FnMut(&K, &V) -> bool
+    where
+        F: FnMut(&K, &V) -> bool,
     {
         let guard = epoch::pin();
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
-                // TODO: right now this removing the element by key without checking the value. The value should be used somehow in old_value
-                self.replace_node(k, None, None, &guard);
+                let old_value: Shared<'_, V> = Shared::from(v as *const V);
+                self.replace_node(k, None, Some(old_value), &guard);
+            }
+        }
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    ///
+    /// This method force entry deletion even if if it is updated concurrently.
+    pub fn retain_force<F>(&mut self, mut f: F)
+        where
+            F: FnMut(&K, &V) -> bool,
+    {
+        let guard = epoch::pin();
+        // removed selected keys
+        for (k, v) in self.iter(&guard) {
+            if !f(k, v) {
+                self.remove(k, &guard);
             }
         }
     }
@@ -1437,5 +1461,54 @@ fn num_cpus() -> usize {
 /// drop(guard);
 /// drop(r);
 /// ```
+
+#[test]
+fn replace_empty() {
+    let map = HashMap::<usize, usize>::new();
+
+    {
+        let guard = epoch::pin();
+        let old = map.replace_node(&42, None, None, &guard);
+        assert!(old.is_none());
+    }
+}
+
+#[test]
+fn replace_existing() {
+    let map = HashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, 42, &guard);
+        let old = map.replace_node(&42, Some(10), None, &guard);
+        assert!(old.is_none());
+        assert_eq!(*map.get(&42, &guard).unwrap(), 10);
+    }
+}
+
+#[test]
+fn replace_existing_observed_value_matching() {
+    let map = HashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, 42, &guard);
+        let observed_value = Shared::from(map.get(&42, &guard).unwrap() as *const _);
+        let old = map.replace_node(&42, Some(10), Some(observed_value), &guard);
+        assert!(old.is_none());
+        assert_eq!(*map.get(&42, &guard).unwrap(), 10);
+    }
+}
+
+#[test]
+fn replace_existing_observed_value_non_matching() {
+    let map = HashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, 42, &guard);
+        let old = map.replace_node(&42, Some(10), Some(Shared::null()), &guard);
+        assert!(old.is_none());
+        assert_eq!(*map.get(&42, &guard).unwrap(), 42);
+    }
+}
+
 #[allow(dead_code)]
 struct CompileFailTests;
