@@ -347,7 +347,7 @@ where
     }
 
     /// Removes all entries from this map.
-    pub fn clear<'g>(&'g self, guard: &'g Guard) {
+    pub fn clear(&self, guard: &Guard) {
         // Negative number of deletions
         let mut delta = 0;
         let mut idx = 0usize;
@@ -380,6 +380,9 @@ where
                     let mut p: Option<&Node<K, V>> = Some(node);
                     while p.is_some() {
                         delta -= 1;
+                        unsafe {
+                            guard.defer_destroy(p.unwrap().value.load(Ordering::SeqCst, guard));
+                        }
                         p = match p.unwrap().next.load(Ordering::SeqCst, guard) {
                             s if s.is_null() => None,
                             s => Some(
@@ -387,10 +390,13 @@ where
                                     .as_node()
                                     .expect("Node.next should always be BinEntry::Node"),
                             ),
-                        }
+                        };
                     }
                     tab.store_bin(idx, Shared::null());
                     idx += 1;
+                    unsafe {
+                        guard.defer_destroy(raw_node);
+                    }
                     drop(head_lock);
                 }
             };
