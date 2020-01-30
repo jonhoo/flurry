@@ -93,11 +93,11 @@ impl<K, V> BinEntry<K, V> {
                     };
 
                     if n.hash == hash && n.key.borrow() == key {
-                        break Shared::from(node as *const _);
+                        return Shared::from(node as *const _);
                     }
                     let next = n.next.load(Ordering::SeqCst, guard);
                     if next.is_null() {
-                        break Shared::null();
+                        return Shared::null();
                     }
                     // safety: next will only be dropped, if we are dropped. we won't be dropped until epoch
                     // passes, which is protected by guard.
