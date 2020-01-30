@@ -1186,8 +1186,18 @@ where
     }
 
     #[inline]
-    /// Tries to reserve capacity for at least additional more elements.
-    /// The collection may reserve more space to avoid frequent reallocations.
+    /// Tries to reserve capacity for at least `additional` more elements to
+    /// be inserted in the `HashMap`. The collection may reserve more space to
+    /// avoid frequent reallocations.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map: HashMap<&str, i32> = HashMap::new();
+    /// map.reserve(10);
+    /// ```
     pub fn reserve(&self, additional: usize) {
         let absolute = self.len() + additional;
 
