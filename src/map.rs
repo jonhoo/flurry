@@ -302,14 +302,27 @@ where
         )
     }
 
-    /// Returns the value to which `key` is mapped.
+    /// Returns a reference to the value corresponding to the key.
     ///
-    /// Returns `None` if this map contains no mapping for the key.
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
     ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
     ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use crossbeam_epoch as epoch;
+    ///
+    /// let mut map = HashMap::new();
+    /// let guard = epoch::pin();
+    /// map.insert(1, "a", &guard);
+    /// assert_eq!(map.get(&1, &guard), Some(&"a"));
+    /// assert_eq!(map.get(&2, &guard), None);
+    /// ```
     // TODO: implement a guard API of our own
     pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
     where
