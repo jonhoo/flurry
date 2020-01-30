@@ -37,6 +37,7 @@ jobs:
      - template: install-rust.yml@templates
      - bash: cargo check --target thumbv7m-none-eabi --no-default-features
        displayName: cargo check
+
 resources:
   repositories:
     - repository: templates

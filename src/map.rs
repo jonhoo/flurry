@@ -1529,7 +1529,7 @@ where
 
 #[inline]
 #[cfg(feature = "std")]
-/// Returns the number of physical CPUs in the machine (_O(1)_).
+/// Returns the number of physical CPUs in the machine.
 /// Returns `1` in `no_std` environment.
 fn num_cpus() -> usize {
     NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
@@ -1538,7 +1538,7 @@ fn num_cpus() -> usize {
 
 #[inline]
 #[cfg(not(feature = "std"))]
-/// Returns the number of physical CPUs in the machine (_O(1)_).
+/// Returns the number of physical CPUs in the machine.
 /// Returns `1` in `no_std` environment.
 fn num_cpus() -> usize {
     1
