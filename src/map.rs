@@ -109,7 +109,7 @@ where
     ///
     /// ```
     /// use flurry::HashMap;
-    /// let mut map: HashMap<&str, i32> = HashMap::new();
+    /// let map: HashMap<&str, i32> = HashMap::new();
     /// ```
     pub fn new() -> Self {
         Self::with_hasher(RandomState::new())
@@ -125,7 +125,7 @@ where
     ///
     /// ```
     /// use flurry::HashMap;
-    /// let mut map: HashMap<&str, i32> = HashMap::with_capacity(10);
+    /// let map: HashMap<&str, i32> = HashMap::with_capacity(10);
     /// ```
     pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_and_hasher(RandomState::new(), capacity)
@@ -156,7 +156,7 @@ where
     ///
     /// let s = RandomState::new();
     /// let guard = epoch::pin();
-    /// let mut map = HashMap::with_hasher(s);
+    /// let map = HashMap::with_hasher(s);
     /// map.insert(1, 2, &guard);
     /// ```
     pub fn with_hasher(hash_builder: S) -> Self {
@@ -189,7 +189,7 @@ where
     ///
     /// let s = RandomState::new();
     /// let guard = epoch::pin();
-    /// let mut map = HashMap::with_capacity_and_hasher(s, 10);
+    /// let map = HashMap::with_capacity_and_hasher(s, 10);
     /// map.insert(1, 2, &guard);
     /// ```
     /// ## Notes
@@ -235,7 +235,7 @@ where
     /// use flurry::HashMap;
     /// use crossbeam_epoch as epoch;
     ///
-    /// let mut map = HashMap::new();
+    /// let map = HashMap::new();
     /// let guard = epoch::pin();
     /// map.insert(1, "a", &guard);
     /// assert_eq!(map.contains_key(&1), true);
@@ -317,7 +317,7 @@ where
     /// use flurry::HashMap;
     /// use crossbeam_epoch as epoch;
     ///
-    /// let mut map = HashMap::new();
+    /// let map = HashMap::new();
     /// let guard = epoch::pin();
     /// map.insert(1, "a", &guard);
     /// assert_eq!(map.get(&1, &guard), Some(&"a"));
@@ -355,7 +355,7 @@ where
     /// use flurry::HashMap;
     /// use crossbeam_epoch as epoch;
     ///
-    /// let mut map = HashMap::new();
+    /// let map = HashMap::new();
     /// let guard = epoch::pin();
     /// map.insert(1, 42, &guard);
     /// assert_eq!(map.get_and(&1, |num| num * 2), Some(84));
@@ -451,7 +451,7 @@ where
     /// use flurry::HashMap;
     /// use crossbeam_epoch as epoch;
     ///
-    /// let mut map = HashMap::new();
+    /// let map = HashMap::new();
     /// let guard = epoch::pin();
     /// assert_eq!(map.insert(37, "a", &guard), None);
     /// assert_eq!(map.is_empty(), false);
