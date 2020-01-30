@@ -209,9 +209,6 @@ mod map;
 mod node;
 mod raw;
 
-#[cfg(feature = "std")]
-use std as alloc;
-
 /// Iterator types.
 pub mod iter;
 

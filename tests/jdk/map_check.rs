@@ -57,8 +57,9 @@ where
     K: Sync + Send + Copy + Hash + Eq,
 {
     let mut sum = 0;
+    let guard = epoch::pin();
     for i in 0..keys.len() {
-        if map.contains_key(&keys[i]) {
+        if map.contains_key(&keys[i], &guard) {
             sum += 1;
         }
     }
@@ -86,11 +87,12 @@ where
     K: Sync + Send + Copy + Hash + Eq,
 {
     let mut sum = 0;
+    let guard = epoch::pin();
     for i in 0..k1.len() {
-        if map.contains_key(&k1[i]) {
+        if map.contains_key(&k1[i], &guard) {
             sum += 1;
         }
-        if map.contains_key(&k2[i]) {
+        if map.contains_key(&k2[i], &guard) {
             sum += 1;
         }
     }

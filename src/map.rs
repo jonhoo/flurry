@@ -2,13 +2,14 @@ use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
 use core::borrow::Borrow;
-use core::fmt::{self, Debug, Formatter};
 use core::hash::{BuildHasher, Hash, Hasher};
 use core::iter::FromIterator;
 use core::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
 #[cfg(feature = "std")]
 use std::collections::hash_map::RandomState;
+#[cfg(feature = "std")]
+use std::fmt::{self, Debug, Formatter};
 #[cfg(feature = "std")]
 use std::sync::Once;
 
@@ -172,16 +173,16 @@ where
         h.finish()
     }
 
+    #[inline]
     /// Tests if `key` is a key in this table.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
-    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    pub fn contains_key<'g, Q>(&self, key: &Q, guard: &'g Guard) -> bool
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        let guard = crossbeam_epoch::pin();
         self.get(key, &guard).is_some()
     }
 
@@ -261,19 +262,19 @@ where
         unsafe { v.as_ref() }
     }
 
+    #[inline]
     /// Obtains the value to which `key` is mapped and passes it through the closure `then`.
     ///
     /// Returns `None` if this map contains no mapping for `key`.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
-    pub fn get_and<Q, R, F>(&self, key: &Q, then: F) -> Option<R>
+    pub fn get_and<'g, Q, R, F>(&self, key: &Q, then: F, guard: &'g Guard) -> Option<R>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
         F: FnOnce(&V) -> R,
     {
-        let guard = &crossbeam_epoch::pin();
         self.get(key, guard).map(then)
     }
 
@@ -1069,11 +1070,9 @@ where
     #[inline]
     /// Tries to reserve capacity for at least additional more elements.
     /// The collection may reserve more space to avoid frequent reallocations.
-    pub fn reserve(&self, additional: usize) {
+    pub fn reserve<'g>(&self, additional: usize, guard: &'g Guard) {
         let absolute = self.len() + additional;
-
-        let guard = epoch::pin();
-        self.try_presize(absolute, &guard);
+        self.try_presize(absolute, guard);
     }
 
     /// Removes the key (and its corresponding value) from this map.
@@ -1265,16 +1264,15 @@ where
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
     /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
-    pub fn retain<F>(&mut self, mut f: F)
+    pub fn retain<'g, F>(&mut self, mut f: F, guard: &'g Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
-        let guard = epoch::pin();
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
                 let old_value: Shared<'_, V> = Shared::from(v as *const V);
-                self.replace_node(k, None, Some(old_value), &guard);
+                self.replace_node(k, None, Some(old_value), guard);
             }
         }
     }
@@ -1285,15 +1283,14 @@ where
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
     /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
-    pub fn retain_force<F>(&mut self, mut f: F)
+    pub fn retain_force<'g, F>(&mut self, mut f: F, guard: &'g Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
-        let guard = epoch::pin();
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
-                self.replace_node(k, None, None, &guard);
+                self.replace_node(k, None, None, guard);
             }
         }
     }
@@ -1356,6 +1353,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> PartialEq for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
@@ -1373,6 +1371,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> Eq for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
@@ -1381,6 +1380,7 @@ where
 {
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> fmt::Debug for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Debug + Eq + Hash,
@@ -1417,6 +1417,7 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> Extend<(K, V)> for &HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -1437,13 +1438,14 @@ where
             (iter.size_hint().0 + 1) / 2
         };
 
-        self.reserve(reserve);
+        let guard = epoch::pin();
 
-        let guard = crossbeam_epoch::pin();
+        self.reserve(reserve, &guard);
         (*self).put_all(iter.into_iter(), &guard);
     }
 }
 
+#[cfg(feature = "std")]
 impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -1506,6 +1508,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> Clone for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -1525,13 +1528,20 @@ where
 }
 
 #[inline]
+#[cfg(feature = "std")]
 /// Returns the number of physical CPUs in the machine (_O(1)_).
-/// This always returns `1` in `no_std` environment.
+/// Returns `1` in `no_std` environment.
 fn num_cpus() -> usize {
-    #[cfg(feature = "std")]
     NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
-
     NCPU.load(Ordering::Relaxed)
+}
+
+#[inline]
+#[cfg(not(feature = "std"))]
+/// Returns the number of physical CPUs in the machine (_O(1)_).
+/// Returns `1` in `no_std` environment.
+fn num_cpus() -> usize {
+    1
 }
 
 #[test]
@@ -1566,7 +1576,7 @@ mod tests {
 
         map.insert(42, 0, &guard);
 
-        map.reserve(32);
+        map.reserve(32, &guard);
 
         let capacity = map.capacity(&guard);
         assert!(capacity >= 16 + 32);
@@ -1577,7 +1587,7 @@ mod tests {
         let map = HashMap::<usize, usize>::new();
         let guard = epoch::pin();
 
-        map.reserve(32);
+        map.reserve(32, &guard);
 
         let capacity = map.capacity(&guard);
         assert!(capacity >= 32);

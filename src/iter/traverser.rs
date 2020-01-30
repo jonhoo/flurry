@@ -3,6 +3,7 @@ extern crate alloc;
 
 use crate::node::{BinEntry, Node};
 use crate::raw::Table;
+#[cfg(not(feature = "std"))]
 use alloc::boxed::Box;
 use core::sync::atomic::Ordering;
 use crossbeam_epoch::{Guard, Shared};
