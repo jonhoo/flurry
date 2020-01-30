@@ -245,11 +245,10 @@ fn concurrent_resize_and_get() {
     }
 
     let map1 = map.clone();
-    // t1 is inserting a lot of new keys, triggering resizes
+    // t1 is using reserve to trigger a bunch of resizes
     let t1 = std::thread::spawn(move || {
-        let guard = epoch::pin();
-        for i in 32..1024 {
-            assert!(map1.insert(i, i, &guard).is_none());
+        for power in 0..16 {
+            map1.reserve(1 << power);
         }
     });
     let map2 = map.clone();
@@ -266,12 +265,6 @@ fn concurrent_resize_and_get() {
 
     t1.join().unwrap();
     t2.join().unwrap();
-
-    let guard = epoch::pin();
-    for i in 0..1024 {
-        let (k, v) = map.get_key_value(&i, &guard).unwrap();
-        assert_eq!(k, v);
-    }
 }
 
 #[test]
