@@ -339,12 +339,28 @@ where
         unsafe { v.as_ref() }
     }
 
-    /// Obtains the value to which `key` is mapped and passes it through the closure `then`.
-    ///
+    /// Apply `then` to the mapping for `key` and get its result.
     /// Returns `None` if this map contains no mapping for `key`.
     ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use crossbeam_epoch as epoch;
+    ///
+    /// let mut map = HashMap::new();
+    /// let guard = epoch::pin();
+    /// map.insert(1, 42, &guard);
+    /// assert_eq!(map.get_and(&1, |num| num * 2), Some(84));
+    /// assert_eq!(map.get_and(&8, |num| num * 2), None);
+    /// ```
     pub fn get_and<Q, R, F>(&self, key: &Q, then: F) -> Option<R>
     where
         K: Borrow<Q>,
