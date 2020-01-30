@@ -115,10 +115,20 @@ where
         Self::with_hasher(RandomState::new())
     }
 
-    /// Creates a new, empty map with an initial table size accommodating the specified number of
-    /// elements without the need to dynamically resize.
-    pub fn with_capacity(n: usize) -> Self {
-        Self::with_capacity_and_hasher(RandomState::new(), n)
+    /// If `capacity` is 0, the hash map will not allocate
+    /// Creates an empty `HashMap` with the specified capacity.
+    ///
+    /// The hash map will be able to hold at least `capacity` elements without
+    /// reallocating. If `capacity` is 0, the hash map will not allocate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// let mut map: HashMap<&str, i32> = HashMap::with_capacity(10);
+    /// ```
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity_and_hasher(RandomState::new(), capacity)
     }
 }
 
