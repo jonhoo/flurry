@@ -59,9 +59,7 @@ where
     S: BuildHasher,
 {
     /// Tests if `key` is a key in this table.
-    ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// See also [`HashMap::contains_key`].
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
@@ -71,11 +69,7 @@ where
     }
 
     /// Returns the value to which `key` is mapped.
-    ///
-    /// Returns `None` if this map contains no mapping for the key.
-    ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// See also [`HashMap::get`].
     pub fn get<'g, Q>(&'g self, key: &Q) -> Option<&'g V>
     where
         K: Borrow<Q>,
@@ -85,12 +79,7 @@ where
     }
 
     /// Returns the key-value pair corresponding to `key`.
-    ///
-    /// Returns `None` if this map contains no mapping for `key`.
-    ///
-    /// The supplied `key` may be any borrowed form of the
-    /// map's key type, but `Hash` and `Eq` on the borrowed form
-    /// must match those for the key type.
+    /// See also [`HashMap::get_key_value`].
     pub fn get_key_value<'g, Q>(&'g self, key: &Q) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
@@ -100,26 +89,14 @@ where
     }
 
     /// Maps `key` to `value` in this table.
-    ///
-    /// The value can be retrieved by calling [`HashMapRef::get`] with a key that is equal to the original key.
+    /// See also [`HashMap::insert`].
     pub fn insert<'g>(&'g self, key: K, value: V) -> Option<&'g V> {
         self.map.insert(key, value, &self.guard)
     }
 
     /// If the value for the specified `key` is present, attempts to
     /// compute a new mapping given the key and its current mapped value.
-    ///
-    /// The new mapping is computed by the `remapping_function`, which may
-    /// return `None` to signalize that the mapping should be removed.
-    /// The entire method invocation is performed atomically.
-    /// The supplied function is invoked exactly once per invocation of
-    /// this method if the key is present, else not at all.  Some
-    /// attempted update operations on this map by other threads may be
-    /// blocked while computation is in progress, so the computation
-    /// should be short and simple.
-    ///
-    /// Returns the new value associated with the specified `key`, or `None`
-    /// if no value for the specified `key` is present.
+    /// See also [`HashMap::compute_if_present`].
     pub fn compute_if_present<'g, Q, F>(&'g self, key: &Q, remapping_function: F) -> Option<&'g V>
     where
         K: Borrow<Q>,
@@ -131,17 +108,13 @@ where
     }
 
     /// Tries to reserve capacity for at least additional more elements.
-    /// The collection may reserve more space to avoid frequent reallocations.
+    /// See also [`HashMap::reserve`].
     pub fn reserve(&self, additional: usize) {
         self.map.reserve(additional, &self.guard)
     }
 
     /// Removes the key (and its corresponding value) from this map.
-    /// This method does nothing if the key is not in the map.
-    /// Returns the previous value associated with the given key.
-    ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// See also [`HashMap::remove`].
     pub fn remove<'g, Q>(&'g self, key: &Q) -> Option<&'g V>
     where
         K: Borrow<Q>,
@@ -151,13 +124,7 @@ where
     }
 
     /// Retains only the elements specified by the predicate.
-    ///
-    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
-    ///
-    /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
-    /// modified before the removal takes place, the entry will not be removed.
-    /// If you want the removal to happen even in the case of concurrent modification,
-    /// use [`HashMapRef::retain_force`].
+    /// See also [`HashMap::retain`].
     pub fn retain<F>(&self, f: F)
     where
         F: FnMut(&K, &V) -> bool,
@@ -166,12 +133,7 @@ where
     }
 
     /// Retains only the elements specified by the predicate.
-    ///
-    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
-    ///
-    /// This method always deletes any key/value pair that `f` returns `false` for,
-    /// even if if the value is updated concurrently. If you do not want that behavior,
-    /// use [`HashMapRef::retain`].
+    /// See also [`HashMap::retain_force`].
     pub fn retain_force<F>(&self, f: F)
     where
         F: FnMut(&K, &V) -> bool,
@@ -181,28 +143,33 @@ where
 
     /// An iterator visiting all key-value pairs in arbitrary order.
     /// The iterator element type is `(&'g K, &'g V)`.
+    /// See also [`HashMap::iter`].
     pub fn iter<'g>(&'g self) -> Iter<'g, K, V> {
         self.map.iter(&self.guard)
     }
 
     /// An iterator visiting all keys in arbitrary order.
     /// The iterator element type is `&'g K`.
+    /// See also [`HashMap::keys`].
     pub fn keys<'g>(&'g self) -> Keys<'g, K, V> {
         self.map.keys(&self.guard)
     }
 
     /// An iterator visiting all values in arbitrary order.
     /// The iterator element type is `&'g V`.
+    /// See also [`HashMap::values`].
     pub fn values<'g>(&'g self) -> Values<'g, K, V> {
         self.map.values(&self.guard)
     }
 
     /// Returns the number of entries in the map.
+    /// See also [`HashMap::len`].
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
     /// Returns `true` if the map is empty. Otherwise returns `false`.
+    /// See also [`HashMap::is_empty`].
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
     }
