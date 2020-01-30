@@ -1198,6 +1198,11 @@ where
     /// let map: HashMap<&str, i32> = HashMap::new();
     /// map.reserve(10);
     /// ```
+    ///
+    /// # Note
+    ///
+    /// Reserving does not panic in flurry. If the new size is invalid, no
+    /// reallocation takes place.
     pub fn reserve(&self, additional: usize) {
         let absolute = self.len() + additional;
 
