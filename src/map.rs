@@ -368,6 +368,7 @@ where
             match node {
                 BinEntry::Moved(next_table) => {
                     table = self.help_transfer(table, *next_table, guard);
+                    // start from the first bin again in the new table
                     idx = 0;
                 }
                 BinEntry::Node(ref node) => {
