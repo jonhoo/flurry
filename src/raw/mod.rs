@@ -1,8 +1,12 @@
 use crate::node::*;
+#[cfg(not(feature = "std"))]
+use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
+use core::borrow::Borrow;
+use core::fmt::Debug;
+use core::sync::atomic::Ordering;
 use crossbeam_epoch::{Atomic, Guard, Owned, Pointer, Shared};
-use std::borrow::Borrow;
-use std::fmt::Debug;
-use std::sync::atomic::Ordering;
 
 #[derive(Debug)]
 pub(crate) struct Table<K, V> {
@@ -172,7 +176,10 @@ impl<K, V> Table<K, V> {
         // anything in the map.
         let guard = unsafe { crossbeam_epoch::unprotected() };
 
-        for bin in Vec::from(std::mem::replace(&mut self.bins, vec![].into_boxed_slice())) {
+        for bin in Vec::from(core::mem::replace(
+            &mut self.bins,
+            vec![].into_boxed_slice(),
+        )) {
             if bin.load(Ordering::SeqCst, guard).is_null() {
                 // bin was never used
                 continue;
@@ -225,7 +232,10 @@ impl<K, V> Drop for Table<K, V> {
         // since BinEntry::Nodes are either dropped by drop_bins or transferred to a new table,
         // all bins are empty or contain a Shared pointing to shared the BinEntry::Moved (if
         // self.bins was not replaced by drop_bins anyway)
-        let bins = Vec::from(std::mem::replace(&mut self.bins, vec![].into_boxed_slice()));
+        let bins = Vec::from(core::mem::replace(
+            &mut self.bins,
+            vec![].into_boxed_slice(),
+        ));
 
         // when testing, we check the above invariant. in production, we assume it to be true
         if cfg!(debug_assertions) {

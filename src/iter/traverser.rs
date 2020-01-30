@@ -1,7 +1,12 @@
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
 use crate::node::{BinEntry, Node};
 use crate::raw::Table;
+#[cfg(not(feature = "std"))]
+use alloc::boxed::Box;
+use core::sync::atomic::Ordering;
 use crossbeam_epoch::{Guard, Shared};
-use std::sync::atomic::Ordering;
 
 #[derive(Debug)]
 pub(crate) struct NodeIter<'g, K, V> {

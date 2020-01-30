@@ -195,13 +195,14 @@
 //! more efficient operation than if everything had to be atomically reference-counted.
 //!
 //!  [`crossbeam::epoch`]: https://docs.rs/crossbeam/0.7/crossbeam/epoch/index.html
-#![deny(
-    missing_docs,
-    missing_debug_implementations,
-    unreachable_pub,
-    intra_doc_link_resolution_failure
-)]
+#![deny(missing_docs, unreachable_pub, intra_doc_link_resolution_failure)]
 #![warn(rust_2018_idioms)]
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(feature = "std", deny(missing_debug_implementations))]
+
+#[cfg(not(feature = "std"))]
+#[macro_use]
+extern crate alloc;
 
 mod map;
 mod map_ref;
@@ -219,5 +220,7 @@ pub type DefaultHashBuilder = ahash::RandomState;
 
 /// Types needed to safely access shared data concurrently.
 pub mod epoch {
-    pub use crossbeam_epoch::{pin, Guard};
+    #[cfg(feature = "std")]
+    pub use crossbeam_epoch::pin;
+    pub use crossbeam_epoch::Guard;
 }

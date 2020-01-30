@@ -21,11 +21,20 @@ maintenance = { status = "experimental" }
 
 [features]
 sanitize = ['crossbeam-epoch/sanitize']
+std = ["crossbeam-epoch/std", "num_cpus"]
+default = ["std"]
 
 [dependencies]
-crossbeam-epoch = "0.9"
 parking_lot = "0.10"
-num_cpus = "1.12.0"
+
+[dependencies.num_cpus]
+version = "1.12.0"
+optional = true
+
+[dependencies.crossbeam-epoch]
+version = "0.9"
+default-features = false
+features = ["alloc"]
 
 [dependencies.ahash]
 version = "0.3.2"

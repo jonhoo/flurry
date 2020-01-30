@@ -1,8 +1,8 @@
 mod traverser;
 pub(crate) use traverser::NodeIter;
 
+use core::sync::atomic::Ordering;
 use crossbeam_epoch::Guard;
-use std::sync::atomic::Ordering;
 
 /// An iterator over a map's entries.
 ///
@@ -63,9 +63,9 @@ impl<'g, K, V> Iterator for Values<'g, K, V> {
 #[cfg(test)]
 mod tests {
     use crate::HashMap;
+    use core::iter::FromIterator;
     use crossbeam_epoch as epoch;
     use std::collections::HashSet;
-    use std::iter::FromIterator;
 
     #[test]
     fn iter() {

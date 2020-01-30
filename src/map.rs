@@ -1,15 +1,16 @@
 use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
+use core::borrow::Borrow;
+use core::hash::{BuildHasher, Hash, Hasher};
+#[cfg(feature = "std")]
+use core::iter::FromIterator;
+use core::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
-use std::borrow::Borrow;
+#[cfg(feature = "std")]
 use std::fmt::{self, Debug, Formatter};
-use std::hash::{BuildHasher, Hash, Hasher};
-use std::iter::FromIterator;
-use std::sync::{
-    atomic::{AtomicIsize, AtomicUsize, Ordering},
-    Once,
-};
+#[cfg(feature = "std")]
+use std::sync::Once;
 
 const ISIZE_BITS: usize = core::mem::size_of::<isize>() * 8;
 
@@ -43,8 +44,10 @@ const MAX_RESIZERS: isize = (1 << (ISIZE_BITS - RESIZE_STAMP_BITS)) - 1;
 /// The bit shift for recording size stamp in `size_ctl`.
 const RESIZE_STAMP_SHIFT: usize = ISIZE_BITS - RESIZE_STAMP_BITS;
 
+#[cfg(feature = "std")]
 static NCPU_INITIALIZER: Once = Once::new();
-static NCPU: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "std")]
+static NCPU: AtomicUsize = AtomicUsize::new(1);
 
 macro_rules! load_factor {
     ($n: expr) => {
@@ -123,6 +126,28 @@ pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     build_hasher: S,
 }
 
+/// A concurrent hash table.
+///
+/// Note that `ahash::RandomState`, the default value of `S`, is not
+/// cryptographically secure. Therefore it is strongly recommended that you do
+/// not use this hash for cryptographic purproses.
+/// See [`ahash`](https://github.com/tkaitchuck/ahash) for more information.
+///
+/// See the [crate-level documentation](index.html) for details.
+#[cfg(not(feature = "std"))]
+pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
+    // NOTE: this is, and must be, an exact copy of the `HashMap` definition above, with just the
+    // default type for `L` unset. This is because in no_std environments, there is no sensible
+    // default lock type for us to use.
+    table: Atomic<Table<K, V>>,
+    next_table: Atomic<Table<K, V>>,
+    transfer_index: AtomicIsize,
+    count: AtomicUsize,
+    size_ctl: AtomicIsize,
+    collector: epoch::Collector,
+    build_hasher: S,
+}
+
 #[cfg(test)]
 #[test]
 #[should_panic]
@@ -144,6 +169,7 @@ fn disallow_evil() {
     assert_eq!(oops.unwrap(), "hello");
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> Default for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -155,6 +181,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V> HashMap<K, V, crate::DefaultHashBuilder>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -178,6 +205,7 @@ where
     V: Sync + Send,
     S: BuildHasher,
 {
+    #[cfg(feature = "std")]
     /// Creates an empty map which will use `hash_builder` to hash keys.
     ///
     /// The created map has the default initial capacity.
@@ -241,6 +269,7 @@ where
         }
     }
 
+    #[cfg(feature = "std")]
     /// Creates an empty map with the specified `capacity`, using `hash_builder` to hash the keys.
     ///
     /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
@@ -417,6 +446,15 @@ where
             // try to allocate the table
             let mut sc = self.size_ctl.load(Ordering::SeqCst);
             if sc < 0 {
+                #[cfg(not(feature = "std"))]
+                // for there to be a race, there must be another thread running
+                // concurrently with us. That thread cannot be blocked on us,
+                // since we are not in any mutually-exclusive section. So our
+                // goal is just to not waste cycles and give it some time to
+                // complete. It is not a requirement that we fully yield.
+                core::sync::atomic::spin_loop_hint();
+
+                #[cfg(feature = "std")]
                 // we lost the initialization race; just spin
                 std::thread::yield_now();
                 continue;
@@ -722,6 +760,7 @@ where
         }
     }
 
+    #[cfg_attr(not(feature = "std"), allow(dead_code))]
     fn put_all<I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &Guard) {
         for (key, value) in iter {
             self.put(key, value, false, guard);
@@ -988,7 +1027,7 @@ where
     fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard) {
         // TODO: implement the Java CounterCell business here
 
-        use std::cmp;
+        use core::cmp;
         let mut count = match n.cmp(&0) {
             cmp::Ordering::Greater => {
                 let n = n as usize;
@@ -1077,7 +1116,7 @@ where
         let ncpu = num_cpus();
 
         let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n };
-        let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
+        let stride = core::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
 
         if next_table.is_null() {
             // we are initiating a resize
@@ -1361,7 +1400,7 @@ where
             // TODO: find out if this is neccessary
             let size = size + (size >> 1) + 1;
 
-            std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
+            core::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
         } as isize;
 
         loop {
@@ -1769,6 +1808,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> PartialEq for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
@@ -1783,6 +1823,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> Eq for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
@@ -1791,6 +1832,7 @@ where
 {
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> fmt::Debug for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Debug + Eq + Hash,
@@ -1827,6 +1869,7 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> Extend<(K, V)> for &HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -1853,6 +1896,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -1865,6 +1909,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> FromIterator<(K, V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -1891,6 +1936,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<'a, K, V, S> FromIterator<(&'a K, &'a V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -1903,6 +1949,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<'a, K, V, S> FromIterator<&'a (K, V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -1915,6 +1962,7 @@ where
     }
 }
 
+#[cfg(feature = "std")]
 impl<K, V, S> Clone for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -1933,16 +1981,19 @@ where
     }
 }
 
-#[cfg(not(miri))]
 #[inline]
-/// Returns the number of physical CPUs in the machine (_O(1)_).
+#[cfg(all(not(miri), feature = "std"))]
+/// Returns the number of physical CPUs in the machine.
+/// Returns `1` in `no_std` environment.
 fn num_cpus() -> usize {
     NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
     NCPU.load(Ordering::Relaxed)
 }
 
-#[cfg(miri)]
 #[inline]
+#[cfg(any(miri, not(feature = "std")))]
+/// Returns the number of physical CPUs in the machine.
+/// Returns `1` in `no_std` environment.
 const fn num_cpus() -> usize {
     1
 }
