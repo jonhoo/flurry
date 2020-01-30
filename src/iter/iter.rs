@@ -6,12 +6,18 @@ use crossbeam_epoch::Guard;
 ///
 /// See [`HashMap::iter`](crate::HashMap::iter) for details.
 #[derive(Debug)]
-pub struct Iter<'g, K, V> {
-    pub(crate) node_iter: NodeIter<'g, K, V>,
+pub struct Iter<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    pub(crate) node_iter: NodeIter<'g, K, V, L>,
     pub(crate) guard: &'g Guard,
 }
 
-impl<'g, K, V> Iterator for Iter<'g, K, V> {
+impl<'g, K, V, L> Iterator for Iter<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     type Item = (&'g K, &'g V);
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node_iter.next()?;
@@ -26,11 +32,17 @@ impl<'g, K, V> Iterator for Iter<'g, K, V> {
 ///
 /// See [`HashMap::keys`](crate::HashMap::keys) for details.
 #[derive(Debug)]
-pub struct Keys<'g, K, V> {
-    pub(crate) node_iter: NodeIter<'g, K, V>,
+pub struct Keys<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    pub(crate) node_iter: NodeIter<'g, K, V, L>,
 }
 
-impl<'g, K, V> Iterator for Keys<'g, K, V> {
+impl<'g, K, V, L> Iterator for Keys<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     type Item = &'g K;
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node_iter.next()?;
@@ -42,12 +54,18 @@ impl<'g, K, V> Iterator for Keys<'g, K, V> {
 ///
 /// See [`HashMap::values`](crate::HashMap::values) for details.
 #[derive(Debug)]
-pub struct Values<'g, K, V> {
-    pub(crate) node_iter: NodeIter<'g, K, V>,
+pub struct Values<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    pub(crate) node_iter: NodeIter<'g, K, V, L>,
     pub(crate) guard: &'g Guard,
 }
 
-impl<'g, K, V> Iterator for Values<'g, K, V> {
+impl<'g, K, V, L> Iterator for Values<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     type Item = &'g V;
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node_iter.next()?;

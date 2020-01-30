@@ -9,15 +9,18 @@ use core::sync::atomic::Ordering;
 use crossbeam_epoch::{Guard, Shared};
 
 #[derive(Debug)]
-pub(crate) struct NodeIter<'g, K, V> {
+pub(crate) struct NodeIter<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     /// Current table; update if resized
-    table: Option<&'g Table<K, V>>,
+    table: Option<&'g Table<K, V, L>>,
 
-    stack: Option<Box<TableStack<'g, K, V>>>,
-    spare: Option<Box<TableStack<'g, K, V>>>,
+    stack: Option<Box<TableStack<'g, K, V, L>>>,
+    spare: Option<Box<TableStack<'g, K, V, L>>>,
 
     /// The last bin entry iterated over
-    prev: Option<&'g Node<K, V>>,
+    prev: Option<&'g Node<K, V, L>>,
 
     /// Index of bin to use next
     index: usize,
@@ -34,8 +37,11 @@ pub(crate) struct NodeIter<'g, K, V> {
     guard: &'g Guard,
 }
 
-impl<'g, K, V> NodeIter<'g, K, V> {
-    pub(crate) fn new(table: Shared<'g, Table<K, V>>, guard: &'g Guard) -> Self {
+impl<'g, K, V, L> NodeIter<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    pub(crate) fn new(table: Shared<'g, Table<K, V, L>>, guard: &'g Guard) -> Self {
         let (table, len) = if table.is_null() {
             (None, 0)
         } else {
@@ -58,7 +64,7 @@ impl<'g, K, V> NodeIter<'g, K, V> {
         }
     }
 
-    fn push_state(&mut self, t: &'g Table<K, V>, i: usize, n: usize) {
+    fn push_state(&mut self, t: &'g Table<K, V, L>, i: usize, n: usize) {
         let mut s = self.spare.take();
         if let Some(ref mut s) = s {
             self.spare = s.next.take();
@@ -114,8 +120,11 @@ impl<'g, K, V> NodeIter<'g, K, V> {
     }
 }
 
-impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
-    type Item = &'g Node<K, V>;
+impl<'g, K, V, L> Iterator for NodeIter<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    type Item = &'g Node<K, V, L>;
     fn next(&mut self) -> Option<Self::Item> {
         let mut e = None;
         if let Some(prev) = self.prev {
@@ -182,11 +191,14 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
 }
 
 #[derive(Debug)]
-struct TableStack<'g, K, V> {
+struct TableStack<'g, K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     length: usize,
     index: usize,
-    table: &'g Table<K, V>,
-    next: Option<Box<TableStack<'g, K, V>>>,
+    table: &'g Table<K, V, L>,
+    next: Option<Box<TableStack<'g, K, V, L>>>,
 }
 
 #[cfg(test)]
@@ -194,7 +206,7 @@ mod tests {
     use super::*;
     use crate::raw::Table;
     use crossbeam_epoch::{self as epoch, Atomic, Owned};
-    use parking_lot::Mutex;
+    use lock_api::Mutex;
 
     #[test]
     fn iter_new() {

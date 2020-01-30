@@ -2,14 +2,17 @@ use crate::raw::Table;
 use core::borrow::Borrow;
 use core::sync::atomic::Ordering;
 use crossbeam_epoch::{Atomic, Guard, Shared};
-use parking_lot::Mutex;
+use lock_api::Mutex;
 
 /// Entry in a bin.
 ///
 /// Will _generally_ be `Node`. Any entry that is not first in the bin, will be a `Node`.
 #[derive(Debug)]
-pub(crate) enum BinEntry<K, V> {
-    Node(Node<K, V>),
+pub(crate) enum BinEntry<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    Node(Node<K, V, L>),
     // safety: the pointer t to the next table inside Moved(t) is a valid pointer if the Moved(t)
     // entry was read after loading `map::HashMap.table` while the guard used to load that table is
     // still alive:
@@ -40,29 +43,36 @@ pub(crate) enum BinEntry<K, V> {
     //
     // Since finishing a resize is the only time a table is `defer_destroy`ed, the above covers
     // all cases.
-    Moved(*const Table<K, V>),
+    Moved(*const Table<K, V, L>),
 }
 
-unsafe impl<K, V> Send for BinEntry<K, V>
+unsafe impl<K, V, L> Send for BinEntry<K, V, L>
 where
     K: Send,
     V: Send,
-    Node<K, V>: Send,
-    Table<K, V>: Send,
+    L: Send,
+    Node<K, V, L>: Send,
+    Table<K, V, L>: Send,
+    L: lock_api::RawMutex,
 {
 }
 
-unsafe impl<K, V> Sync for BinEntry<K, V>
+unsafe impl<K, V, L> Sync for BinEntry<K, V, L>
 where
     K: Sync,
     V: Sync,
-    Node<K, V>: Sync,
-    Table<K, V>: Sync,
+    L: Sync,
+    Node<K, V, L>: Sync,
+    Table<K, V, L>: Sync,
+    L: lock_api::RawMutex,
 {
 }
 
-impl<K, V> BinEntry<K, V> {
-    pub(crate) fn as_node(&self) -> Option<&Node<K, V>> {
+impl<K, V, L> BinEntry<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    pub(crate) fn as_node(&self) -> Option<&Node<K, V, L>> {
         if let BinEntry::Node(ref n) = *self {
             Some(n)
         } else {
@@ -71,13 +81,16 @@ impl<K, V> BinEntry<K, V> {
     }
 }
 
-impl<K, V> BinEntry<K, V> {
+impl<K, V, L> BinEntry<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     pub(crate) fn find<'g, Q>(
         &'g self,
         hash: u64,
         key: &Q,
         guard: &'g Guard,
-    ) -> Shared<'g, BinEntry<K, V>>
+    ) -> Shared<'g, BinEntry<K, V, L>>
     where
         K: Borrow<Q>,
         Q: ?Sized + Eq,
@@ -139,10 +152,13 @@ impl<K, V> BinEntry<K, V> {
 
 /// Key-value entry.
 #[derive(Debug)]
-pub(crate) struct Node<K, V> {
+pub(crate) struct Node<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     pub(crate) hash: u64,
     pub(crate) key: K,
     pub(crate) value: Atomic<V>,
-    pub(crate) next: Atomic<BinEntry<K, V>>,
-    pub(crate) lock: Mutex<()>,
+    pub(crate) next: Atomic<BinEntry<K, V, L>>,
+    pub(crate) lock: Mutex<L, ()>,
 }

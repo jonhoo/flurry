@@ -8,19 +8,28 @@ use core::sync::atomic::Ordering;
 use crossbeam_epoch::{Atomic, Guard, Owned, Shared};
 
 #[derive(Debug)]
-pub(crate) struct Table<K, V> {
-    bins: Box<[Atomic<BinEntry<K, V>>]>,
+pub(crate) struct Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    bins: Box<[Atomic<BinEntry<K, V, L>>]>,
 }
 
-impl<K, V> From<Vec<Atomic<BinEntry<K, V>>>> for Table<K, V> {
-    fn from(bins: Vec<Atomic<BinEntry<K, V>>>) -> Self {
+impl<K, V, L> From<Vec<Atomic<BinEntry<K, V, L>>>> for Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    fn from(bins: Vec<Atomic<BinEntry<K, V, L>>>) -> Self {
         Self {
             bins: bins.into_boxed_slice(),
         }
     }
 }
 
-impl<K, V> Table<K, V> {
+impl<K, V, L> Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     pub(crate) fn new(bins: usize) -> Self {
         Self::from(vec![Atomic::null(); bins])
     }
@@ -81,7 +90,10 @@ impl<K, V> Table<K, V> {
     }
 }
 
-impl<K, V> Drop for Table<K, V> {
+impl<K, V, L> Drop for Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     fn drop(&mut self) {
         // we need to drop any forwarding nodes (since they are heap allocated).
 
@@ -106,7 +118,10 @@ impl<K, V> Drop for Table<K, V> {
     }
 }
 
-impl<K, V> Table<K, V> {
+impl<K, V, L> Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     #[inline]
     pub(crate) fn bini(&self, hash: u64) -> usize {
         let mask = self.bins.len() as u64 - 1;
@@ -114,7 +129,7 @@ impl<K, V> Table<K, V> {
     }
 
     #[inline]
-    pub(crate) fn bin<'g>(&'g self, i: usize, guard: &'g Guard) -> Shared<'g, BinEntry<K, V>> {
+    pub(crate) fn bin<'g>(&'g self, i: usize, guard: &'g Guard) -> Shared<'g, BinEntry<K, V, L>> {
         self.bins[i].load(Ordering::Acquire, guard)
     }
 
@@ -123,18 +138,22 @@ impl<K, V> Table<K, V> {
     pub(crate) fn cas_bin<'g>(
         &'g self,
         i: usize,
-        current: Shared<'_, BinEntry<K, V>>,
-        new: Owned<BinEntry<K, V>>,
+        current: Shared<'_, BinEntry<K, V, L>>,
+        new: Owned<BinEntry<K, V, L>>,
         guard: &'g Guard,
     ) -> Result<
-        Shared<'g, BinEntry<K, V>>,
-        crossbeam_epoch::CompareAndSetError<'g, BinEntry<K, V>, Owned<BinEntry<K, V>>>,
+        Shared<'g, BinEntry<K, V, L>>,
+        crossbeam_epoch::CompareAndSetError<'g, BinEntry<K, V, L>, Owned<BinEntry<K, V, L>>>,
     > {
         self.bins[i].compare_and_set(current, new, Ordering::AcqRel, guard)
     }
 
     #[inline]
-    pub(crate) fn store_bin<P: crossbeam_epoch::Pointer<BinEntry<K, V>>>(&self, i: usize, new: P) {
+    pub(crate) fn store_bin<P: crossbeam_epoch::Pointer<BinEntry<K, V, L>>>(
+        &self,
+        i: usize,
+        new: P,
+    ) {
         self.bins[i].store(new, Ordering::Release)
     }
 }
