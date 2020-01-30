@@ -1,5 +1,9 @@
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
 use crate::node::{BinEntry, Node};
 use crate::raw::Table;
+use alloc::boxed::Box;
 use core::sync::atomic::Ordering;
 use crossbeam_epoch::{Guard, Shared};
 

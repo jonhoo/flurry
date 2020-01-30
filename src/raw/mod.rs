@@ -1,4 +1,8 @@
 use crate::node::*;
+#[cfg(not(feature = "std"))]
+use alloc::boxed::Box;
+#[cfg(not(feature = "std"))]
+use alloc::vec::Vec;
 use core::fmt::Debug;
 use core::sync::atomic::Ordering;
 use crossbeam_epoch::{Atomic, Guard, Owned, Shared};

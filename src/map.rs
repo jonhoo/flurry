@@ -9,6 +9,7 @@ use core::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
 #[cfg(feature = "std")]
 use std::collections::hash_map::RandomState;
+#[cfg(feature = "std")]
 use std::sync::Once;
 
 const ISIZE_BITS: usize = core::mem::size_of::<isize>() * 8;
@@ -43,8 +44,10 @@ const MAX_RESIZERS: isize = (1 << (ISIZE_BITS - RESIZE_STAMP_BITS)) - 1;
 /// The bit shift for recording size stamp in `size_ctl`.
 const RESIZE_STAMP_SHIFT: usize = ISIZE_BITS - RESIZE_STAMP_BITS;
 
+#[cfg(feature = "std")]
 static NCPU_INITIALIZER: Once = Once::new();
-static NCPU: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "std")]
+static NCPU: AtomicUsize = AtomicUsize::new(1);
 
 macro_rules! load_factor {
     ($n: expr) => {
@@ -1523,7 +1526,9 @@ where
 
 #[inline]
 /// Returns the number of physical CPUs in the machine (_O(1)_).
+/// This always returns `1` in `no_std` environment.
 fn num_cpus() -> usize {
+    #[cfg(feature = "std")]
     NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
 
     NCPU.load(Ordering::Relaxed)
