@@ -56,5 +56,5 @@ fn test_remove() {
     map.remove(&5, &guard);
     // TODO: add len check once method exists
     // assert_eq!(map.len(), 4);
-    assert!(!map.contains_key(&5));
+    assert!(!map.contains_key(&5, &guard));
 }

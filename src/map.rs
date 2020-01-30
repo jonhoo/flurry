@@ -174,16 +174,16 @@ where
         h.finish()
     }
 
+    #[inline]
     /// Tests if `key` is a key in this table.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
-    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        let guard = crossbeam_epoch::pin();
         self.get(key, &guard).is_some()
     }
 
@@ -263,19 +263,19 @@ where
         unsafe { v.as_ref() }
     }
 
+    #[inline]
     /// Obtains the value to which `key` is mapped and passes it through the closure `then`.
     ///
     /// Returns `None` if this map contains no mapping for `key`.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
-    pub fn get_and<Q, R, F>(&self, key: &Q, then: F) -> Option<R>
+    pub fn get_and<Q, R, F>(&self, key: &Q, then: F, guard: &Guard) -> Option<R>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
         F: FnOnce(&V) -> R,
     {
-        let guard = &crossbeam_epoch::pin();
         self.get(key, guard).map(then)
     }
 
@@ -538,7 +538,7 @@ where
         }
     }
 
-    fn put_all<'g, I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &'g Guard) {
+    fn put_all<I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &Guard) {
         for (key, value) in iter {
             self.put(key, value, false, guard);
         }
@@ -951,7 +951,7 @@ where
     }
 
     /// Tries to presize table to accommodate the given number of elements.
-    fn try_presize<'g>(&self, size: usize, guard: &'g Guard) {
+    fn try_presize(&self, size: usize, guard: &Guard) {
         let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
             MAXIMUM_CAPACITY
         } else {
@@ -1062,11 +1062,9 @@ where
     #[inline]
     /// Tries to reserve capacity for at least additional more elements.
     /// The collection may reserve more space to avoid frequent reallocations.
-    pub fn reserve(&self, additional: usize) {
+    pub fn reserve(&self, additional: usize, guard: &Guard) {
         let absolute = self.len() + additional;
-
-        let guard = epoch::pin();
-        self.try_presize(absolute, &guard);
+        self.try_presize(absolute, guard);
     }
 
     /// Removes the key (and its corresponding value) from this map.
@@ -1259,16 +1257,15 @@ where
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
     /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
-    pub fn retain<F>(&self, mut f: F)
+    pub fn retain<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
-        let guard = epoch::pin();
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
                 let old_value: Shared<'_, V> = Shared::from(v as *const V);
-                self.replace_node(k, None, Some(old_value), &guard);
+                self.replace_node(k, None, Some(old_value), guard);
             }
         }
     }
@@ -1279,15 +1276,14 @@ where
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
     /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
-    pub fn retain_force<F>(&self, mut f: F)
+    pub fn retain_force<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
-        let guard = epoch::pin();
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
-                self.replace_node(k, None, None, &guard);
+                self.replace_node(k, None, None, guard);
             }
         }
     }
@@ -1331,7 +1327,7 @@ where
     #[inline]
     #[cfg(test)]
     /// Returns the capacity of the map.
-    fn capacity<'g>(&self, guard: &'g Guard) -> usize {
+    fn capacity(&self, guard: &Guard) -> usize {
         let table = self.table.load(Ordering::Relaxed, &guard);
 
         if table.is_null() {
@@ -1431,9 +1427,9 @@ where
             (iter.size_hint().0 + 1) / 2
         };
 
-        self.reserve(reserve);
+        let guard = epoch::pin();
 
-        let guard = crossbeam_epoch::pin();
+        self.reserve(reserve, &guard);
         (*self).put_all(iter.into_iter(), &guard);
     }
 }
@@ -1523,7 +1519,6 @@ where
 /// Returns the number of physical CPUs in the machine (_O(1)_).
 fn num_cpus() -> usize {
     NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
-
     NCPU.load(Ordering::Relaxed)
 }
 
@@ -1565,7 +1560,7 @@ mod tests {
 
         map.insert(42, 0, &guard);
 
-        map.reserve(32);
+        map.reserve(32, &guard);
 
         let capacity = map.capacity(&guard);
         assert!(capacity >= 16 + 32);
@@ -1576,7 +1571,7 @@ mod tests {
         let map = HashMap::<usize, usize>::new();
         let guard = epoch::pin();
 
-        map.reserve(32);
+        map.reserve(32, &guard);
 
         let capacity = map.capacity(&guard);
         assert!(capacity >= 32);
