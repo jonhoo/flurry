@@ -1257,7 +1257,7 @@ where
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
     /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
-    pub fn retain<F>(&mut self, mut f: F)
+    pub fn retain<F>(&self, mut f: F)
     where
         F: FnMut(&K, &V) -> bool,
     {
@@ -1277,7 +1277,7 @@ where
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
     /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
-    pub fn retain_force<F>(&mut self, mut f: F)
+    pub fn retain_force<F>(&self, mut f: F)
     where
         F: FnMut(&K, &V) -> bool,
     {
