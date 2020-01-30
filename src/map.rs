@@ -146,6 +146,19 @@ where
     /// allow the map to be resistant to attacks that cause many collisions and
     /// very poor performance. Setting it manually using this
     /// function can expose a DoS attack vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use crossbeam_epoch as epoch;
+    /// use std::collections::hash_map::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let guard = epoch::pin();
+    /// let mut map = HashMap::with_hasher(s);
+    /// map.insert(1, 2, &guard);
+    /// ```
     pub fn with_hasher(hash_builder: S) -> Self {
         Self {
             table: Atomic::null(),
