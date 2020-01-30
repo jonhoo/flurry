@@ -59,8 +59,8 @@ macro_rules! load_factor {
 /// A concurrent hash table.
 ///
 /// Note that `ahash::RandomState`, the default value of `S`, is not
-/// cryptographically secure. Therefore it is strongly recommended that you do 
-/// not use this hash for cryptographic purproses. 
+/// cryptographically secure. Therefore it is strongly recommended that you do
+/// not use this hash for cryptographic purproses.
 /// See [`ahash`](https://github.com/tkaitchuck/ahash) for more information.
 ///
 /// See the [crate-level documentation](index.html) for details.
@@ -1188,6 +1188,9 @@ where
 
                             // just remove the node if the value is the one we expected at method call
                             if observed_value.map(|ov| ov == ev).unwrap_or(true) {
+                                // we remember the old value so that we can return it and mark it for deletion below
+                                old_val = Some(ev);
+
                                 // found the node but we have a new value to replace the old one
                                 if let Some(nv) = new_value {
                                     n.value.store(Owned::new(nv), Ordering::SeqCst);
@@ -1195,8 +1198,6 @@ where
                                     // so we stop iterating here
                                     break;
                                 }
-                                // we remember the old value so that we can return it and mark it for deletion below
-                                old_val = Some(ev);
                                 // remove the BinEntry containing the removed key value pair from the bucket
                                 if !pred.is_null() {
                                     // either by changing the pointer of the previous BinEntry, if present
@@ -1268,7 +1269,7 @@ where
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
     /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
-    pub fn retain<F>(&mut self, mut f: F, guard: &Guard)
+    pub fn retain<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
@@ -1287,7 +1288,7 @@ where
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
     /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
-    pub fn retain_force<F>(&mut self, mut f: F, guard: &Guard)
+    pub fn retain_force<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
@@ -1532,7 +1533,7 @@ where
 }
 
 #[inline]
-#[cfg(feature = "std")]
+#[cfg(all(not(miri), feature = "std"))]
 /// Returns the number of physical CPUs in the machine.
 /// Returns `1` in `no_std` environment.
 fn num_cpus() -> usize {
@@ -1541,10 +1542,10 @@ fn num_cpus() -> usize {
 }
 
 #[inline]
-#[cfg(not(feature = "std"))]
+#[cfg(any(miri, not(feature = "std")))]
 /// Returns the number of physical CPUs in the machine.
 /// Returns `1` in `no_std` environment.
-fn num_cpus() -> usize {
+const fn num_cpus() -> usize {
     1
 }
 
@@ -1723,7 +1724,7 @@ fn replace_existing() {
         let guard = epoch::pin();
         map.insert(42, 42, &guard);
         let old = map.replace_node(&42, Some(10), None, &guard);
-        assert!(old.is_none());
+        assert_eq!(old, Some(&42));
         assert_eq!(*map.get(&42, &guard).unwrap(), 10);
     }
 }
@@ -1736,7 +1737,7 @@ fn replace_existing_observed_value_matching() {
         map.insert(42, 42, &guard);
         let observed_value = Shared::from(map.get(&42, &guard).unwrap() as *const _);
         let old = map.replace_node(&42, Some(10), Some(observed_value), &guard);
-        assert!(old.is_none());
+        assert_eq!(old, Some(&42));
         assert_eq!(*map.get(&42, &guard).unwrap(), 10);
     }
 }

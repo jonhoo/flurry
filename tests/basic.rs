@@ -449,7 +449,7 @@ fn from_iter_empty() {
 #[test]
 fn retain_empty() {
     let guard = epoch::pin();
-    let mut map = HashMap::<&'static str, u32>::new();
+    let map = HashMap::<&'static str, u32>::new();
     map.retain(|_, _| false, &guard);
     assert_eq!(map.len(), 0);
 }
@@ -457,7 +457,7 @@ fn retain_empty() {
 #[test]
 fn retain_all_false() {
     let guard = epoch::pin();
-    let mut map: HashMap<u32, u32> = (0..10 as u32).map(|x| (x, x)).collect();
+    let map: HashMap<u32, u32> = (0..10 as u32).map(|x| (x, x)).collect();
     map.retain(|_, _| false, &guard);
     assert_eq!(map.len(), 0);
 }
@@ -466,7 +466,7 @@ fn retain_all_false() {
 fn retain_all_true() {
     let size = 10usize;
     let guard = epoch::pin();
-    let mut map: HashMap<usize, usize> = (0..size).map(|x| (x, x)).collect();
+    let map: HashMap<usize, usize> = (0..size).map(|x| (x, x)).collect();
     map.retain(|_, _| true, &guard);
     assert_eq!(map.len(), size);
 }
@@ -474,7 +474,7 @@ fn retain_all_true() {
 #[test]
 fn retain_some() {
     let guard = epoch::pin();
-    let mut map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
+    let map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
     let expected_map: HashMap<u32, u32> = (5..10).map(|x| (x, x)).collect();
     map.retain(|_, v| *v >= 5, &guard);
     assert_eq!(map.len(), 5);
@@ -484,7 +484,7 @@ fn retain_some() {
 #[test]
 fn retain_force_empty() {
     let guard = epoch::pin();
-    let mut map = HashMap::<&'static str, u32>::new();
+    let map = HashMap::<&'static str, u32>::new();
     map.retain_force(|_, _| false, &guard);
     assert_eq!(map.len(), 0);
 }
@@ -492,7 +492,7 @@ fn retain_force_empty() {
 #[test]
 fn retain_force_some() {
     let guard = epoch::pin();
-    let mut map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
+    let map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
     let expected_map: HashMap<u32, u32> = (5..10).map(|x| (x, x)).collect();
     map.retain_force(|_, v| *v >= 5, &guard);
     assert_eq!(map.len(), 5);
