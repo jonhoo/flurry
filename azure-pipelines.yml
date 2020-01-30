@@ -29,7 +29,14 @@ jobs:
        condition: ne(variables.CACHE_RESTORED, 'true')
      - script: cargo deny check
        displayName: cargo deny
-
+ - job: no_std
+   displayName: "Compile-check on no_std target"
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+     - bash: cargo check --target thumbv7m-none-eabi --no-default-features
+       displayName: cargo check
 resources:
   repositories:
     - repository: templates
