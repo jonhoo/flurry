@@ -56,7 +56,7 @@ macro_rules! load_factor {
 /// A concurrent hash table.
 ///
 /// See the [crate-level documentation](index.html) for details.
-pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
+pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
     table: Atomic<Table<K, V>>,
@@ -105,6 +105,22 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// We avoid that by checking that every external guard that is passed in is associated with
     /// the `Collector` that was specified when the map was created (which may be the global
     /// collector).
+    ///
+    /// Note also that the fact that this can be a global collector is what necessitates the
+    /// `'static` bounds on `K` and `V`. Since deallocation can be deferred arbitrarily, it is not
+    /// okay for us to take a `K` or `V` with a limited lifetime, since we may drop it far after
+    /// that lifetime has passed.
+    ///
+    /// ```rust,compile_fail
+    /// struct X<'a>(flurry::HashMap<&'a (), &'a ()>);
+    /// ```
+    ///
+    /// One possibility is to never use the global allocator, and instead _always_ create and use
+    /// our own `Collector`. If we did that, then we could accept non-`'static` keys and values since
+    /// the destruction of the collector would ensure that that all deferred destructors are run.
+    /// It would, sadly, mean that we don't get to share a collector with other things that use
+    /// `crossbeam-epoch` though. For more on this (and a cool optimization), see:
+    /// https://github.com/crossbeam-rs/crossbeam/blob/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-skiplist/src/base.rs#L308-L319
     collector: epoch::Collector,
 
     build_hasher: S,
