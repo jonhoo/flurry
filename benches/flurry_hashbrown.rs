@@ -1,12 +1,16 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use hashbrown::HashMap;
 
-/* HASHBROWN:
+/* Benchmarks from `hashbrown` (https://github.com/rust-lang/hashbrown):
  *
  * This benchmark suite contains some benchmarks along a set of dimensions:
  *   Int key distribution: low bit heavy, top bit heavy, and random.
  *   Task: basic functionality: insert, insert_erase, lookup, lookup_fail, iter
+ *
+ * For the associated license information, please refer to hashbrown.LICENSE.
  */
+
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use flurry::{epoch, HashMap};
+
 const SIZE: usize = 1000;
 
 #[derive(Clone, Copy)]
@@ -50,8 +54,9 @@ macro_rules! bench_insert {
             b.iter(|| {
                 let mut map = HashMap::with_capacity(SIZE as usize);
 
+                let guard = epoch::pin();
                 ($keydist).take(SIZE).for_each(|i| {
-                    map.insert(i, i);
+                    map.insert(i, i, &guard);
                 });
                 black_box(&mut map);
             });
@@ -59,14 +64,24 @@ macro_rules! bench_insert {
     };
 }
 
-bench_suite!(bench_insert, insert_hashbrown, "insert_hashbrown",);
+bench_suite!(
+    bench_insert,
+    insert_flurry_hashbrown,
+    "insert_flurry_hashbrown",
+);
 
 macro_rules! bench_insert_erase {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
-        let mut base = HashMap::with_capacity(SIZE as usize);
-        ($keydist).take(SIZE).for_each(|i| {
-            base.insert(i, i);
-        });
+        let base = HashMap::with_capacity(SIZE as usize);
+        {
+            // NOTE: in testing, I tried running this without the local scope.
+            // not dropping the guard and pinning the epoch for the entire benchmark literally
+            // crashed multiple programs on my PC, so I advise not to do that...
+            let guard = epoch::pin();
+            ($keydist).take(SIZE).for_each(|i| {
+                base.insert(i, i, &guard);
+            });
+        }
         let skip = ($keydist).take(SIZE);
 
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
@@ -77,12 +92,13 @@ macro_rules! bench_insert_erase {
 
                 // While keeping the size constant,
                 // replace the first keydist with the second.
+                let guard = epoch::pin();
                 (&mut add_iter)
                     .zip(&mut remove_iter)
                     .take(SIZE)
                     .for_each(|(add, remove)| {
-                        map.insert(add, add);
-                        black_box(map.remove(&remove));
+                        map.insert(add, add, &guard);
+                        black_box(map.remove(&remove, &guard));
                     });
                 black_box(&mut map);
             });
@@ -92,41 +108,51 @@ macro_rules! bench_insert_erase {
 
 bench_suite!(
     bench_insert_erase,
-    insert_erase_hashbrown,
-    "insert_erase_hashbrown",
+    insert_erase_flurry_hashbrown,
+    "insert_erase_flurry_hashbrown",
 );
 
 macro_rules! bench_lookup {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
-        let mut map = HashMap::with_capacity(SIZE as usize);
-        ($keydist).take(SIZE).for_each(|i| {
-            map.insert(i, i);
-        });
+        let map = HashMap::with_capacity(SIZE as usize);
+        {
+            // see bench_insert_erase for a comment on the local scope
+            let guard = epoch::pin();
+            ($keydist).take(SIZE).for_each(|i| {
+                map.insert(i, i, &guard);
+            });
+        }
 
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
             b.iter(|| {
+                let guard = epoch::pin();
                 ($keydist).take(SIZE).for_each(|i| {
-                    black_box(map.get(&i));
+                    black_box(map.get(&i, &guard));
                 });
             });
         });
     };
 }
 
-bench_suite!(bench_lookup, get_hashbrown, "get_hashbrown",);
+bench_suite!(bench_lookup, get_flurry_hashbrown, "get_flurry_hashbrown",);
 
 macro_rules! bench_lookup_fail {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
-        let mut map = HashMap::with_capacity(SIZE as usize);
+        let map = HashMap::with_capacity(SIZE as usize);
         let mut iter = $keydist;
-        (&mut iter).take(SIZE).for_each(|i| {
-            map.insert(i, i);
-        });
+        {
+            // see bench_insert_erase for a comment on the local scope
+            let guard = epoch::pin();
+            (&mut iter).take(SIZE).for_each(|i| {
+                map.insert(i, i, &guard);
+            });
+        }
 
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
             b.iter(|| {
+                let guard = epoch::pin();
                 (&mut iter).take(SIZE).for_each(|i| {
-                    black_box(map.get(&i));
+                    black_box(map.get(&i, &guard));
                 });
             });
         });
@@ -135,20 +161,25 @@ macro_rules! bench_lookup_fail {
 
 bench_suite!(
     bench_lookup_fail,
-    get_absent_hashbrown,
-    "get_absent_hashbrown",
+    get_absent_flurry_hashbrown,
+    "get_absent_flurry_hashbrown",
 );
 
 macro_rules! bench_iter {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
-        let mut map = HashMap::with_capacity(SIZE as usize);
-        ($keydist).take(SIZE).for_each(|i| {
-            map.insert(i, i);
-        });
+        let map = HashMap::with_capacity(SIZE as usize);
+        {
+            // see bench_insert_erase for a comment on the local scope
+            let guard = epoch::pin();
+            ($keydist).take(SIZE).for_each(|i| {
+                map.insert(i, i, &guard);
+            });
+        }
 
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
             b.iter(|| {
-                for k in &map {
+                let guard = epoch::pin();
+                for k in map.iter(&guard) {
                     black_box(k);
                 }
             });
@@ -156,14 +187,14 @@ macro_rules! bench_iter {
     };
 }
 
-bench_suite!(bench_iter, iter_hashbrown, "iter_hashbrown",);
+bench_suite!(bench_iter, iter_flurry_hashbrown, "iter_flurry_hashbrown",);
 
 criterion_group!(
     benches,
-    insert_hashbrown,
-    insert_erase_hashbrown,
-    get_hashbrown,
-    get_absent_hashbrown,
-    iter_hashbrown,
+    insert_flurry_hashbrown,
+    insert_erase_flurry_hashbrown,
+    get_flurry_hashbrown,
+    get_absent_flurry_hashbrown,
+    iter_flurry_hashbrown,
 );
 criterion_main!(benches);
