@@ -1,36 +1,46 @@
 use crate::raw::Table;
 use crossbeam_epoch::Atomic;
-use parking_lot::Mutex;
+use lock_api::Mutex;
 
 /// Entry in a bin.
 ///
 /// Will _generally_ be `Node`. Any entry that is not first in the bin, will be a `Node`.
 #[derive(Debug)]
-pub(crate) enum BinEntry<K, V> {
-    Node(Node<K, V>),
+pub(crate) enum BinEntry<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    Node(Node<K, V, L>),
     Moved,
 }
 
-unsafe impl<K, V> Send for BinEntry<K, V>
+unsafe impl<K, V, L> Send for BinEntry<K, V, L>
 where
     K: Send,
     V: Send,
-    Node<K, V>: Send,
-    Table<K, V>: Send,
+    L: Send,
+    Node<K, V, L>: Send,
+    Table<K, V, L>: Send,
+    L: lock_api::RawMutex,
 {
 }
 
-unsafe impl<K, V> Sync for BinEntry<K, V>
+unsafe impl<K, V, L> Sync for BinEntry<K, V, L>
 where
     K: Sync,
     V: Sync,
-    Node<K, V>: Sync,
-    Table<K, V>: Sync,
+    L: Sync,
+    Node<K, V, L>: Sync,
+    Table<K, V, L>: Sync,
+    L: lock_api::RawMutex,
 {
 }
 
-impl<K, V> BinEntry<K, V> {
-    pub(crate) fn as_node(&self) -> Option<&Node<K, V>> {
+impl<K, V, L> BinEntry<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    pub(crate) fn as_node(&self) -> Option<&Node<K, V, L>> {
         if let BinEntry::Node(ref n) = *self {
             Some(n)
         } else {
@@ -41,12 +51,15 @@ impl<K, V> BinEntry<K, V> {
 
 /// Key-value entry.
 #[derive(Debug)]
-pub(crate) struct Node<K, V> {
+pub(crate) struct Node<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     pub(crate) hash: u64,
     pub(crate) key: K,
     pub(crate) value: Atomic<V>,
-    pub(crate) next: Atomic<BinEntry<K, V>>,
-    pub(crate) lock: Mutex<()>,
+    pub(crate) next: Atomic<BinEntry<K, V, L>>,
+    pub(crate) lock: Mutex<L, ()>,
 }
 
 #[cfg(test)]
@@ -55,7 +68,7 @@ mod tests {
     use crossbeam_epoch::Owned;
     use std::sync::atomic::Ordering;
 
-    fn new_node(hash: u64, key: usize, value: usize) -> Node<usize, usize> {
+    fn new_node(hash: u64, key: usize, value: usize) -> Node<usize, usize, parking_lot::RawMutex> {
         Node {
             hash,
             key,
@@ -119,7 +132,7 @@ mod tests {
     #[test]
     fn find_moved_empty_bins_no_match() {
         let guard = &crossbeam_epoch::pin();
-        let mut table = Table::<usize, usize>::new(1);
+        let mut table = Table::<usize, usize, parking_lot::RawMutex>::new(1);
         let mut table2 = Owned::new(Table::new(1)).into_shared(guard);
 
         let entry = table.get_moved(table2, guard);
@@ -134,7 +147,7 @@ mod tests {
     #[test]
     fn find_moved_no_bins_no_match() {
         let guard = &crossbeam_epoch::pin();
-        let mut table = Table::<usize, usize>::new(1);
+        let mut table = Table::<usize, usize, parking_lot::RawMutex>::new(1);
         let mut table2 = Owned::new(Table::new(0)).into_shared(guard);
         let entry = table.get_moved(table2, guard);
         table.store_bin(0, entry);
@@ -148,7 +161,7 @@ mod tests {
     #[test]
     fn find_moved_null_bin_no_match() {
         let guard = &crossbeam_epoch::pin();
-        let mut table = Table::<usize, usize>::new(1);
+        let mut table = Table::<usize, usize, parking_lot::RawMutex>::new(1);
         let mut table2 = Owned::new(Table::new(2)).into_shared(guard);
         unsafe { table2.deref() }.store_bin(0, Owned::new(BinEntry::Node(new_node(1, 2, 3))));
         let entry = table.get_moved(table2, guard);
@@ -163,7 +176,7 @@ mod tests {
     #[test]
     fn find_moved_match() {
         let guard = &crossbeam_epoch::pin();
-        let mut table = Table::<usize, usize>::new(1);
+        let mut table = Table::<usize, usize, parking_lot::RawMutex>::new(1);
         let mut table2 = Owned::new(Table::new(1)).into_shared(guard);
         // safety: table2 is still valid
         unsafe { table2.deref() }.store_bin(0, Owned::new(BinEntry::Node(new_node(1, 2, 3))));

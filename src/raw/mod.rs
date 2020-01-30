@@ -9,12 +9,15 @@ use core::sync::atomic::Ordering;
 use crossbeam_epoch::{Atomic, Guard, Owned, Pointer, Shared};
 
 #[derive(Debug)]
-pub(crate) struct Table<K, V> {
-    bins: Box<[Atomic<BinEntry<K, V>>]>,
+pub(crate) struct Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    bins: Box<[Atomic<BinEntry<K, V, L>>]>,
 
     // since a Moved does not contain associated information,
     // one instance is sufficient and shared across all bins in this table
-    moved: Atomic<BinEntry<K, V>>,
+    moved: Atomic<BinEntry<K, V, L>>,
 
     // since the information content of moved nodes is the same across
     // the table, we share this information
@@ -50,11 +53,14 @@ pub(crate) struct Table<K, V> {
     //
     // Since finishing a resize is the only time a table is `defer_destroy`ed, the above covers
     // all cases.
-    next_table: Atomic<Table<K, V>>,
+    next_table: Atomic<Table<K, V, L>>,
 }
 
-impl<K, V> From<Vec<Atomic<BinEntry<K, V>>>> for Table<K, V> {
-    fn from(bins: Vec<Atomic<BinEntry<K, V>>>) -> Self {
+impl<K, V, L> From<Vec<Atomic<BinEntry<K, V, L>>>> for Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
+    fn from(bins: Vec<Atomic<BinEntry<K, V, L>>>) -> Self {
         Self {
             bins: bins.into_boxed_slice(),
             moved: Atomic::from(Owned::new(BinEntry::Moved)),
@@ -63,7 +69,10 @@ impl<K, V> From<Vec<Atomic<BinEntry<K, V>>>> for Table<K, V> {
     }
 }
 
-impl<K, V> Table<K, V> {
+impl<K, V, L> Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     pub(crate) fn new(bins: usize) -> Self {
         Self::from(vec![Atomic::null(); bins])
     }
@@ -78,9 +87,9 @@ impl<K, V> Table<K, V> {
 
     pub(crate) fn get_moved<'g>(
         &'g self,
-        for_table: Shared<'g, Table<K, V>>,
+        for_table: Shared<'g, Table<K, V, L>>,
         guard: &'g Guard,
-    ) -> Shared<'g, BinEntry<K, V>> {
+    ) -> Shared<'g, BinEntry<K, V, L>> {
         match self.next_table(guard) {
             t if t.is_null() => {
                 // if a no next table is yet associated with this table,
@@ -108,11 +117,11 @@ impl<K, V> Table<K, V> {
 
     pub(crate) fn find<'g, Q>(
         &'g self,
-        bin: &BinEntry<K, V>,
+        bin: &BinEntry<K, V, L>,
         hash: u64,
         key: &Q,
         guard: &'g Guard,
-    ) -> Shared<'g, BinEntry<K, V>>
+    ) -> Shared<'g, BinEntry<K, V, L>>
     where
         K: Borrow<Q>,
         Q: ?Sized + Eq,
@@ -222,7 +231,10 @@ impl<K, V> Table<K, V> {
     }
 }
 
-impl<K, V> Drop for Table<K, V> {
+impl<K, V, L> Drop for Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     fn drop(&mut self) {
         // safety: we have &mut self _and_ all references we have returned are bound to the
         // lifetime of their borrow of self, so there cannot be any outstanding references to
@@ -276,7 +288,10 @@ impl<K, V> Drop for Table<K, V> {
     }
 }
 
-impl<K, V> Table<K, V> {
+impl<K, V, L> Table<K, V, L>
+where
+    L: lock_api::RawMutex,
+{
     #[inline]
     pub(crate) fn bini(&self, hash: u64) -> usize {
         let mask = self.bins.len() as u64 - 1;
@@ -284,7 +299,7 @@ impl<K, V> Table<K, V> {
     }
 
     #[inline]
-    pub(crate) fn bin<'g>(&'g self, i: usize, guard: &'g Guard) -> Shared<'g, BinEntry<K, V>> {
+    pub(crate) fn bin<'g>(&'g self, i: usize, guard: &'g Guard) -> Shared<'g, BinEntry<K, V, L>> {
         self.bins[i].load(Ordering::Acquire, guard)
     }
 
@@ -293,26 +308,26 @@ impl<K, V> Table<K, V> {
     pub(crate) fn cas_bin<'g, P>(
         &'g self,
         i: usize,
-        current: Shared<'_, BinEntry<K, V>>,
+        current: Shared<'_, BinEntry<K, V, L>>,
         new: P,
         guard: &'g Guard,
     ) -> Result<
-        Shared<'g, BinEntry<K, V>>,
-        crossbeam_epoch::CompareAndSetError<'g, BinEntry<K, V>, P>,
+        Shared<'g, BinEntry<K, V, L>>,
+        crossbeam_epoch::CompareAndSetError<'g, BinEntry<K, V, L>, P>,
     >
     where
-        P: Pointer<BinEntry<K, V>>,
+        P: Pointer<BinEntry<K, V, L>>,
     {
         self.bins[i].compare_and_set(current, new, Ordering::AcqRel, guard)
     }
 
     #[inline]
-    pub(crate) fn store_bin<P: Pointer<BinEntry<K, V>>>(&self, i: usize, new: P) {
+    pub(crate) fn store_bin<P: Pointer<BinEntry<K, V, L>>>(&self, i: usize, new: P) {
         self.bins[i].store(new, Ordering::Release)
     }
 
     #[inline]
-    pub(crate) fn next_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
+    pub(crate) fn next_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V, L>> {
         self.next_table.load(Ordering::SeqCst, guard)
     }
 }
