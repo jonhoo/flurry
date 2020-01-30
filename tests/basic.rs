@@ -19,7 +19,7 @@ fn clear() {
         map.insert(4, 1, &guard);
     }
     map.clear(&guard);
-    assert!(map.len() == 0);
+    assert!(map.is_empty());
 }
 
 #[test]
