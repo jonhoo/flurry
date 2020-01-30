@@ -111,10 +111,6 @@ pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     /// okay for us to take a `K` or `V` with a limited lifetime, since we may drop it far after
     /// that lifetime has passed.
     ///
-    /// ```rust,compile_fail
-    /// struct X<'a>(flurry::HashMap<&'a (), &'a ()>);
-    /// ```
-    ///
     /// One possibility is to never use the global allocator, and instead _always_ create and use
     /// our own `Collector`. If we did that, then we could accept non-`'static` keys and values since
     /// the destruction of the collector would ensure that that all deferred destructors are run.
@@ -1981,6 +1977,27 @@ mod tests {
 /// let r = map.values(&guard).next();
 /// drop(guard);
 /// drop(r);
+/// ```
+///
+/// # Keys and values must be static
+///
+/// ```compile_fail
+/// let x = String::from("foo");
+/// let map: flurry::HashMap<_, _> = std::iter::once((&x, &x)).collect();
+/// ```
+/// ```compile_fail
+/// let x = String::from("foo");
+/// let map: flurry::HashMap<_, _> = flurry::HashMap::new();
+/// map.insert(&x, &x, &map.register().pin());
+/// ```
+///
+/// # get() key can be non-static
+///
+/// ```no_run
+/// let x = String::from("foo");
+/// let map: flurry::HashMap<_, _> = flurry::HashMap::new();
+/// map.insert(x.clone(), x.clone(), &map.register().pin());
+/// map.get(&x, &map.register().pin());
 /// ```
 #[allow(dead_code)]
 struct CompileFailTests;
