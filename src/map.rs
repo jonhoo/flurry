@@ -82,18 +82,19 @@ pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     /// unsoundness as described in https://github.com/jonhoo/flurry/issues/46. Specifically, a
     /// user can do:
     ///
-    /// ```rust,should_panic
+    /// ```rust,ignore
+    /// # // this test should be should_panic, not ignore, but that makes ASAN crash..?
     /// # use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// # use crossbeam_epoch;
     /// let map: HashMap<_, _> = HashMap::default();
-    /// map.insert(42, String::from("hello"), &epoch::pin());
+    /// map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
     ///
-    /// let evil = epoch::Collector::new();
+    /// let evil = crossbeam_epoch::Collector::new();
     /// let evil = evil.register();
     /// let guard = evil.pin();
     /// let oops = map.get(&42, &guard);
     ///
-    /// map.remove(&42, &epoch::pin());
+    /// map.remove(&42, &crossbeam_epoch::pin());
     /// // at this point, the default collector is allowed to free `"hello"`
     /// // since no-one has the global epoch pinned as far as it is aware.
     /// // `oops` is tied to the lifetime of a Guard that is not a part of
@@ -120,6 +121,27 @@ pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     collector: epoch::Collector,
 
     build_hasher: S,
+}
+
+#[cfg(test)]
+#[test]
+#[should_panic]
+fn disallow_evil() {
+    let map: HashMap<_, _> = HashMap::default();
+    map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
+
+    let evil = crossbeam_epoch::Collector::new();
+    let evil = evil.register();
+    let guard = evil.pin();
+    let oops = map.get(&42, &guard);
+
+    map.remove(&42, &crossbeam_epoch::pin());
+    // at this point, the default collector is allowed to free `"hello"`
+    // since no-one has the global epoch pinned as far as it is aware.
+    // `oops` is tied to the lifetime of a Guard that is not a part of
+    // the same epoch group, and so can now be dangling.
+    // but we can still access it!
+    assert_eq!(oops.unwrap(), "hello");
 }
 
 impl<K, V, S> Default for HashMap<K, V, S>
