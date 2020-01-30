@@ -1210,12 +1210,28 @@ where
         self.try_presize(absolute, &guard);
     }
 
-    /// Removes the key (and its corresponding value) from this map.
-    /// This method does nothing if the key is not in the map.
-    /// Returns the previous value associated with the given key.
+    /// Removes a key from the map, returning a reference to the value at the
+    /// key if the key was previously in the map.
     ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use crossbeam_epoch as epoch;
+    ///
+    /// let map = HashMap::new();
+    /// let guard = epoch::pin();
+    /// map.insert(1, "a", &guard);
+    /// assert_eq!(map.remove(&1, &guard), Some(&"a"));
+    /// assert_eq!(map.remove(&1, &guard), None);
+    /// ```
     pub fn remove<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
     where
         K: Borrow<Q>,
