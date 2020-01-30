@@ -223,8 +223,11 @@ where
     /// Returns `true` if the map contains a value for the specified key.
     ///
     /// The key may be any borrowed form of the map's key type, but
-    /// [`Hash`](std::hash::Hash) and [`Eq`](std::cmp::Eq) on the
-    /// borrowed form *must* match those for the key type.
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
     ///
