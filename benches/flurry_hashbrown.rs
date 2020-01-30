@@ -52,7 +52,7 @@ macro_rules! bench_insert {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
             b.iter(|| {
-                let mut map = HashMap::with_capacity(SIZE as usize);
+                let mut map: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
 
                 let guard = epoch::pin();
                 ($keydist).take(SIZE).for_each(|i| {
@@ -72,7 +72,7 @@ bench_suite!(
 
 macro_rules! bench_insert_erase {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
-        let base = HashMap::with_capacity(SIZE as usize);
+        let base: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
         {
             // NOTE: in testing, I tried running this without the local scope.
             // not dropping the guard and pinning the epoch for the entire benchmark literally
@@ -114,7 +114,7 @@ bench_suite!(
 
 macro_rules! bench_lookup {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
-        let map = HashMap::with_capacity(SIZE as usize);
+        let map: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
         {
             // see bench_insert_erase for a comment on the local scope
             let guard = epoch::pin();
@@ -138,7 +138,7 @@ bench_suite!(bench_lookup, get_flurry_hashbrown, "get_flurry_hashbrown",);
 
 macro_rules! bench_lookup_fail {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
-        let map = HashMap::with_capacity(SIZE as usize);
+        let map: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
         let mut iter = $keydist;
         {
             // see bench_insert_erase for a comment on the local scope
@@ -167,7 +167,7 @@ bench_suite!(
 
 macro_rules! bench_iter {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
-        let map = HashMap::with_capacity(SIZE as usize);
+        let map: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
         {
             // see bench_insert_erase for a comment on the local scope
             let guard = epoch::pin();
