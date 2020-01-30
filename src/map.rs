@@ -179,6 +179,21 @@ where
     /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
     /// to be resistant to attacks that cause many collisions and very poor performance.
     /// Setting it manually using this function can expose a DoS attack vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use crossbeam_epoch as epoch;
+    /// use std::collections::hash_map::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let guard = epoch::pin();
+    /// let mut map = HashMap::with_capacity_and_hasher(s, 10);
+    /// map.insert(1, 2, &guard);
+    /// ```
+    /// ## Notes
+    /// The order of the parameters differs from the [std::collections::HashMap]
     pub fn with_capacity_and_hasher(hash_builder: S, capacity: usize) -> Self {
         if capacity == 0 {
             return Self::with_hasher(hash_builder);
