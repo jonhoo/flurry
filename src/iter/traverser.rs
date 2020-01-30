@@ -208,16 +208,18 @@ mod tests {
     use crossbeam_epoch::{self as epoch, Atomic, Owned};
     use lock_api::Mutex;
 
+    type L = parking_lot::RawMutex;
+
     #[test]
     fn iter_new() {
         let guard = epoch::pin();
-        let iter = NodeIter::<usize, usize>::new(Shared::null(), &guard);
+        let iter = NodeIter::<usize, usize, L>::new(Shared::null(), &guard);
         assert_eq!(iter.count(), 0);
     }
 
     #[test]
     fn iter_empty() {
-        let table = Owned::new(Table::<usize, usize>::new(16));
+        let table = Owned::new(Table::<usize, usize, L>::new(16));
         let guard = epoch::pin();
         let table = table.into_shared(&guard);
         let iter = NodeIter::new(table, &guard);
@@ -236,7 +238,7 @@ mod tests {
             key: 0usize,
             value: Atomic::new(0usize),
             next: Atomic::null(),
-            lock: Mutex::new(()),
+            lock: Mutex::<L, _>::new(()),
         }));
 
         let table = Owned::new(Table::from(bins));
@@ -271,7 +273,7 @@ mod tests {
         for bin in &mut bins[8..] {
             *bin = Atomic::new(BinEntry::Moved(&*deep_table as *const _));
         }
-        let table = Owned::new(Table::<usize, usize>::from(bins));
+        let table = Owned::new(Table::<usize, usize, L>::from(bins));
         let guard = epoch::pin();
         let table = table.into_shared(&guard);
         {

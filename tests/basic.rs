@@ -106,7 +106,7 @@ impl Hasher for OneBucketHasher {
 #[test]
 fn one_bucket() {
     let guard = epoch::pin();
-    let map = HashMap::<&'static str, usize, _>::with_hasher(OneBucketState);
+    let map = HashMap::<&'static str, usize, parking_lot::RawMutex, _>::with_hasher(OneBucketState);
 
     // we want to check that all operations work regardless on whether
     // we are operating on the head of a bucket, the tail of the bucket,
