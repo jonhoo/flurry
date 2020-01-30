@@ -1,7 +1,7 @@
 use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
-use ahash::RandomState;
+pub use ahash::RandomState;
 use core::borrow::Borrow;
 use core::hash::{BuildHasher, Hash, Hasher};
 use core::iter::FromIterator;
@@ -57,6 +57,11 @@ macro_rules! load_factor {
 }
 
 /// A concurrent hash table.
+///
+/// Note that `ahash::RandomState`, the default value of `S`, is not
+/// cryptographically secure. Therefore it is strongly recommended that you do 
+/// not use this hash for cryptographic purproses. 
+/// See [`ahash`](https://github.com/tkaitchuck/ahash) for more information.
 ///
 /// See the [crate-level documentation](index.html) for details.
 pub struct HashMap<K, V, S = RandomState> {
