@@ -359,7 +359,7 @@ where
             let tab = unsafe { table.deref() };
             let raw_node = tab.bin(idx, guard);
             if raw_node.is_null() {
-                idx = idx + 1;
+                idx += 1;
                 continue;
             }
             // Safety: node is a valid pointer because we checked
