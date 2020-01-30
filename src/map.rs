@@ -357,32 +357,40 @@ where
         // Safety: self.table is a valid pointer because we checked it above.
         while !table.is_null() && idx < unsafe { table.deref() }.len() {
             let tab = unsafe { table.deref() };
-            let node = tab.bin(idx, guard);
-            if node.is_null() {
+            let raw_node = tab.bin(idx, guard);
+            if raw_node.is_null() {
                 idx = idx + 1;
                 continue;
             }
             // Safety: node is a valid pointer because we checked
             // it in the above if stmt.
-            let node = unsafe { node.deref() };
+            let node = unsafe { raw_node.deref() };
             match node {
                 BinEntry::Moved(next_table) => {
                     table = self.help_transfer(table, *next_table, guard);
                     idx = 0;
                 }
                 BinEntry::Node(ref node) => {
-                    let lock = node.lock.lock();
+                    let head_lock = node.lock.lock();
+                    let current_head = tab.bin(idx, guard);
+                    if current_head != raw_node {
+                        continue;
+                    }
                     let mut p: Option<&Node<K, V>> = Some(node);
                     while p.is_some() {
-                        delta = delta - 1;
+                        delta -= 1;
                         p = match p.unwrap().next.load(Ordering::SeqCst, guard) {
                             s if s.is_null() => None,
-                            s => unsafe { s.deref() }.as_node(),
-                        };
+                            s => Some(
+                                unsafe { s.deref() }
+                                    .as_node()
+                                    .expect("Node.next should always be BinEntry::Node"),
+                            ),
+                        }
                     }
                     tab.store_bin(idx, Shared::null());
-                    idx = idx + 1;
-                    drop(lock);
+                    idx += 1;
+                    drop(head_lock);
                 }
             };
         }
