@@ -239,7 +239,7 @@ fn concurrent_resize_and_get() {
     let map = Arc::new(HashMap::<usize, usize>::new());
     {
         let guard = epoch::pin();
-        for i in 0..32 {
+        for i in 0..1024 {
             map.insert(i, i, &guard);
         }
     }
@@ -247,7 +247,8 @@ fn concurrent_resize_and_get() {
     let map1 = map.clone();
     // t1 is using reserve to trigger a bunch of resizes
     let t1 = std::thread::spawn(move || {
-        for power in 0..16 {
+        // there should be 2 ** 10 capacity already, so trigger additional resizes
+        for power in 11..16 {
             map1.reserve(1 << power);
         }
     });
@@ -256,7 +257,7 @@ fn concurrent_resize_and_get() {
     let t2 = std::thread::spawn(move || {
         let guard = epoch::pin();
         for _ in 0..32 {
-            for i in 0..32 {
+            for i in 0..1024 {
                 let v = map2.get(&i, &guard).unwrap();
                 assert_eq!(v, &i);
             }
@@ -265,6 +266,16 @@ fn concurrent_resize_and_get() {
 
     t1.join().unwrap();
     t2.join().unwrap();
+
+    // make sure all the entries still exist after all the resizes
+    {
+        let guard = epoch::pin();
+
+        for i in 0..1024 {
+            let v = map.get(&i, &guard).unwrap();
+            assert_eq!(v, &i);
+        }
+    }
 }
 
 #[test]
