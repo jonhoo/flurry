@@ -542,6 +542,221 @@ where
         }
     }
 
+    /// If the value for the specified `key` is present, attempts to
+    /// compute a new mapping given the key and its current mapped value.
+    ///
+    /// The new mapping is computed by the `remapping_function`, which may
+    /// return `None` to signalize that the mapping should be removed.
+    /// The entire method invocation is performed atomically.
+    /// The supplied function is invoked exactly once per invocation of
+    /// this method if the key is present, else not at all.  Some
+    /// attempted update operations on this map by other threads may be
+    /// blocked while computation is in progress, so the computation
+    /// should be short and simple.
+    ///
+    /// Returns the new value associated with the specified `key`, or `None`
+    /// if no value for the specified `key` is present.
+    pub fn compute_if_present<'g, Q, F>(
+        &'g self,
+        key: &Q,
+        remapping_function: F,
+        guard: &'g Guard,
+    ) -> Option<&'g V>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+        F: FnOnce(&K, &V) -> Option<V>,
+    {
+        let h = self.hash(&key);
+
+        let mut table = self.table.load(Ordering::SeqCst, guard);
+
+        loop {
+            // safety: see argument below for !is_null case
+            if table.is_null() || unsafe { table.deref() }.len() == 0 {
+                table = self.init_table(guard);
+                continue;
+            }
+
+            // safety: table is a valid pointer.
+            //
+            // we are in one of three cases:
+            //
+            //  1. if table is the one we read before the loop, then we read it while holding the
+            //     guard, so it won't be dropped until after we drop that guard b/c the drop logic
+            //     only queues a drop for the next epoch after removing the table.
+            //
+            //  2. if table is read by init_table, then either we did a load, and the argument is
+            //     as for point 1. or, we allocated a table, in which case the earliest it can be
+            //     deallocated is in the next epoch. we are holding up the epoch by holding the
+            //     guard, so this deref is safe.
+            //
+            //  3. if table is set by a Moved node (below) through help_transfer, it will _either_
+            //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
+            //     pointer from inside the Moved. to see that if a Moved(t) is _read_, then t must
+            //     still be valid, see the safety comment on BinEntry::Moved.
+            let t = unsafe { table.deref() };
+
+            let bini = t.bini(h);
+            let bin = t.bin(bini, guard);
+            if bin.is_null() {
+                // fast path -- bin is empty so key is not present
+                return None;
+            }
+
+            // slow path -- bin is non-empty
+            // safety: bin is a valid pointer.
+            //
+            // there are two cases when a bin pointer is invalidated:
+            //
+            //  1. if the table was resized, bin is a move entry, and the resize has completed. in
+            //     that case, the table (and all its heads) will be dropped in the next epoch
+            //     following that.
+            //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
+            //     will then be dropped in the following epoch after that happens.
+            //
+            // in both cases, we held the guard when we got the reference to the bin. if any such
+            // swap happened, it must have happened _after_ we read. since we did the read while
+            // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
+            // are holding up by holding on to our guard).
+            match *unsafe { bin.deref() } {
+                BinEntry::Moved(next_table) => {
+                    table = self.help_transfer(table, next_table, guard);
+                }
+                BinEntry::Node(ref head) => {
+                    // bin is non-empty, need to link into it, so we must take the lock
+                    let head_lock = head.lock.lock();
+
+                    // need to check that this is _still_ the head
+                    let current_head = t.bin(bini, guard);
+                    if current_head != bin {
+                        // nope -- try again from the start
+                        continue;
+                    }
+
+                    // yes, it is still the head, so we can now "own" the bin
+                    // note that there can still be readers in the bin!
+
+                    // TODO: TreeBin & ReservationNode
+
+                    let mut removed_node = false;
+                    let mut bin_count = 1;
+                    let mut p = bin;
+                    let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
+
+                    let new_val = loop {
+                        // safety: we read the bin while pinning the epoch. a bin will never be
+                        // dropped until the next epoch after it is removed. since it wasn't
+                        // removed, and the epoch was pinned, that cannot be until after we drop
+                        // our guard.
+                        let n = unsafe { p.deref() }.as_node().unwrap();
+                        // TODO: This Ordering can probably be relaxed due to the Mutex
+                        let next = n.next.load(Ordering::SeqCst, guard);
+                        if n.hash == h && n.key.borrow() == key {
+                            // the key already exists in the map!
+                            let current_value = n.value.load(Ordering::SeqCst, guard);
+
+                            // safety: since the value is present now, and we've held a guard from
+                            // the beginning of the search, the value cannot be dropped until the
+                            // next epoch, which won't arrive until after we drop our guard.
+                            let new_value =
+                                remapping_function(&n.key, unsafe { current_value.deref() });
+
+                            if let Some(value) = new_value {
+                                let now_garbage =
+                                    n.value.swap(Owned::new(value), Ordering::SeqCst, guard);
+                                // NOTE: now_garbage == current_value
+
+                                // safety: need to guarantee that now_garbage is no longer
+                                // reachable. more specifically, no thread that executes _after_
+                                // this line can ever get a reference to now_garbage.
+                                //
+                                // here are the possible cases:
+                                //
+                                //  - another thread already has a reference to now_garbage.
+                                //    they must have read it before the call to swap.
+                                //    because of this, that thread must be pinned to an epoch <=
+                                //    the epoch of our guard. since the garbage is placed in our
+                                //    epoch, it won't be freed until the _next_ epoch, at which
+                                //    point, that thread must have dropped its guard, and with it,
+                                //    any reference to the value.
+                                //  - another thread is about to get a reference to this value.
+                                //    they execute _after_ the swap, and therefore do _not_ get a
+                                //    reference to now_garbage (they get value instead). there are
+                                //    no other ways to get to a value except through its Node's
+                                //    `value` field (which is what we swapped), so freeing
+                                //    now_garbage is fine.
+                                unsafe { guard.defer_destroy(now_garbage) };
+
+                                // safety: since the value is present now, and we've held a guard from
+                                // the beginning of the search, the value cannot be dropped until the
+                                // next epoch, which won't arrive until after we drop our guard.
+                                break Some(unsafe {
+                                    n.value.load(Ordering::SeqCst, guard).deref()
+                                });
+                            } else {
+                                removed_node = true;
+                                // remove the BinEntry containing the removed key value pair from the bucket
+                                if !pred.is_null() {
+                                    // either by changing the pointer of the previous BinEntry, if present
+                                    // safety: see remove
+                                    unsafe { pred.deref() }
+                                        .as_node()
+                                        .unwrap()
+                                        .next
+                                        .store(next, Ordering::SeqCst);
+                                } else {
+                                    // or by setting the next node as the first BinEntry if there is no previous entry
+                                    t.store_bin(bini, next);
+                                }
+
+                                // in either case, mark the BinEntry as garbage, since it was just removed
+                                // safety: need to guarantee that the old value is no longer
+                                // reachable. more specifically, no thread that executes _after_
+                                // this line can ever get a reference to val.
+                                //
+                                // here are the possible cases:
+                                //
+                                //  - another thread already has a reference to the old value.
+                                //    they must have read it before the call to store_bin.
+                                //    because of this, that thread must be pinned to an epoch <=
+                                //    the epoch of our guard. since the garbage is placed in our
+                                //    epoch, it won't be freed until the _next_ epoch, at which
+                                //    point, that thread must have dropped its guard, and with it,
+                                //    any reference to the value.
+                                //  - another thread is about to get a reference to this value.
+                                //    they execute _after_ the store_bin, and therefore do _not_ get a
+                                //    reference to the old value. there are no other ways to get to a
+                                //    value except through its Node's `value` field (which is now gone
+                                //    together with the node), so freeing the old value is fine.
+                                unsafe { guard.defer_destroy(p) };
+                                unsafe { guard.defer_destroy(current_value) };
+                                break None;
+                            }
+                        }
+
+                        pred = p;
+                        if next.is_null() {
+                            // we're at the end of the bin
+                            break None;
+                        }
+                        p = next;
+
+                        bin_count += 1;
+                    };
+                    drop(head_lock);
+
+                    if removed_node {
+                        // decrement count
+                        self.add_count(-1, Some(bin_count), guard);
+                    }
+                    guard.flush();
+                    return new_val;
+                }
+            }
+        }
+    }
+
     fn help_transfer<'g>(
         &'g self,
         table: Shared<'g, Table<K, V>>,
