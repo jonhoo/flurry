@@ -1587,7 +1587,7 @@ where
     {
         self.check_guard(guard);
         // removed selected keys
-        for (k, v) in self.iter(&guard) {
+        for (k, v) in self.iter(guard) {
             if !f(k, v) {
                 let old_value: Shared<'_, V> = Shared::from(v as *const V);
                 self.replace_node(k, None, Some(old_value), guard);
@@ -1607,7 +1607,7 @@ where
     {
         self.check_guard(guard);
         // removed selected keys
-        for (k, v) in self.iter(&guard) {
+        for (k, v) in self.iter(guard) {
             if !f(k, v) {
                 self.replace_node(k, None, None, guard);
             }

@@ -102,6 +102,35 @@ where
         self.map.remove(key, &self.guard)
     }
 
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    ///
+    /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
+    /// modified before the removal takes place, the entry will not be removed.
+    /// If you want the removal to happen even in the case of concurrent modification,
+    /// use [`HashMapRef::retain_force`].
+    pub fn retain<F>(&self, f: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        self.map.retain(f, &self.guard);
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    ///
+    /// This method always deletes any key/value pair that `f` returns `false` for,
+    /// even if if the value is updated concurrently. If you do not want that behavior,
+    /// use [`HashMapRef::retain`].
+    pub fn retain_force<F>(&self, f: F)
+    where
+        F: FnMut(&K, &V) -> bool,
+    {
+        self.map.retain_force(f, &self.guard);
+    }
+
     /// An iterator visiting all key-value pairs in arbitrary order.
     /// The iterator element type is `(&'g K, &'g V)`.
     pub fn iter<'g>(&'g self) -> Iter<'g, K, V> {
