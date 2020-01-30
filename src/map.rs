@@ -187,8 +187,8 @@ where
     /// reclamation happens.
     ///
     /// Note that _all_ `Guard` references provided to access the returned map _must_ be
-    /// constructed using guards produced by `collector`. You can use [`HashMap::pin`] to get a
-    /// thread-local handle to the collector that lets you construct `Guard`s.
+    /// constructed using guards produced by `collector`. You can use [`HashMap::register`] to get
+    /// a thread-local handle to the collector that then lets you construct an [`epoch::Guard`].
     pub fn with_collector(mut self, collector: epoch::Collector) -> Self {
         self.collector = collector;
         self
