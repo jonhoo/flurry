@@ -19,8 +19,11 @@ azure-devops = { project = "jonhoo/jonhoo", pipeline = "flurry", build = "15" }
 codecov = { repository = "jonhoo/flurry", branch = "master", service = "github" }
 maintenance = { status = "experimental" }
 
+[features]
+sanitize = ['crossbeam-epoch/sanitize']
+
 [dependencies]
-crossbeam-epoch = "0.8"
+crossbeam-epoch = "0.9"
 parking_lot = "0.10"
 num_cpus = "1.12.0"
 
@@ -37,3 +40,5 @@ harness = false
 name = "flurry_hashbrown" 
 harness = false
 
+[patch.crates-io]
+crossbeam-epoch = { git = "https://github.com/cynecx/crossbeam.git", branch = "fix-unsoundness" }

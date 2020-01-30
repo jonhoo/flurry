@@ -29,6 +29,57 @@ jobs:
        condition: ne(variables.CACHE_RESTORED, 'true')
      - script: cargo deny check
        displayName: cargo deny
+ - job: miri
+   displayName: "Run miri on test suite"
+   dependsOn: deny
+   continueOnError: true # since miri sometimes isn't on nightly
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+       parameters:
+         rust: nightly
+         components:
+           - miri
+     # ignore leaks due to https://github.com/crossbeam-rs/crossbeam/issues/464
+     - bash: yes | cargo miri -Zmiri-ignore-leaks test
+       displayName: cargo miri test
+ - job: asan
+   dependsOn: deny
+   displayName: "Run address sanitizer on test suite"
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+       parameters:
+         rust: nightly
+     - bash: |
+           sudo ln -s /usr/bin/llvm-symbolizer-6.0 /usr/bin/llvm-symbolizer
+           sed -i '/\[features\]/i [profile.dev]' Cargo.toml
+           sed -i '/profile.dev/a opt-level = 1' Cargo.toml
+           cat Cargo.toml
+       displayName: Enable debug symbols
+     - script: |
+           env ASAN_OPTIONS="detect_odr_violation=0" RUSTFLAGS="-Z sanitizer=address" cargo test --features sanitize --target x86_64-unknown-linux-gnu
+       displayName: cargo -Z sanitizer=address test
+ - job: lsan
+   dependsOn: deny
+   displayName: "Run leak sanitizer on test suite"
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+       parameters:
+         rust: nightly
+     - bash: |
+           sudo ln -s /usr/bin/llvm-symbolizer-6.0 /usr/bin/llvm-symbolizer
+           sed -i '/\[features\]/i [profile.dev]' Cargo.toml
+           sed -i '/profile.dev/a opt-level = 1' Cargo.toml
+           cat Cargo.toml
+       displayName: Enable debug symbols
+     - script: |
+           env RUSTFLAGS="-Z sanitizer=leak" cargo test --features sanitize --target x86_64-unknown-linux-gnu
+       displayName: cargo -Z sanitizer=leak test
 
 resources:
   repositories:
