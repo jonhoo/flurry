@@ -87,25 +87,24 @@ where
     S: BuildHasher + Default,
 {
     fn default() -> Self {
-        Self::new()
+        Self::with_hasher(S::default())
     }
 }
 
-impl<K, V, S> HashMap<K, V, S>
+impl<K, V> HashMap<K, V>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
-    S: BuildHasher + Default,
 {
     /// Creates a new, empty map with the default initial table size (16).
     pub fn new() -> Self {
-        Self::with_hasher(S::default())
+        Self::default()
     }
 
     /// Creates a new, empty map with an initial table size accommodating the specified number of
     /// elements without the need to dynamically resize.
     pub fn with_capacity(n: usize) -> Self {
-        Self::with_capacity_and_hasher(S::default(), n)
+        Self::with_capacity_and_hasher(n, crate::DefaultHashBuilder::default())
     }
 }
 
@@ -143,7 +142,7 @@ where
     /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
     /// to be resistant to attacks that cause many collisions and very poor performance.
     /// Setting it manually using this function can expose a DoS attack vector.
-    pub fn with_capacity_and_hasher(hash_builder: S, capacity: usize) -> Self {
+    pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
         if capacity == 0 {
             return Self::with_hasher(hash_builder);
         }
@@ -1671,13 +1670,13 @@ where
             let guard = unsafe { crossbeam_epoch::unprotected() };
 
             let (lower, _) = iter.size_hint();
-            let map = Self::with_capacity(lower.saturating_add(1));
+            let map = HashMap::with_capacity_and_hasher(lower.saturating_add(1), S::default());
 
             map.put(key, value, false, &guard);
             map.put_all(iter, &guard);
             map
         } else {
-            Self::new()
+            Self::default()
         }
     }
 }
@@ -1713,7 +1712,7 @@ where
     S: BuildHasher + Clone,
 {
     fn clone(&self) -> HashMap<K, V, S> {
-        let cloned_map = Self::with_capacity_and_hasher(self.build_hasher.clone(), self.len());
+        let cloned_map = Self::with_capacity_and_hasher(self.len(), self.build_hasher.clone());
         {
             let guard = epoch::pin();
             for (k, v) in self.iter(&guard) {
