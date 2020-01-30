@@ -1,18 +1,19 @@
-/* Benchmarks from `dashmap` (https://github.com/xacrimon/dashmap):
+/* Benchmarks from `dashmap` (https://github.com/xacrimon/dashmap),
+ * adapted to flurry for comparison:
  *
  * This benchmark suite contains benchmarks for concurrent insertion
- * and retrieval (get). 
+ * and retrieval (get).
  * Currently, this file provides two versions of each test, one which
  * follows the original implementation in using `par_iter().for_each()`,
  * which necessitates creating a new guard for each operation since
  * guards are not `Send + Sync`, and one version which uses threads
- * spawned in scopes. The latter version is able to create only one 
+ * spawned in scopes. The latter version is able to create only one
  * guard per thread, but incurs overhead from the setup of the more
  * heavyweight threading environment.
  *
  * For the associated license information, please refer to dashmap.LICENSE.
  */
- 
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use flurry::{epoch, HashMap};
 use rayon;

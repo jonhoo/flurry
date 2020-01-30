@@ -1,5 +1,5 @@
-
-/* Benchmarks from `hashbrown` (https://github.com/rust-lang/hashbrown):
+/* Benchmarks from `hashbrown` (https://github.com/rust-lang/hashbrown),
+ * adapted to flurry for comparison:
  *
  * This benchmark suite contains some benchmarks along a set of dimensions:
  *   Int key distribution: low bit heavy, top bit heavy, and random.
