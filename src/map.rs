@@ -433,9 +433,43 @@ where
     }
 
     #[inline]
-    /// Maps `key` to `value` in this table.
+    /// Inserts a key-value pair into the map.
     ///
-    /// The value can be retrieved by calling [`HashMap::get`] with a key that is equal to the original key.
+    /// If the map did not have this key present, [`None`] is returned.
+    ///
+    /// If the map did have this key present, the value is updated, and the old
+    /// value is returned. The key is not updated, though; this matters for
+    /// types that can be `==` without being identical. See the [std-collections
+    /// documentation] for more.
+    ///
+    /// [`None`]: std::option::Option::None
+    /// [std-collections documentation]: https://doc.rust-lang.org/std/collections/index.html#insert-and-complex-keys
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use crossbeam_epoch as epoch;
+    ///
+    /// let mut map = HashMap::new();
+    /// let guard = epoch::pin();
+    /// assert_eq!(map.insert(37, "a", &guard), None);
+    /// assert_eq!(map.is_empty(), false);
+    ///
+    /// map.insert(37, "b", &guard);
+    /// assert_eq!(map.insert(37, "c", &guard), Some(&"b"));
+    /// assert_eq!(map.get(&37, &guard), Some(&"c"));
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// Flurry uses an [`epoch::pin`] to control the lifetime of the resources
+    /// that get extracted from the map.
+    ///
+    /// For more information, see the [`epoch::pin`] notes in the crate-level
+    /// documentation.
+    ///
+    /// [`epoch::pin`]: index.html#a-note-on-guard-and-memory-use
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.put(key, value, false, guard)
     }
