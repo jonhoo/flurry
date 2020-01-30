@@ -106,6 +106,30 @@ where
         self.map.insert(key, value, &self.guard)
     }
 
+    /// If the value for the specified `key` is present, attempts to
+    /// compute a new mapping given the key and its current mapped value.
+    ///
+    /// The new mapping is computed by the `remapping_function`, which may
+    /// return `None` to signalize that the mapping should be removed.
+    /// The entire method invocation is performed atomically.
+    /// The supplied function is invoked exactly once per invocation of
+    /// this method if the key is present, else not at all.  Some
+    /// attempted update operations on this map by other threads may be
+    /// blocked while computation is in progress, so the computation
+    /// should be short and simple.
+    ///
+    /// Returns the new value associated with the specified `key`, or `None`
+    /// if no value for the specified `key` is present.
+    pub fn compute_if_present<'g, Q, F>(&'g self, key: &Q, remapping_function: F) -> Option<&'g V>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+        F: FnOnce(&K, &V) -> Option<V>,
+    {
+        self.map
+            .compute_if_present(key, remapping_function, &self.guard)
+    }
+
     /// Tries to reserve capacity for at least additional more elements.
     /// The collection may reserve more space to avoid frequent reallocations.
     pub fn reserve(&self, additional: usize) {
