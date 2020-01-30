@@ -196,6 +196,7 @@
 #![deny(
     missing_docs,
     missing_debug_implementations,
+    unreachable_pub,
     intra_doc_link_resolution_failure
 )]
 #![warn(rust_2018_idioms)]
@@ -208,6 +209,9 @@ mod raw;
 pub mod iter;
 
 pub use map::HashMap;
+
+/// Default hasher for [`HashMap`].
+pub type DefaultHashBuilder = ahash::RandomState;
 
 /// Types needed to safely access shared data concurrently.
 pub mod epoch {

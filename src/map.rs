@@ -3,7 +3,6 @@ use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
 use std::borrow::Borrow;
-use std::collections::hash_map::RandomState;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
@@ -61,7 +60,7 @@ macro_rules! load_factor {
 /// A concurrent hash table.
 ///
 /// See the [crate-level documentation](index.html) for details.
-pub struct HashMap<K, V, S = RandomState> {
+pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
     table: Atomic<Table<K, V>>,
