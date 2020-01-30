@@ -3,7 +3,6 @@ use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
 use std::borrow::Borrow;
-use std::collections::hash_map::RandomState;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
@@ -12,18 +11,14 @@ use std::sync::{
     Once,
 };
 
-macro_rules! isize_bits {
-    () => {
-        std::mem::size_of::<isize>() * 8
-    };
-}
+const ISIZE_BITS: usize = core::mem::size_of::<isize>() * 8;
 
 /// The largest possible table capacity.  This value must be
 /// exactly 1<<30 to stay within Java array allocation and indexing
 /// bounds for power of two table sizes, and is further required
 /// because the top two bits of 32bit hash fields are used for
 /// control purposes.
-const MAXIMUM_CAPACITY: usize = 1 << 30; // TODO: use isize_bits!()
+const MAXIMUM_CAPACITY: usize = 1 << 30; // TODO: use ISIZE_BITS
 
 /// The default initial table capacity.  Must be a power of 2
 /// (i.e., at least 1) and at most `MAXIMUM_CAPACITY`.
@@ -38,15 +33,15 @@ const MIN_TRANSFER_STRIDE: isize = 16;
 
 /// The number of bits used for generation stamp in `size_ctl`.
 /// Must be at least 6 for 32bit arrays.
-const RESIZE_STAMP_BITS: usize = isize_bits!() / 2;
+const RESIZE_STAMP_BITS: usize = ISIZE_BITS / 2;
 
 /// The maximum number of threads that can help resize.
 /// Must fit in `32 - RESIZE_STAMP_BITS` bits for 32 bit architectures
 /// and `64 - RESIZE_STAMP_BITS` bits for 64 bit architectures
-const MAX_RESIZERS: isize = (1 << (isize_bits!() - RESIZE_STAMP_BITS)) - 1;
+const MAX_RESIZERS: isize = (1 << (ISIZE_BITS - RESIZE_STAMP_BITS)) - 1;
 
 /// The bit shift for recording size stamp in `size_ctl`.
-const RESIZE_STAMP_SHIFT: usize = isize_bits!() - RESIZE_STAMP_BITS;
+const RESIZE_STAMP_SHIFT: usize = ISIZE_BITS - RESIZE_STAMP_BITS;
 
 static NCPU_INITIALIZER: Once = Once::new();
 static NCPU: AtomicUsize = AtomicUsize::new(0);
@@ -61,7 +56,7 @@ macro_rules! load_factor {
 /// A concurrent hash table.
 ///
 /// See the [crate-level documentation](index.html) for details.
-pub struct HashMap<K, V, S = RandomState> {
+pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
     table: Atomic<Table<K, V>>,
@@ -85,30 +80,32 @@ pub struct HashMap<K, V, S = RandomState> {
     build_hasher: S,
 }
 
-impl<K, V> Default for HashMap<K, V, RandomState>
+impl<K, V, S> Default for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
+    S: BuildHasher + Default,
 {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<K, V> HashMap<K, V, RandomState>
+impl<K, V, S> HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
+    S: BuildHasher + Default,
 {
     /// Creates a new, empty map with the default initial table size (16).
     pub fn new() -> Self {
-        Self::with_hasher(RandomState::new())
+        Self::with_hasher(S::default())
     }
 
     /// Creates a new, empty map with an initial table size accommodating the specified number of
     /// elements without the need to dynamically resize.
     pub fn with_capacity(n: usize) -> Self {
-        Self::with_capacity_and_hasher(RandomState::new(), n)
+        Self::with_capacity_and_hasher(S::default(), n)
     }
 }
 
@@ -172,16 +169,16 @@ where
         h.finish()
     }
 
+    #[inline]
     /// Tests if `key` is a key in this table.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
-    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        let guard = crossbeam_epoch::pin();
         self.get(key, &guard).is_some()
     }
 
@@ -261,19 +258,19 @@ where
         unsafe { v.as_ref() }
     }
 
+    #[inline]
     /// Obtains the value to which `key` is mapped and passes it through the closure `then`.
     ///
     /// Returns `None` if this map contains no mapping for `key`.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
-    pub fn get_and<Q, R, F>(&self, key: &Q, then: F) -> Option<R>
+    pub fn get_and<Q, R, F>(&self, key: &Q, then: F, guard: &Guard) -> Option<R>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
         F: FnOnce(&V) -> R,
     {
-        let guard = &crossbeam_epoch::pin();
         self.get(key, guard).map(then)
     }
 
@@ -536,7 +533,7 @@ where
         }
     }
 
-    fn put_all<'g, I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &'g Guard) {
+    fn put_all<I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &Guard) {
         for (key, value) in iter {
             self.put(key, value, false, guard);
         }
@@ -1164,7 +1161,7 @@ where
     }
 
     /// Tries to presize table to accommodate the given number of elements.
-    fn try_presize<'g>(&self, size: usize, guard: &'g Guard) {
+    fn try_presize(&self, size: usize, guard: &Guard) {
         let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
             MAXIMUM_CAPACITY
         } else {
@@ -1275,11 +1272,9 @@ where
     #[inline]
     /// Tries to reserve capacity for at least additional more elements.
     /// The collection may reserve more space to avoid frequent reallocations.
-    pub fn reserve(&self, additional: usize) {
+    pub fn reserve(&self, additional: usize, guard: &Guard) {
         let absolute = self.len() + additional;
-
-        let guard = epoch::pin();
-        self.try_presize(absolute, &guard);
+        self.try_presize(absolute, guard);
     }
 
     /// Removes the key (and its corresponding value) from this map.
@@ -1472,16 +1467,15 @@ where
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
     /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
-    pub fn retain<F>(&self, mut f: F)
+    pub fn retain<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
-        let guard = epoch::pin();
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
                 let old_value: Shared<'_, V> = Shared::from(v as *const V);
-                self.replace_node(k, None, Some(old_value), &guard);
+                self.replace_node(k, None, Some(old_value), guard);
             }
         }
     }
@@ -1492,15 +1486,14 @@ where
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
     /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
-    pub fn retain_force<F>(&self, mut f: F)
+    pub fn retain_force<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
-        let guard = epoch::pin();
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
-                self.replace_node(k, None, None, &guard);
+                self.replace_node(k, None, None, guard);
             }
         }
     }
@@ -1544,7 +1537,7 @@ where
     #[inline]
     #[cfg(test)]
     /// Returns the capacity of the map.
-    fn capacity<'g>(&self, guard: &'g Guard) -> usize {
+    fn capacity(&self, guard: &Guard) -> usize {
         let table = self.table.load(Ordering::Relaxed, &guard);
 
         if table.is_null() {
@@ -1644,9 +1637,9 @@ where
             (iter.size_hint().0 + 1) / 2
         };
 
-        self.reserve(reserve);
+        let guard = epoch::pin();
 
-        let guard = crossbeam_epoch::pin();
+        self.reserve(reserve, &guard);
         (*self).put_all(iter.into_iter(), &guard);
     }
 }
@@ -1663,10 +1656,11 @@ where
     }
 }
 
-impl<K, V> FromIterator<(K, V)> for HashMap<K, V, RandomState>
+impl<K, V, S> FromIterator<(K, V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
+    S: BuildHasher + Default,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
@@ -1688,10 +1682,11 @@ where
     }
 }
 
-impl<'a, K, V> FromIterator<(&'a K, &'a V)> for HashMap<K, V, RandomState>
+impl<'a, K, V, S> FromIterator<(&'a K, &'a V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
+    S: BuildHasher + Default,
 {
     #[inline]
     fn from_iter<T: IntoIterator<Item = (&'a K, &'a V)>>(iter: T) -> Self {
@@ -1699,10 +1694,11 @@ where
     }
 }
 
-impl<'a, K, V> FromIterator<&'a (K, V)> for HashMap<K, V, RandomState>
+impl<'a, K, V, S> FromIterator<&'a (K, V)> for HashMap<K, V, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
+    S: BuildHasher + Default,
 {
     #[inline]
     fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
@@ -1733,7 +1729,6 @@ where
 /// Returns the number of physical CPUs in the machine (_O(1)_).
 fn num_cpus() -> usize {
     NCPU_INITIALIZER.call_once(|| NCPU.store(num_cpus::get_physical(), Ordering::Relaxed));
-
     NCPU.load(Ordering::Relaxed)
 }
 
@@ -1764,6 +1759,7 @@ fn capacity() {
     // The table has been resized once (and it's capacity doubled),
     // since we inserted more elements than it can hold
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1774,7 +1770,7 @@ mod tests {
 
         map.insert(42, 0, &guard);
 
-        map.reserve(32);
+        map.reserve(32, &guard);
 
         let capacity = map.capacity(&guard);
         assert!(capacity >= 16 + 32);
@@ -1785,7 +1781,7 @@ mod tests {
         let map = HashMap::<usize, usize>::new();
         let guard = epoch::pin();
 
-        map.reserve(32);
+        map.reserve(32, &guard);
 
         let capacity = map.capacity(&guard);
         assert!(capacity >= 32);
