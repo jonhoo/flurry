@@ -178,7 +178,7 @@ where
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
-    pub fn contains_key<'g, Q>(&self, key: &Q, guard: &'g Guard) -> bool
+    pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -269,7 +269,7 @@ where
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
-    pub fn get_and<'g, Q, R, F>(&self, key: &Q, then: F, guard: &'g Guard) -> Option<R>
+    pub fn get_and<Q, R, F>(&self, key: &Q, then: F, guard: &Guard) -> Option<R>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -1070,7 +1070,7 @@ where
     #[inline]
     /// Tries to reserve capacity for at least additional more elements.
     /// The collection may reserve more space to avoid frequent reallocations.
-    pub fn reserve<'g>(&self, additional: usize, guard: &'g Guard) {
+    pub fn reserve(&self, additional: usize, guard: &Guard) {
         let absolute = self.len() + additional;
         self.try_presize(absolute, guard);
     }
@@ -1264,7 +1264,7 @@ where
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
     /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
-    pub fn retain<'g, F>(&mut self, mut f: F, guard: &'g Guard)
+    pub fn retain<F>(&mut self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
@@ -1283,7 +1283,7 @@ where
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
     /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
-    pub fn retain_force<'g, F>(&mut self, mut f: F, guard: &'g Guard)
+    pub fn retain_force<F>(&mut self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
     {
