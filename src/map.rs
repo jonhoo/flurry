@@ -1,13 +1,12 @@
 use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
+use ahash::RandomState;
 use core::borrow::Borrow;
 use core::hash::{BuildHasher, Hash, Hasher};
 use core::iter::FromIterator;
 use core::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
-#[cfg(feature = "std")]
-use std::collections::hash_map::RandomState;
 #[cfg(feature = "std")]
 use std::fmt::{self, Debug, Formatter};
 #[cfg(feature = "std")]
