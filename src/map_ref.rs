@@ -4,13 +4,29 @@ use crossbeam_epoch::Guard;
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
-use std::ops::Index;
+use std::ops::{Deref, Index};
 
-/// A reference to a [`HashMap`], constructed with [`HashMap::as_ref`].
+/// A reference to a [`HashMap`], constructed with [`HashMap::guarded`] or [`HashMap::with_guard`].
 /// The current thread will be pinned for the duration of this reference.
 pub struct HashMapRef<'map, K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     map: &'map HashMap<K, V, S>,
-    guard: Guard,
+    guard: GuardRef<'map>,
+}
+
+enum GuardRef<'g> {
+    Owned(Guard),
+    Ref(&'g Guard),
+}
+
+impl Deref for GuardRef<'_> {
+    type Target = Guard;
+
+    #[inline]
+    fn deref(&self) -> &Guard {
+        match *self {
+            GuardRef::Owned(ref guard) | GuardRef::Ref(&ref guard) => guard,
+        }
+    }
 }
 
 impl<K, V, S> HashMap<K, V, S>
@@ -20,10 +36,18 @@ where
     S: BuildHasher,
 {
     /// Get a reference to this map with the current thread pinned.
-    pub fn as_ref(&self) -> HashMapRef<'_, K, V, S> {
+    pub fn guarded(&self) -> HashMapRef<'_, K, V, S> {
         HashMapRef {
-            guard: self.guard(),
+            guard: GuardRef::Owned(self.guard()),
             map: &self,
+        }
+    }
+
+    /// Get a reference to this map with the given guard.
+    pub fn with_guard<'g>(&'g self, guard: &'g Guard) -> HashMapRef<'g, K, V, S> {
+        HashMapRef {
+            map: &self,
+            guard: GuardRef::Ref(guard),
         }
     }
 }
@@ -192,7 +216,7 @@ where
     S: BuildHasher,
 {
     fn clone(&self) -> Self {
-        self.map.as_ref()
+        self.map.guarded()
     }
 }
 
