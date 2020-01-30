@@ -220,10 +220,24 @@ where
         h.finish()
     }
 
-    /// Tests if `key` is a key in this table.
+    /// Returns `true` if the map contains a value for the specified key.
     ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`](std::hash::Hash) and [`Eq`](std::cmp::Eq) on the
+    /// borrowed form *must* match those for the key type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use crossbeam_epoch as epoch;
+    ///
+    /// let mut map = HashMap::new();
+    /// let guard = epoch::pin();
+    /// map.insert(1, "a", &guard);
+    /// assert_eq!(map.contains_key(&1), true);
+    /// assert_eq!(map.contains_key(&2), false);
+    /// ```
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
