@@ -146,3 +146,115 @@ pub(crate) struct Node<K, V> {
     pub(crate) next: Atomic<BinEntry<K, V>>,
     pub(crate) lock: Mutex<()>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam_epoch::Owned;
+
+    fn new_node(hash: u64, key: usize, value: usize) -> Node<usize, usize> {
+        Node {
+            hash,
+            key,
+            value: Atomic::new(value),
+            next: Atomic::null(),
+            lock: Mutex::new(()),
+        }
+    }
+
+    fn drop_entry(entry: BinEntry<usize, usize>) {
+        // currently bins don't handle dropping their
+        // own values the Table is responsible. This
+        // makes use of the tables implementation for
+        // convenience in the unit test
+        let mut table = Table::<usize, usize>::new(1);
+        table.store_bin(0, Owned::new(entry));
+        table.drop_bins();
+    }
+
+    #[test]
+    fn find_node_no_match() {
+        let guard = &crossbeam_epoch::pin();
+        let node2 = new_node(4, 5, 6);
+        let entry2 = BinEntry::Node(node2);
+        let node1 = new_node(1, 2, 3);
+        node1.next.store(Owned::new(entry2), Ordering::SeqCst);
+        let entry1 = BinEntry::Node(node1);
+        assert!(entry1.find(1, &0, guard).is_null());
+        drop_entry(entry1);
+    }
+
+    #[test]
+    fn find_node_single_match() {
+        let guard = &crossbeam_epoch::pin();
+        let entry = BinEntry::Node(new_node(1, 2, 3));
+        assert_eq!(
+            unsafe { entry.find(1, &2, guard).deref() }
+                .as_node()
+                .unwrap()
+                .key,
+            2
+        );
+        drop_entry(entry);
+    }
+
+    #[test]
+    fn find_node_multi_match() {
+        let guard = &crossbeam_epoch::pin();
+        let node2 = new_node(4, 5, 6);
+        let entry2 = BinEntry::Node(node2);
+        let node1 = new_node(1, 2, 3);
+        node1.next.store(Owned::new(entry2), Ordering::SeqCst);
+        let entry1 = BinEntry::Node(node1);
+        assert_eq!(
+            unsafe { entry1.find(4, &5, guard).deref() }
+                .as_node()
+                .unwrap()
+                .key,
+            5
+        );
+        drop_entry(entry1);
+    }
+
+    #[test]
+    fn find_moved_empty_bins_no_match() {
+        let guard = &crossbeam_epoch::pin();
+        let table = &Table::<usize, usize>::new(1);
+        let entry = BinEntry::<usize, usize>::Moved(table as *const _);
+        assert!(entry.find(1, &2, guard).is_null());
+    }
+
+    #[test]
+    fn find_moved_no_bins_no_match() {
+        let guard = &crossbeam_epoch::pin();
+        let table = &Table::<usize, usize>::new(0);
+        let entry = BinEntry::<usize, usize>::Moved(table as *const _);
+        assert!(entry.find(1, &2, guard).is_null());
+    }
+
+    #[test]
+    fn find_moved_null_bin_no_match() {
+        let guard = &crossbeam_epoch::pin();
+        let table = &mut Table::<usize, usize>::new(2);
+        table.store_bin(1, Owned::new(BinEntry::Node(new_node(1, 2, 3))));
+        let entry = BinEntry::<usize, usize>::Moved(table as *const _);
+        assert!(entry.find(0, &1, guard).is_null());
+        table.drop_bins();
+    }
+
+    #[test]
+    fn find_moved_match() {
+        let guard = &crossbeam_epoch::pin();
+        let table = &mut Table::<usize, usize>::new(1);
+        table.store_bin(0, Owned::new(BinEntry::Node(new_node(1, 2, 3))));
+        let entry = BinEntry::<usize, usize>::Moved(table as *const _);
+        assert_eq!(
+            unsafe { entry.find(1, &2, guard).deref() }
+                .as_node()
+                .unwrap()
+                .key,
+            2
+        );
+        table.drop_bins();
+    }
+}
