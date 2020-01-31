@@ -454,6 +454,84 @@ where
         self.put(key, value, false, guard)
     }
 
+    /// Removes all entries from this map.
+    pub fn clear(&self, guard: &Guard) {
+        // Negative number of deletions
+        let mut delta = 0;
+        let mut idx = 0usize;
+
+        let mut table = self.table.load(Ordering::SeqCst, guard);
+        // Safety: self.table is a valid pointer because we checked it above.
+        while !table.is_null() && idx < unsafe { table.deref() }.len() {
+            let tab = unsafe { table.deref() };
+            let raw_node = tab.bin(idx, guard);
+            if raw_node.is_null() {
+                idx += 1;
+                continue;
+            }
+            // Safety: node is a valid pointer because we checked
+            // it in the above if stmt.
+            match unsafe { raw_node.deref() } {
+                BinEntry::Moved(next_table) => {
+                    table = self.help_transfer(table, *next_table, guard);
+                    // start from the first bin again in the new table
+                    idx = 0;
+                }
+                BinEntry::Node(ref node) => {
+                    let head_lock = node.lock.lock();
+                    // need to check that this is _still_ the head
+                    let current_head = tab.bin(idx, guard);
+                    if current_head != raw_node {
+                        // nope -- try the bin again
+                        continue;
+                    }
+                    // we now own the bin
+                    // unlink it from the map to prevent others from entering it
+                    tab.store_bin(idx, Shared::null());
+                    // next, walk the nodes of the bin and free the nodes and their values as we go
+                    // note that we do not free the head node yet, since we're holding the lock it contains
+                    let mut p = node.next.load(Ordering::SeqCst, guard);
+                    while !p.is_null() {
+                        delta -= 1;
+                        p = {
+                            // safety: we loaded p under guard, and guard is still pinned, so p has not been dropped.
+                            let node = unsafe { p.deref() }
+                                .as_node()
+                                .expect("entry following Node should always be a Node");
+                            let next = node.next.load(Ordering::SeqCst, guard);
+                            let value = node.value.load(Ordering::SeqCst, guard);
+                            // NOTE: do not use the reference in `node` after this point!
+
+                            // free the node's value
+                            // safety: any thread that sees this p's value must have read the bin before we stored null
+                            // into it above. it must also have pinned the epoch before that time. therefore, the
+                            // defer_destroy below won't be executed until that thread's guard is dropped, at which
+                            // point it holds no outstanding references to the value anyway.
+                            unsafe { guard.defer_destroy(value) };
+                            // free the bin entry itself
+                            // safety: same argument as for value above.
+                            unsafe { guard.defer_destroy(p) };
+                            next
+                        };
+                    }
+                    drop(head_lock);
+                    // finally, we can drop the head node and its value
+                    let value = node.value.load(Ordering::SeqCst, guard);
+                    // NOTE: do not use the reference in `node` after this point!
+                    // safety: same as the argument for being allowed to free the nodes beyond the head above
+                    unsafe { guard.defer_destroy(value) };
+                    unsafe { guard.defer_destroy(raw_node) };
+                    delta -= 1;
+                    idx += 1;
+                }
+            };
+        }
+
+        if delta != 0 {
+            self.add_count(delta, None, guard);
+        }
+    }
+
     fn put<'g>(
         &'g self,
         key: K,
