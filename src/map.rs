@@ -461,7 +461,6 @@ where
         let mut idx = 0usize;
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
-
         // Safety: self.table is a valid pointer because we checked it above.
         while !table.is_null() && idx < unsafe { table.deref() }.len() {
             let tab = unsafe { table.deref() };
@@ -472,8 +471,7 @@ where
             }
             // Safety: node is a valid pointer because we checked
             // it in the above if stmt.
-            let node = unsafe { raw_node.deref() };
-            match node {
+            match unsafe { raw_node.deref() } {
                 BinEntry::Moved(next_table) => {
                     table = self.help_transfer(table, *next_table, guard);
                     // start from the first bin again in the new table
@@ -481,40 +479,48 @@ where
                 }
                 BinEntry::Node(ref node) => {
                     let head_lock = node.lock.lock();
+                    // need to check that this is _still_ the head
                     let current_head = tab.bin(idx, guard);
                     if current_head != raw_node {
+                        // nope -- try the bin again
                         continue;
                     }
-                    let mut p: Option<&Node<K, V>> = Some(node);
-                    while p.is_some() {
+                    // we now own the bin
+                    // unlink it from the map to prevent others from entering it
+                    tab.store_bin(idx, Shared::null());
+                    // next, walk the nodes of the bin and free the nodes and their values as we go
+                    // note that we do not free the head node yet, since we're holding the lock it contains
+                    let mut p = raw_node;
+                    while !p.is_null() {
                         delta -= 1;
-                        unsafe {
-                            guard.defer_destroy(p.unwrap().value.load(Ordering::SeqCst, guard));
-                        }
-                        p = match p.unwrap().next.load(Ordering::SeqCst, guard) {
-                            s if s.is_null() => None,
-                            s => {
-                                unsafe {
-                                    guard.defer_destroy(s);
-                                }
-                                Some(
-                                    unsafe { s.deref() }
-                                        .as_node()
-                                        .expect("Node.next should always be BinEntry::Node"),
-                                )
-                            }
+                        p = {
+                            // safety: we loaded p under guard, and guard is still pinned, so p has not been dropped.
+                            let node = unsafe { p.deref() }
+                                .as_node()
+                                .expect("entry following Node should always be a Node");
+                            let next = node.next.load(Ordering::SeqCst, guard);
+                            let value = node.value.load(Ordering::SeqCst, guard);
+                            drop(node);
+
+                            // free the node's value
+                            // safety: any thread that sees this p's value must have read the bin before we stored null
+                            // into it above. it must also have pinned the epoch before that time. therefore, the
+                            // defer_destroy below won't be executed until that thread's guard is dropped, at which
+                            // point it holds no outstanding references to the value anyway.
+                            unsafe { guard.defer_destroy(value) };
+                            // free the bin entry itself
+                            // safety: same argument as for value above.
+                            unsafe { guard.defer_destroy(p) };
+                            next
                         };
                     }
-                    tab.store_bin(idx, Shared::null());
-                    idx += 1;
-                    unsafe {
-                        guard.defer_destroy(raw_node);
-                    }
                     drop(head_lock);
+                    idx += 1;
                 }
             };
         }
 
+        println!("delta: {}", delta);
         if delta != 0 {
             self.add_count(delta, None, guard);
         }
