@@ -1587,7 +1587,7 @@ where
     {
         self.check_guard(guard);
         // removed selected keys
-        for (k, v) in self.iter(&guard) {
+        for (k, v) in self.iter(guard) {
             if !f(k, v) {
                 let old_value: Shared<'_, V> = Shared::from(v as *const V);
                 self.replace_node(k, None, Some(old_value), guard);
@@ -1607,7 +1607,7 @@ where
     {
         self.check_guard(guard);
         // removed selected keys
-        for (k, v) in self.iter(&guard) {
+        for (k, v) in self.iter(guard) {
             if !f(k, v) {
                 self.replace_node(k, None, None, guard);
             }
@@ -1674,6 +1674,18 @@ where
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    pub(crate) fn guarded_eq(&self, other: &Self, our_guard: &Guard, their_guard: &Guard) -> bool
+    where
+        V: PartialEq,
+    {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        self.iter(our_guard)
+            .all(|(key, value)| other.get(key, their_guard).map_or(false, |v| *value == *v))
+    }
 }
 
 impl<K, V, S> PartialEq for HashMap<K, V, S>
@@ -1686,11 +1698,7 @@ where
         if self.len() != other.len() {
             return false;
         }
-
-        let our_guard = self.collector.register().pin();
-        let their_guard = other.collector.register().pin();
-        self.iter(&our_guard)
-            .all(|(key, value)| other.get(key, &their_guard).map_or(false, |v| *value == *v))
+        self.guarded_eq(other, &self.guard(), &other.guard())
     }
 }
 
