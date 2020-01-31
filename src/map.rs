@@ -500,7 +500,7 @@ where
                                 .expect("entry following Node should always be a Node");
                             let next = node.next.load(Ordering::SeqCst, guard);
                             let value = node.value.load(Ordering::SeqCst, guard);
-                            drop(node);
+                            // NOTE: do not use the reference in `node` after this point!
 
                             // free the node's value
                             // safety: any thread that sees this p's value must have read the bin before we stored null
@@ -517,7 +517,7 @@ where
                     drop(head_lock);
                     // finally, we can drop the head node and its value
                     let value = node.value.load(Ordering::SeqCst, guard);
-                    drop(node);
+                    // NOTE: do not use the reference in `node` after this point!
                     // safety: same as the argument for being allowed to free the nodes beyond the head above
                     unsafe { guard.defer_destroy(value) };
                     unsafe { guard.defer_destroy(raw_node) };
