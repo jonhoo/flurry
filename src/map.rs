@@ -490,15 +490,19 @@ where
                         delta -= 1;
                         unsafe {
                             guard.defer_destroy(p.unwrap().value.load(Ordering::SeqCst, guard));
-                            guard.defer_destroy(p.unwrap().next.load(Ordering::SeqCst, guard));
                         }
                         p = match p.unwrap().next.load(Ordering::SeqCst, guard) {
                             s if s.is_null() => None,
-                            s => Some(
-                                unsafe { s.deref() }
-                                    .as_node()
-                                    .expect("Node.next should always be BinEntry::Node"),
-                            ),
+                            s => {
+                                unsafe {
+                                    guard.defer_destroy(s);
+                                }
+                                Some(
+                                    unsafe { s.deref() }
+                                        .as_node()
+                                        .expect("Node.next should always be BinEntry::Node"),
+                                )
+                            }
                         };
                     }
                     tab.store_bin(idx, Shared::null());
