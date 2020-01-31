@@ -4,7 +4,7 @@ use std::sync::Arc;
 #[test]
 fn insert() {
     let map = HashMap::<usize, usize>::new();
-    let map = map.guarded();
+    let map = map.pin();
 
     let old = map.insert(42, 0);
     assert!(old.is_none());
@@ -15,7 +15,7 @@ fn get_empty() {
     let map = HashMap::<usize, usize>::new();
 
     {
-        let map = map.guarded();
+        let map = map.pin();
         let e = map.get(&42);
         assert!(e.is_none());
     }
@@ -26,7 +26,7 @@ fn get_key_value_empty() {
     let map = HashMap::<usize, usize>::new();
 
     {
-        let map = map.guarded();
+        let map = map.pin();
         let e = map.get_key_value(&42);
         assert!(e.is_none());
     }
@@ -37,7 +37,7 @@ fn remove_empty() {
     let map = HashMap::<usize, usize>::new();
 
     {
-        let map = map.guarded();
+        let map = map.pin();
         let old = map.remove(&42);
         assert!(old.is_none());
     }
@@ -48,7 +48,7 @@ fn insert_and_remove() {
     let map = HashMap::<usize, usize>::new();
 
     {
-        let map = map.guarded();
+        let map = map.pin();
         map.insert(42, 0);
         let old = map.remove(&42).unwrap();
         assert_eq!(old, &0);
@@ -60,9 +60,9 @@ fn insert_and_remove() {
 fn insert_and_get() {
     let map = HashMap::<usize, usize>::new();
 
-    map.guarded().insert(42, 0);
+    map.pin().insert(42, 0);
     {
-        let map = map.guarded();
+        let map = map.pin();
         let e = map.get(&42).unwrap();
         assert_eq!(e, &0);
     }
@@ -72,9 +72,9 @@ fn insert_and_get() {
 fn insert_and_get_key_value() {
     let map = HashMap::<usize, usize>::new();
 
-    map.guarded().insert(42, 0);
+    map.pin().insert(42, 0);
     {
-        let map = map.guarded();
+        let map = map.pin();
         let e = map.get_key_value(&42).unwrap();
         assert_eq!(e, (&42, &0));
     }
@@ -84,12 +84,12 @@ fn insert_and_get_key_value() {
 fn update() {
     let map = HashMap::<usize, usize>::new();
 
-    let map1 = map.guarded();
+    let map1 = map.pin();
     map1.insert(42, 0);
     let old = map1.insert(42, 1);
     assert_eq!(old, Some(&0));
     {
-        let map2 = map.guarded();
+        let map2 = map.pin();
         let e = map2.get(&42).unwrap();
         assert_eq!(e, &1);
     }
@@ -99,12 +99,12 @@ fn update() {
 fn compute_if_present() {
     let map = HashMap::<usize, usize>::new();
 
-    let map1 = map.guarded();
+    let map1 = map.pin();
     map1.insert(42, 0);
     let new = map1.compute_if_present(&42, |_, v| Some(v + 1));
     assert_eq!(new, Some(&1));
     {
-        let map2 = map.guarded();
+        let map2 = map.pin();
         let e = map2.get(&42).unwrap();
         assert_eq!(e, &1);
     }
@@ -114,11 +114,11 @@ fn compute_if_present() {
 fn compute_if_present_empty() {
     let map = HashMap::<usize, usize>::new();
 
-    let map1 = map.guarded();
+    let map1 = map.pin();
     let new = map1.compute_if_present(&42, |_, v| Some(v + 1));
     assert!(new.is_none());
     {
-        let map2 = map.guarded();
+        let map2 = map.pin();
         assert!(map2.get(&42).is_none());
     }
 }
@@ -127,12 +127,12 @@ fn compute_if_present_empty() {
 fn compute_if_present_remove() {
     let map = HashMap::<usize, usize>::new();
 
-    let map1 = map.guarded();
+    let map1 = map.pin();
     map1.insert(42, 0);
     let new = map1.compute_if_present(&42, |_, _| None);
     assert!(new.is_none());
     {
-        let map2 = map.guarded();
+        let map2 = map.pin();
         assert!(map2.get(&42).is_none());
     }
 }
@@ -144,20 +144,20 @@ fn concurrent_insert() {
     let map1 = map.clone();
     let t1 = std::thread::spawn(move || {
         for i in 0..64 {
-            map1.guarded().insert(i, 0);
+            map1.pin().insert(i, 0);
         }
     });
     let map2 = map.clone();
     let t2 = std::thread::spawn(move || {
         for i in 0..64 {
-            map2.guarded().insert(i, 0);
+            map2.pin().insert(i, 0);
         }
     });
 
     t1.join().unwrap();
     t2.join().unwrap();
 
-    let map = map.guarded();
+    let map = map.pin();
     for i in 0..64 {
         let v = map.get(&i).unwrap();
         assert!(v == &0 || v == &1);
@@ -172,7 +172,7 @@ fn concurrent_remove() {
     let map = Arc::new(HashMap::<usize, usize>::new());
 
     {
-        let map = map.guarded();
+        let map = map.pin();
         for i in 0..64 {
             map.insert(i, i);
         }
@@ -180,7 +180,7 @@ fn concurrent_remove() {
 
     let map1 = map.clone();
     let t1 = std::thread::spawn(move || {
-        let map1 = map1.guarded();
+        let map1 = map1.pin();
         for i in 0..64 {
             if let Some(v) = map1.remove(&i) {
                 assert_eq!(v, &i);
@@ -189,7 +189,7 @@ fn concurrent_remove() {
     });
     let map2 = map.clone();
     let t2 = std::thread::spawn(move || {
-        let map2 = map2.guarded();
+        let map2 = map2.pin();
         for i in 0..64 {
             if let Some(v) = map2.remove(&i) {
                 assert_eq!(v, &i);
@@ -201,7 +201,7 @@ fn concurrent_remove() {
     t2.join().unwrap();
 
     // after joining the threads, the map should be empty
-    let map = map.guarded();
+    let map = map.pin();
     for i in 0..64 {
         assert!(map.get(&i).is_none());
     }
@@ -212,7 +212,7 @@ fn concurrent_compute_if_present() {
     let map = Arc::new(HashMap::<usize, usize>::new());
 
     {
-        let map = map.guarded();
+        let map = map.pin();
         for i in 0..64 {
             map.insert(i, i);
         }
@@ -220,7 +220,7 @@ fn concurrent_compute_if_present() {
 
     let map1 = map.clone();
     let t1 = std::thread::spawn(move || {
-        let map1 = map1.guarded();
+        let map1 = map1.pin();
         for i in 0..64 {
             let new = map1.compute_if_present(&i, |_, _| None);
             assert!(new.is_none());
@@ -228,7 +228,7 @@ fn concurrent_compute_if_present() {
     });
     let map2 = map.clone();
     let t2 = std::thread::spawn(move || {
-        let map2 = map2.guarded();
+        let map2 = map2.pin();
         for i in 0..64 {
             let new = map2.compute_if_present(&i, |_, _| None);
             assert!(new.is_none());
@@ -239,7 +239,7 @@ fn concurrent_compute_if_present() {
     t2.join().unwrap();
 
     // after joining the threads, the map should be empty
-    let map = map.guarded();
+    let map = map.pin();
     for i in 0..64 {
         assert!(map.get(&i).is_none());
     }
@@ -252,7 +252,7 @@ fn current_kv_dropped() {
 
     let map = HashMap::<Arc<usize>, Arc<usize>>::new();
 
-    map.guarded().insert(dropped1.clone(), dropped2.clone());
+    map.pin().insert(dropped1.clone(), dropped2.clone());
     assert_eq!(Arc::strong_count(&dropped1), 2);
     assert_eq!(Arc::strong_count(&dropped2), 2);
 
@@ -267,10 +267,10 @@ fn current_kv_dropped() {
 fn empty_maps_equal() {
     let map1 = HashMap::<usize, usize>::new();
     let map2 = HashMap::<usize, usize>::new();
-    assert_eq!(map1, map2.guarded());
-    assert_eq!(map1.guarded(), map2);
-    assert_eq!(map1.guarded(), map2.guarded());
-    assert_eq!(map2.guarded(), map1.guarded());
+    assert_eq!(map1, map2.pin());
+    assert_eq!(map1.pin(), map2);
+    assert_eq!(map1.pin(), map2.pin());
+    assert_eq!(map2.pin(), map1.pin());
 }
 
 #[test]
@@ -278,17 +278,17 @@ fn different_size_maps_not_equal() {
     let map1 = HashMap::<usize, usize>::new();
     let map2 = HashMap::<usize, usize>::new();
     {
-        let map1 = map1.guarded();
-        let map2 = map2.guarded();
+        let map1 = map1.pin();
+        let map2 = map2.pin();
         map1.insert(1, 0);
         map1.insert(2, 0);
         map2.insert(1, 0);
     }
 
-    assert_ne!(map1, map2.guarded());
-    assert_ne!(map1.guarded(), map2);
-    assert_ne!(map1.guarded(), map2.guarded());
-    assert_ne!(map2.guarded(), map1.guarded());
+    assert_ne!(map1, map2.pin());
+    assert_ne!(map1.pin(), map2);
+    assert_ne!(map1.pin(), map2.pin());
+    assert_ne!(map2.pin(), map1.pin());
 }
 
 #[test]
@@ -296,16 +296,16 @@ fn same_values_equal() {
     let map1 = HashMap::<usize, usize>::new();
     let map2 = HashMap::<usize, usize>::new();
     {
-        let map1 = map1.guarded();
-        let map2 = map2.guarded();
+        let map1 = map1.pin();
+        let map2 = map2.pin();
         map1.insert(1, 0);
         map2.insert(1, 0);
     }
 
-    assert_eq!(map1, map2.guarded());
-    assert_eq!(map1.guarded(), map2);
-    assert_eq!(map1.guarded(), map2.guarded());
-    assert_eq!(map2.guarded(), map1.guarded());
+    assert_eq!(map1, map2.pin());
+    assert_eq!(map1.pin(), map2);
+    assert_eq!(map1.pin(), map2.pin());
+    assert_eq!(map2.pin(), map1.pin());
 }
 
 #[test]
@@ -313,16 +313,16 @@ fn different_values_not_equal() {
     let map1 = HashMap::<usize, usize>::new();
     let map2 = HashMap::<usize, usize>::new();
     {
-        let map1 = map1.guarded();
-        let map2 = map2.guarded();
+        let map1 = map1.pin();
+        let map2 = map2.pin();
         map1.insert(1, 0);
         map2.insert(1, 1);
     }
 
-    assert_ne!(map1, map2.guarded());
-    assert_ne!(map1.guarded(), map2);
-    assert_ne!(map1.guarded(), map2.guarded());
-    assert_ne!(map2.guarded(), map1.guarded());
+    assert_ne!(map1, map2.pin());
+    assert_ne!(map1.pin(), map2);
+    assert_ne!(map1.pin(), map2.pin());
+    assert_ne!(map2.pin(), map1.pin());
 }
 
 #[test]
@@ -334,11 +334,11 @@ fn drop_value() {
 
     let map = HashMap::<usize, Arc<usize>>::new();
 
-    map.guarded().insert(42, dropped1.clone());
+    map.pin().insert(42, dropped1.clone());
     assert_eq!(Arc::strong_count(&dropped1), 2);
     assert_eq!(Arc::strong_count(&dropped2), 1);
 
-    map.guarded().insert(42, dropped2.clone());
+    map.pin().insert(42, dropped2.clone());
     assert_eq!(Arc::strong_count(&dropped2), 2);
 
     drop(map);
@@ -352,7 +352,7 @@ fn drop_value() {
 #[test]
 fn clone_map_empty() {
     let map = HashMap::<&'static str, u32>::new();
-    let map = map.guarded();
+    let map = map.pin();
     let cloned_map = map.clone(); // another ref to the same map
     assert_eq!(map.len(), cloned_map.len());
     assert_eq!(map, cloned_map);
@@ -363,7 +363,7 @@ fn clone_map_empty() {
 // Test that same values exists in both refs (original and cloned)
 fn clone_map_filled() {
     let map = HashMap::<&'static str, u32>::new();
-    let map = map.guarded();
+    let map = map.pin();
     map.insert("FooKey", 0);
     map.insert("BarKey", 10);
     let cloned_map = map.clone(); // another ref to the same map
@@ -378,7 +378,7 @@ fn clone_map_filled() {
 #[test]
 fn debug() {
     let map: HashMap<usize, usize> = HashMap::new();
-    let map = map.guarded();
+    let map = map.pin();
 
     map.insert(42, 0);
     map.insert(16, 8);
@@ -391,7 +391,7 @@ fn debug() {
 #[test]
 fn retain_empty() {
     let map = HashMap::<&'static str, u32>::new();
-    let map = map.guarded();
+    let map = map.pin();
     map.retain(|_, _| false);
     assert_eq!(map.len(), 0);
 }
@@ -399,7 +399,7 @@ fn retain_empty() {
 #[test]
 fn retain_all_false() {
     let map: HashMap<u32, u32> = (0..10 as u32).map(|x| (x, x)).collect();
-    let map = map.guarded();
+    let map = map.pin();
     map.retain(|_, _| false);
     assert_eq!(map.len(), 0);
 }
@@ -408,7 +408,7 @@ fn retain_all_false() {
 fn retain_all_true() {
     let size = 10usize;
     let map: HashMap<usize, usize> = (0..size).map(|x| (x, x)).collect();
-    let map = map.guarded();
+    let map = map.pin();
     map.retain(|_, _| true);
     assert_eq!(map.len(), size);
 }
@@ -416,7 +416,7 @@ fn retain_all_true() {
 #[test]
 fn retain_some() {
     let map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
-    let map = map.guarded();
+    let map = map.pin();
     let expected_map: HashMap<u32, u32> = (5..10).map(|x| (x, x)).collect();
     map.retain(|_, v| *v >= 5);
     assert_eq!(map.len(), 5);
@@ -426,7 +426,7 @@ fn retain_some() {
 #[test]
 fn retain_force_empty() {
     let map = HashMap::<&'static str, u32>::new();
-    let map = map.guarded();
+    let map = map.pin();
     map.retain_force(|_, _| false);
     assert_eq!(map.len(), 0);
 }
@@ -434,7 +434,7 @@ fn retain_force_empty() {
 #[test]
 fn retain_force_some() {
     let map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
-    let map = map.guarded();
+    let map = map.pin();
     let expected_map: HashMap<u32, u32> = (5..10).map(|x| (x, x)).collect();
     map.retain_force(|_, v| *v >= 5);
     assert_eq!(map.len(), 5);
