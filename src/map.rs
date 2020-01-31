@@ -490,7 +490,7 @@ where
                     tab.store_bin(idx, Shared::null());
                     // next, walk the nodes of the bin and free the nodes and their values as we go
                     // note that we do not free the head node yet, since we're holding the lock it contains
-                    let mut p = raw_node;
+                    let mut p = node.next.load(Ordering::SeqCst, guard);
                     while !p.is_null() {
                         delta -= 1;
                         p = {
@@ -515,12 +515,18 @@ where
                         };
                     }
                     drop(head_lock);
+                    // finally, we can drop the head node and its value
+                    let value = node.value.load(Ordering::SeqCst, guard);
+                    drop(node);
+                    // safety: same as the argument for being allowed to free the nodes beyond the head above
+                    unsafe { guard.defer_destroy(value) };
+                    unsafe { guard.defer_destroy(raw_node) };
+                    delta -= 1;
                     idx += 1;
                 }
             };
         }
 
-        println!("delta: {}", delta);
         if delta != 0 {
             self.add_count(delta, None, guard);
         }
