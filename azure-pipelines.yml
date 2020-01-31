@@ -29,6 +29,19 @@ jobs:
        condition: ne(variables.CACHE_RESTORED, 'true')
      - script: cargo deny check
        displayName: cargo deny
+ - job: canary
+   displayName: "Warning screening"
+   dependsOn: deny
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+       parameters:
+         rust: beta
+         components:
+           - clippy
+     - bash: cargo clippy --all-features -- -D warnings
+       displayName: cargo clippy -- -D warnings
  - job: miri
    displayName: "Run miri on test suite"
    dependsOn: deny
