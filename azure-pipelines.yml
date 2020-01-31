@@ -45,7 +45,6 @@ jobs:
  - job: miri
    displayName: "Run miri on test suite"
    dependsOn: deny
-   continueOnError: true # since miri sometimes isn't on nightly
    pool:
      vmImage: ubuntu-16.04
    steps:
