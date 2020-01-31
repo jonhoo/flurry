@@ -155,7 +155,7 @@ where
     }
 }
 
-impl<K, V> HashMap<K, V>
+impl<K, V> HashMap<K, V, crate::DefaultHashBuilder>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -303,7 +303,7 @@ where
         // safety: we loaded the table while epoch was pinned. table won't be deallocated until
         // next epoch at the earliest.
         let table = unsafe { table.deref() };
-        if table.len() == 0 {
+        if table.is_empty() {
             return None;
         }
 
@@ -553,7 +553,7 @@ where
 
         loop {
             // safety: see argument below for !is_null case
-            if table.is_null() || unsafe { table.deref() }.len() == 0 {
+            if table.is_null() || unsafe { table.deref() }.is_empty() {
                 table = self.init_table(guard);
                 continue;
             }
@@ -760,7 +760,7 @@ where
 
         loop {
             // safety: see argument below for !is_null case
-            if table.is_null() || unsafe { table.deref() }.len() == 0 {
+            if table.is_null() || unsafe { table.deref() }.is_empty() {
                 table = self.init_table(guard);
                 continue;
             }
@@ -1371,9 +1371,10 @@ where
             let table = self.table.load(Ordering::SeqCst, &guard);
 
             // The current capacity == the number of bins in the current table
-            let current_capactity = match table.is_null() {
-                true => 0,
-                false => unsafe { table.deref() }.len(),
+            let current_capactity = if table.is_null() {
+                0
+            } else {
+                unsafe { table.deref() }.len()
             };
 
             if current_capactity == 0 {
@@ -1501,7 +1502,7 @@ where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        let h = self.hash(key);
+        let hash = self.hash(key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
 
@@ -1526,8 +1527,8 @@ where
             if n == 0 {
                 break;
             }
-            let i = t.bini(h);
-            let bin = t.bin(i, guard);
+            let bini = t.bini(hash);
+            let bin = t.bin(bini, guard);
             if bin.is_null() {
                 break;
             }
@@ -1555,7 +1556,7 @@ where
                     let mut old_val: Option<Shared<'g, V>> = None;
 
                     // need to check that this is _still_ the head
-                    if t.bin(i, guard) != bin {
+                    if t.bin(bini, guard) != bin {
                         continue;
                     }
 
@@ -1573,7 +1574,7 @@ where
                         // our guard, e is also valid if it was obtained from a next pointer.
                         let n = unsafe { e.deref() }.as_node().unwrap();
                         let next = n.next.load(Ordering::SeqCst, guard);
-                        if n.hash == h && n.key.borrow() == key {
+                        if n.hash == hash && n.key.borrow() == key {
                             let ev = n.value.load(Ordering::SeqCst, guard);
 
                             // just remove the node if the value is the one we expected at method call
@@ -1599,7 +1600,7 @@ where
                                         .store(next, Ordering::SeqCst);
                                 } else {
                                     // or by setting the next node as the first BinEntry if there is no previous entry
-                                    t.store_bin(i, next);
+                                    t.store_bin(bini, next);
                                 }
 
                                 // in either case, mark the BinEntry as garbage, since it was just removed
@@ -1846,7 +1847,7 @@ where
 
         let guard = self.collector.register().pin();
         self.reserve(reserve, &guard);
-        (*self).put_all(iter.into_iter(), &guard);
+        (*self).put_all(iter, &guard);
     }
 }
 

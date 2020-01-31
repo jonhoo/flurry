@@ -18,7 +18,7 @@ impl<'g, K, V> Iterator for Iter<'g, K, V> {
         let value = node.value.load(Ordering::SeqCst, self.guard);
         // safety: flurry does not drop or move until after guard drop
         let value = unsafe { value.deref() };
-        return Some((&node.key, &value));
+        Some((&node.key, &value))
     }
 }
 
@@ -34,7 +34,7 @@ impl<'g, K, V> Iterator for Keys<'g, K, V> {
     type Item = &'g K;
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node_iter.next()?;
-        return Some(&node.key);
+        Some(&node.key)
     }
 }
 
@@ -54,7 +54,7 @@ impl<'g, K, V> Iterator for Values<'g, K, V> {
         let value = node.value.load(Ordering::SeqCst, self.guard);
         // safety: flurry does not drop or move until after guard drop
         let value = unsafe { value.deref() };
-        return Some(&value);
+        Some(value)
     }
 }
 

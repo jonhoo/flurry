@@ -95,7 +95,7 @@ where
 
     /// Maps `key` to `value` in this table.
     /// See also [`HashMap::insert`].
-    pub fn insert<'g>(&'g self, key: K, value: V) -> Option<&'g V> {
+    pub fn insert(&self, key: K, value: V) -> Option<&'_ V> {
         self.map.insert(key, value, &self.guard)
     }
 
@@ -149,21 +149,21 @@ where
     /// An iterator visiting all key-value pairs in arbitrary order.
     /// The iterator element type is `(&'g K, &'g V)`.
     /// See also [`HashMap::iter`].
-    pub fn iter<'g>(&'g self) -> Iter<'g, K, V> {
+    pub fn iter(&self) -> Iter<'_, K, V> {
         self.map.iter(&self.guard)
     }
 
     /// An iterator visiting all keys in arbitrary order.
     /// The iterator element type is `&'g K`.
     /// See also [`HashMap::keys`].
-    pub fn keys<'g>(&'g self) -> Keys<'g, K, V> {
+    pub fn keys(&self) -> Keys<'_, K, V> {
         self.map.keys(&self.guard)
     }
 
     /// An iterator visiting all values in arbitrary order.
     /// The iterator element type is `&'g V`.
     /// See also [`HashMap::values`].
-    pub fn values<'g>(&'g self) -> Values<'g, K, V> {
+    pub fn values(&self) -> Values<'_, K, V> {
         self.map.values(&self.guard)
     }
 
