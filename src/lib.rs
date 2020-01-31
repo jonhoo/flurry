@@ -23,7 +23,9 @@
 //! Notice that there is a trade-off here. Creating and dropping a `Guard` is not free, since it
 //! also needs to interact with said bookkeeping. But if you keep one around for a long time, you
 //! may accumulate much garbage which will take up valuable free memory on your system. Use your
-//! best judgement in deciding whether or not to re-use a `Guard`.
+//! best judgement in deciding whether or not to re-use a `Guard`. This is also the reason why the
+//! map requires that `K: 'static` and `V: 'static`. If we did not, then your keys and values may
+//! get dropped far later, potentially after those lifetimes have passed, which would not be sound.
 //!
 //! # Consistency
 //!
@@ -196,6 +198,7 @@
 #![deny(
     missing_docs,
     missing_debug_implementations,
+    unreachable_pub,
     intra_doc_link_resolution_failure
 )]
 #![warn(rust_2018_idioms)]
@@ -208,6 +211,9 @@ mod raw;
 pub mod iter;
 
 pub use map::HashMap;
+
+/// Default hasher for [`HashMap`].
+pub type DefaultHashBuilder = ahash::RandomState;
 
 /// Types needed to safely access shared data concurrently.
 pub mod epoch {

@@ -7,7 +7,7 @@ const ITER: [(usize, &'static str); 5] = [(1, "A"), (2, "B"), (3, "C"), (4, "D")
 fn test_from_iter() {
     let guard = unsafe { crossbeam_epoch::unprotected() };
     let map1 = from_iter_contron();
-    let map2 = HashMap::from_iter(ITER.iter());
+    let map2: HashMap<_, _> = HashMap::from_iter(ITER.iter());
 
     // TODO: improve when `Map: Eq`
     let mut fst: Vec<_> = map1.iter(&guard).collect();
@@ -56,5 +56,5 @@ fn test_remove() {
     map.remove(&5, &guard);
     // TODO: add len check once method exists
     // assert_eq!(map.len(), 4);
-    assert!(!map.contains_key(&5));
+    assert!(!map.contains_key(&5, &guard));
 }
