@@ -162,6 +162,16 @@ mod tests {
         }
     }
 
+    fn drop_entry(entry: BinEntry<usize, usize>) {
+        // currently bins don't handle dropping their
+        // own values the Table is responsible. This
+        // makes use of the tables implementation for
+        // convenience in the unit test
+        let mut table = Table::<usize, usize>::new(1);
+        table.store_bin(0, Owned::new(entry));
+        table.drop_bins();
+    }
+
     #[test]
     fn find_node_no_match() {
         let guard = &crossbeam_epoch::pin();
@@ -171,6 +181,7 @@ mod tests {
         node1.next.store(Owned::new(entry2), Ordering::SeqCst);
         let entry1 = BinEntry::Node(node1);
         assert!(entry1.find(1, &0, guard).is_null());
+        drop_entry(entry1);
     }
 
     #[test]
@@ -184,6 +195,7 @@ mod tests {
                 .key,
             2
         );
+        drop_entry(entry);
     }
 
     #[test]
@@ -201,6 +213,7 @@ mod tests {
                 .key,
             5
         );
+        drop_entry(entry1);
     }
 
     #[test]
