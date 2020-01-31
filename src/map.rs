@@ -56,7 +56,7 @@ macro_rules! load_factor {
 /// A concurrent hash table.
 ///
 /// See the [crate-level documentation](index.html) for details.
-pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
+pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
     table: Atomic<Table<K, V>>,
@@ -77,7 +77,71 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// next element count value upon which to resize the table.
     size_ctl: AtomicIsize,
 
+    /// Collector that all `Guard` references used for operations on this map must be tied to. It
+    /// is important that they all assocate with the _same_ `Collector`, otherwise you end up with
+    /// unsoundness as described in https://github.com/jonhoo/flurry/issues/46. Specifically, a
+    /// user can do:
+    ///
+    /// ```rust,ignore
+    /// # // this test should be should_panic, not ignore, but that makes ASAN crash..?
+    /// # use flurry::HashMap;
+    /// # use crossbeam_epoch;
+    /// let map: HashMap<_, _> = HashMap::default();
+    /// map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
+    ///
+    /// let evil = crossbeam_epoch::Collector::new();
+    /// let evil = evil.register();
+    /// let guard = evil.pin();
+    /// let oops = map.get(&42, &guard);
+    ///
+    /// map.remove(&42, &crossbeam_epoch::pin());
+    /// // at this point, the default collector is allowed to free `"hello"`
+    /// // since no-one has the global epoch pinned as far as it is aware.
+    /// // `oops` is tied to the lifetime of a Guard that is not a part of
+    /// // the same epoch group, and so can now be dangling.
+    /// // but we can still access it!
+    /// assert_eq!(oops.unwrap(), "hello");
+    /// ```
+    ///
+    /// We avoid that by checking that every external guard that is passed in is associated with
+    /// the `Collector` that was specified when the map was created (which may be the global
+    /// collector).
+    ///
+    /// Note also that the fact that this can be a global collector is what necessitates the
+    /// `'static` bounds on `K` and `V`. Since deallocation can be deferred arbitrarily, it is not
+    /// okay for us to take a `K` or `V` with a limited lifetime, since we may drop it far after
+    /// that lifetime has passed.
+    ///
+    /// One possibility is to never use the global allocator, and instead _always_ create and use
+    /// our own `Collector`. If we did that, then we could accept non-`'static` keys and values since
+    /// the destruction of the collector would ensure that that all deferred destructors are run.
+    /// It would, sadly, mean that we don't get to share a collector with other things that use
+    /// `crossbeam-epoch` though. For more on this (and a cool optimization), see:
+    /// https://github.com/crossbeam-rs/crossbeam/blob/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-skiplist/src/base.rs#L308-L319
+    collector: epoch::Collector,
+
     build_hasher: S,
+}
+
+#[cfg(test)]
+#[test]
+#[should_panic]
+fn disallow_evil() {
+    let map: HashMap<_, _> = HashMap::default();
+    map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
+
+    let evil = crossbeam_epoch::Collector::new();
+    let evil = evil.register();
+    let guard = evil.pin();
+    let oops = map.get(&42, &guard);
+
+    map.remove(&42, &crossbeam_epoch::pin());
+    // at this point, the default collector is allowed to free `"hello"`
+    // since no-one has the global epoch pinned as far as it is aware.
+    // `oops` is tied to the lifetime of a Guard that is not a part of
+    // the same epoch group, and so can now be dangling.
+    // but we can still access it!
+    assert_eq!(oops.unwrap(), "hello");
 }
 
 impl<K, V, S> Default for HashMap<K, V, S>
@@ -130,6 +194,50 @@ where
             count: AtomicUsize::new(0),
             size_ctl: AtomicIsize::new(0),
             build_hasher: hash_builder,
+            collector: epoch::default_collector().clone(),
+        }
+    }
+
+    /*
+    NOTE: This method is intentionally left out atm as it is a potentially large foot-gun.
+          See https://github.com/jonhoo/flurry/pull/49#issuecomment-580514518.
+    */
+    /*
+    /// Associate a custom [`epoch::Collector`] with this map.
+    ///
+    /// By default, the global collector is used. With this method you can use a different
+    /// collector instead. This may be desireable if you want more control over when and how memory
+    /// reclamation happens.
+    ///
+    /// Note that _all_ `Guard` references provided to access the returned map _must_ be
+    /// constructed using guards produced by `collector`. You can use [`HashMap::register`] to get
+    /// a thread-local handle to the collector that then lets you construct an [`epoch::Guard`].
+    pub fn with_collector(mut self, collector: epoch::Collector) -> Self {
+        self.collector = collector;
+        self
+    }
+
+    /// Allocate a thread-local handle to the [`epoch::Collector`] associated with this map.
+    ///
+    /// You can use the returned handle to produce [`epoch::Guard`] references.
+    pub fn register(&self) -> epoch::LocalHandle {
+        self.collector.register()
+    }
+    */
+
+    /// Pin a `Guard` for use with this map.
+    ///
+    /// Keep in mind that for as long as you hold onto this `Guard`, you are preventing the
+    /// collection of garbage generated by the map.
+    pub fn guard(&self) -> epoch::Guard {
+        self.collector.register().pin()
+    }
+
+    #[inline]
+    fn check_guard(&self, guard: &Guard) {
+        // guard.collector() may be `None` if it is unprotected
+        if let Some(c) = guard.collector() {
+            assert_eq!(c, &self.collector);
         }
     }
 
@@ -178,6 +286,7 @@ where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
+        self.check_guard(guard);
         self.get(key, &guard).is_some()
     }
 
@@ -237,7 +346,7 @@ where
     ///
     /// Returns `None` if this map contains no mapping for the key.
     ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
+    /// To obtain a `Guard`, use [`HashMap::guard`].
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
@@ -247,6 +356,7 @@ where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
+        self.check_guard(guard);
         let node = self.get_node(key, guard)?;
 
         let v = node.value.load(Ordering::SeqCst, guard);
@@ -285,6 +395,7 @@ where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
+        self.check_guard(guard);
         let node = self.get_node(key, guard)?;
 
         let v = node.value.load(Ordering::SeqCst, guard);
@@ -339,6 +450,7 @@ where
     ///
     /// The value can be retrieved by calling [`HashMap::get`] with a key that is equal to the original key.
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
+        self.check_guard(guard);
         self.put(key, value, false, guard)
     }
 
@@ -563,6 +675,7 @@ where
         Q: ?Sized + Hash + Eq,
         F: FnOnce(&K, &V) -> Option<V>,
     {
+        self.check_guard(guard);
         let h = self.hash(&key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
@@ -1272,6 +1385,7 @@ where
     /// Tries to reserve capacity for at least additional more elements.
     /// The collection may reserve more space to avoid frequent reallocations.
     pub fn reserve(&self, additional: usize, guard: &Guard) {
+        self.check_guard(guard);
         let absolute = self.len() + additional;
         self.try_presize(absolute, guard);
     }
@@ -1287,6 +1401,7 @@ where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
+        self.check_guard(guard);
         self.replace_node(key, None, None, guard)
     }
 
@@ -1470,6 +1585,7 @@ where
     where
         F: FnMut(&K, &V) -> bool,
     {
+        self.check_guard(guard);
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
@@ -1489,6 +1605,7 @@ where
     where
         F: FnMut(&K, &V) -> bool,
     {
+        self.check_guard(guard);
         // removed selected keys
         for (k, v) in self.iter(&guard) {
             if !f(k, v) {
@@ -1502,6 +1619,7 @@ where
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
     pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V> {
+        self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
         Iter { node_iter, guard }
@@ -1512,6 +1630,7 @@ where
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
     pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V> {
+        self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
         Keys { node_iter }
@@ -1522,6 +1641,7 @@ where
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
     pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V> {
+        self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
         Values { node_iter, guard }
@@ -1537,6 +1657,7 @@ where
     #[cfg(test)]
     /// Returns the capacity of the map.
     fn capacity(&self, guard: &Guard) -> usize {
+        self.check_guard(guard);
         let table = self.table.load(Ordering::Relaxed, &guard);
 
         if table.is_null() {
@@ -1566,9 +1687,10 @@ where
             return false;
         }
 
-        let guard = epoch::pin();
-        self.iter(&guard)
-            .all(|(key, value)| other.get(key, &guard).map_or(false, |v| *value == *v))
+        let our_guard = self.collector.register().pin();
+        let their_guard = other.collector.register().pin();
+        self.iter(&our_guard)
+            .all(|(key, value)| other.get(key, &their_guard).map_or(false, |v| *value == *v))
     }
 }
 
@@ -1587,7 +1709,7 @@ where
     S: BuildHasher,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let guard = epoch::pin();
+        let guard = self.collector.register().pin();
         f.debug_map().entries(self.iter(&guard)).finish()
     }
 }
@@ -1636,8 +1758,7 @@ where
             (iter.size_hint().0 + 1) / 2
         };
 
-        let guard = epoch::pin();
-
+        let guard = self.collector.register().pin();
         self.reserve(reserve, &guard);
         (*self).put_all(iter.into_iter(), &guard);
     }
@@ -1714,7 +1835,7 @@ where
     fn clone(&self) -> HashMap<K, V, S> {
         let cloned_map = Self::with_capacity_and_hasher(self.len(), self.build_hasher.clone());
         {
-            let guard = epoch::pin();
+            let guard = self.collector.register().pin();
             for (k, v) in self.iter(&guard) {
                 cloned_map.insert(k.clone(), v.clone(), &guard);
             }
@@ -1893,6 +2014,29 @@ mod tests {
 /// drop(guard);
 /// drop(r);
 /// ```
+///
+/// # Keys and values must be static
+///
+/// ```compile_fail
+/// let x = String::from("foo");
+/// let map: flurry::HashMap<_, _> = std::iter::once((&x, &x)).collect();
+/// ```
+/// ```compile_fail
+/// let x = String::from("foo");
+/// let map: flurry::HashMap<_, _> = flurry::HashMap::new();
+/// map.insert(&x, &x, &map.guard());
+/// ```
+///
+/// # get() key can be non-static
+///
+/// ```no_run
+/// let x = String::from("foo");
+/// let map: flurry::HashMap<_, _> = flurry::HashMap::new();
+/// map.insert(x.clone(), x.clone(), &map.guard());
+/// map.get(&x, &map.guard());
+/// ```
+#[allow(dead_code)]
+struct CompileFailTests;
 
 #[test]
 fn replace_empty() {
@@ -1941,6 +2085,3 @@ fn replace_existing_observed_value_non_matching() {
         assert_eq!(*map.get(&42, &guard).unwrap(), 42);
     }
 }
-
-#[allow(dead_code)]
-struct CompileFailTests;
