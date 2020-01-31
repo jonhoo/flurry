@@ -2,6 +2,21 @@ use flurry::HashMap;
 use std::sync::Arc;
 
 #[test]
+fn clear() {
+    let map = HashMap::<usize, usize>::new();
+    let map = map.pin();
+    {
+        map.insert(0, 1);
+        map.insert(1, 1);
+        map.insert(2, 1);
+        map.insert(3, 1);
+        map.insert(4, 1);
+    }
+    map.clear();
+    assert!(map.is_empty());
+}
+
+#[test]
 fn insert() {
     let map = HashMap::<usize, usize>::new();
     let map = map.pin();
