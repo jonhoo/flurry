@@ -99,6 +99,12 @@ where
         self.map.insert(key, value, &self.guard)
     }
 
+    /// Removes all entries from this map.
+    /// See also [`HashMap::clear`].
+    pub fn clear(&self) {
+        self.map.clear(&self.guard);
+    }
+
     /// If the value for the specified `key` is present, attempts to
     /// compute a new mapping given the key and its current mapped value.
     /// See also [`HashMap::compute_if_present`].
