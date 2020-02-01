@@ -8,7 +8,7 @@ use crossbeam_epoch::Guard;
 ///
 /// See [`HashMap::iter`](crate::HashMap::iter) for details.
 #[derive(Debug)]
-pub struct Iter<'g, K, V, L>
+pub(crate) struct Iter<'g, K, V, L>
 where
     L: lock_api::RawMutex,
 {
@@ -34,7 +34,7 @@ where
 ///
 /// See [`HashMap::keys`](crate::HashMap::keys) for details.
 #[derive(Debug)]
-pub struct Keys<'g, K, V, L>
+pub(crate) struct Keys<'g, K, V, L>
 where
     L: lock_api::RawMutex,
 {
@@ -56,7 +56,7 @@ where
 ///
 /// See [`HashMap::values`](crate::HashMap::values) for details.
 #[derive(Debug)]
-pub struct Values<'g, K, V, L>
+pub(crate) struct Values<'g, K, V, L>
 where
     L: lock_api::RawMutex,
 {

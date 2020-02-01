@@ -1,4 +1,3 @@
-use crate::iter::*;
 use crate::ConcurrentHashMap;
 use core::borrow::Borrow;
 use core::fmt::{self, Debug, Formatter};
@@ -172,21 +171,21 @@ where
     /// An iterator visiting all key-value pairs in arbitrary order.
     /// The iterator element type is `(&'g K, &'g V)`.
     /// See also [`HashMap::iter`].
-    pub fn iter(&self) -> Iter<'_, K, V, L> {
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
         self.map.iter(&self.guard)
     }
 
     /// An iterator visiting all keys in arbitrary order.
     /// The iterator element type is `&'g K`.
     /// See also [`HashMap::keys`].
-    pub fn keys(&self) -> Keys<'_, K, V, L> {
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
         self.map.keys(&self.guard)
     }
 
     /// An iterator visiting all values in arbitrary order.
     /// The iterator element type is `&'g V`.
     /// See also [`HashMap::values`].
-    pub fn values(&self) -> Values<'_, K, V, L> {
+    pub fn values(&self) -> impl Iterator<Item = &V> {
         self.map.values(&self.guard)
     }
 
@@ -203,21 +202,6 @@ where
     }
 }
 
-impl<'g, K, V, L, S> IntoIterator for &'g ConcurrentHashMapRef<'_, K, V, L, S>
-where
-    K: Sync + Send + Clone + Hash + Eq,
-    V: Sync + Send,
-    S: BuildHasher,
-    L: lock_api::RawMutex,
-{
-    type IntoIter = Iter<'g, K, V, L>;
-    type Item = (&'g K, &'g V);
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.map.iter(&self.guard)
-    }
-}
-
 impl<K, V, L, S> Debug for ConcurrentHashMapRef<'_, K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq + Debug,
@@ -226,7 +210,7 @@ where
     L: lock_api::RawMutex,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_map().entries(self).finish()
+        f.debug_map().entries(self.iter()).finish()
     }
 }
 

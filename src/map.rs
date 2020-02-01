@@ -1730,7 +1730,7 @@ where
     /// The iterator element type is `(&'g K, &'g V)`.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
-    pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V, L> {
+    pub fn iter<'g>(&'g self, guard: &'g Guard) -> impl Iterator<Item = (&'g K, &'g V)> {
         self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
@@ -1741,7 +1741,7 @@ where
     /// The iterator element type is `&'g K`.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
-    pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V, L> {
+    pub fn keys<'g>(&'g self, guard: &'g Guard) -> impl Iterator<Item = &'g K> {
         self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
@@ -1752,7 +1752,7 @@ where
     /// The iterator element type is `&'g V`.
     ///
     /// To obtain a `Guard`, use [`epoch::pin`].
-    pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V, L> {
+    pub fn values<'g>(&'g self, guard: &'g Guard) -> impl Iterator<Item = &'g V> {
         self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
         let node_iter = NodeIter::new(table, guard);
