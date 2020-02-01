@@ -212,7 +212,12 @@ mod raw;
 /// Iterator types.
 pub mod iter;
 
+pub use map::ConcurrentHashMap;
+pub use map_ref::ConcurrentHashMapRef;
+
+#[cfg(feature = "std")]
 pub use map::HashMap;
+#[cfg(feature = "std")]
 pub use map_ref::HashMapRef;
 
 /// Default hasher for [`HashMap`].

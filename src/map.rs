@@ -56,11 +56,19 @@ macro_rules! load_factor {
     };
 }
 
+#[cfg(feature = "std")]
 /// A concurrent hash table.
 ///
 /// See the [crate-level documentation](index.html) for details.
-#[cfg(feature = "std")]
-pub struct HashMap<K: 'static, V: 'static, L = parking_lot::RawMutex, S = crate::DefaultHashBuilder>
+pub type HashMap<K, V, S = crate::DefaultHashBuilder> =
+    ConcurrentHashMap<K, V, parking_lot::RawMutex, S>;
+
+/// A concurrent hash table.
+///
+/// Prefer the type alias [`HashMap`].
+///
+/// See the [crate-level documentation](index.html) for details.
+pub struct ConcurrentHashMap<K: 'static, V: 'static, L, S = crate::DefaultHashBuilder>
 where
     L: lock_api::RawMutex,
     S: BuildHasher,
@@ -132,32 +140,6 @@ where
     build_hasher: S,
 }
 
-/// A concurrent hash table.
-///
-/// Note that `ahash::RandomState`, the default value of `S`, is not
-/// cryptographically secure. Therefore it is strongly recommended that you do
-/// not use this hash for cryptographic purproses.
-/// See [`ahash`](https://github.com/tkaitchuck/ahash) for more information.
-///
-/// See the [crate-level documentation](index.html) for details.
-#[cfg(not(feature = "std"))]
-pub struct HashMap<K: 'static, V: 'static, L, S = crate::DefaultHashBuilder>
-where
-    L: lock_api::RawMutex,
-    S: BuildHasher,
-{
-    // NOTE: this is, and must be, an exact copy of the `HashMap` definition above, with just the
-    // default type for `L` unset. This is because in no_std environments, there is no sensible
-    // default lock type for us to use.
-    table: Atomic<Table<K, V, L>>,
-    next_table: Atomic<Table<K, V, L>>,
-    transfer_index: AtomicIsize,
-    count: AtomicUsize,
-    size_ctl: AtomicIsize,
-    collector: epoch::Collector,
-    build_hasher: S,
-}
-
 #[cfg(test)]
 #[test]
 #[should_panic]
@@ -180,7 +162,7 @@ fn disallow_evil() {
 }
 
 #[cfg(feature = "std")]
-impl<K, V, L, S> Default for HashMap<K, V, L, S>
+impl<K, V, L, S> Default for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -193,7 +175,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<K, V, L> HashMap<K, V, L, crate::DefaultHashBuilder>
+impl<K, V, L> ConcurrentHashMap<K, V, L, crate::DefaultHashBuilder>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -211,7 +193,7 @@ where
     }
 }
 
-impl<K, V, L, S> HashMap<K, V, L, S>
+impl<K, V, L, S> ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -306,7 +288,7 @@ where
     }
 }
 
-impl<K, V, L, S> HashMap<K, V, L, S>
+impl<K, V, L, S> ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -1823,7 +1805,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<K, V, L, S> PartialEq for HashMap<K, V, L, S>
+impl<K, V, L, S> PartialEq for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
     V: Sync + Send + PartialEq,
@@ -1839,7 +1821,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<K, V, L, S> Eq for HashMap<K, V, L, S>
+impl<K, V, L, S> Eq for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
     V: Sync + Send + Eq,
@@ -1849,7 +1831,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<K, V, L, S> fmt::Debug for HashMap<K, V, L, S>
+impl<K, V, L, S> fmt::Debug for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Debug + Eq + Hash,
     V: Sync + Send + Debug,
@@ -1862,7 +1844,7 @@ where
     }
 }
 
-impl<K, V, L, S> Drop for HashMap<K, V, L, S>
+impl<K, V, L, S> Drop for ConcurrentHashMap<K, V, L, S>
 where
     L: lock_api::RawMutex,
     S: BuildHasher,
@@ -1891,7 +1873,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<K, V, L, S> Extend<(K, V)> for &HashMap<K, V, L, S>
+impl<K, V, L, S> Extend<(K, V)> for &ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -1919,7 +1901,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<'a, K, V, L, S> Extend<(&'a K, &'a V)> for &HashMap<K, V, L, S>
+impl<'a, K, V, L, S> Extend<(&'a K, &'a V)> for &ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
@@ -1933,7 +1915,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<K, V, L, S> FromIterator<(K, V)> for HashMap<K, V, L, S>
+impl<K, V, L, S> FromIterator<(K, V)> for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
@@ -1949,7 +1931,8 @@ where
             let guard = unsafe { crossbeam_epoch::unprotected() };
 
             let (lower, _) = iter.size_hint();
-            let map = HashMap::with_capacity_and_hasher(lower.saturating_add(1), S::default());
+            let map =
+                ConcurrentHashMap::with_capacity_and_hasher(lower.saturating_add(1), S::default());
 
             map.put(key, value, false, &guard);
             map.put_all(iter, &guard);
@@ -1961,7 +1944,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<'a, K, V, L, S> FromIterator<(&'a K, &'a V)> for HashMap<K, V, L, S>
+impl<'a, K, V, L, S> FromIterator<(&'a K, &'a V)> for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
@@ -1975,7 +1958,7 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<'a, K, V, L, S> FromIterator<&'a (K, V)> for HashMap<K, V, L, S>
+impl<'a, K, V, L, S> FromIterator<&'a (K, V)> for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
     V: Sync + Send + Copy,
@@ -1989,14 +1972,14 @@ where
 }
 
 #[cfg(feature = "std")]
-impl<K, V, L, S> Clone for HashMap<K, V, L, S>
+impl<K, V, L, S> Clone for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send + Clone,
     S: BuildHasher + Clone,
     L: lock_api::RawMutex,
 {
-    fn clone(&self) -> HashMap<K, V, L, S> {
+    fn clone(&self) -> ConcurrentHashMap<K, V, L, S> {
         let cloned_map = Self::with_capacity_and_hasher(self.len(), self.build_hasher.clone());
         {
             let guard = self.collector.register().pin();
