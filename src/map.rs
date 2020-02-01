@@ -2,13 +2,11 @@ use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
 use core::borrow::Borrow;
+use core::fmt::{self, Debug, Formatter};
 use core::hash::{BuildHasher, Hash, Hasher};
-#[cfg(feature = "std")]
 use core::iter::FromIterator;
 use core::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
-#[cfg(feature = "std")]
-use std::fmt::{self, Debug, Formatter};
 #[cfg(feature = "std")]
 use std::sync::Once;
 
@@ -161,7 +159,6 @@ fn disallow_evil() {
     assert_eq!(oops.unwrap(), "hello");
 }
 
-#[cfg(feature = "std")]
 impl<K, V, L, S> Default for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -174,7 +171,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 impl<K, V, L> ConcurrentHashMap<K, V, L, crate::DefaultHashBuilder>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -200,7 +196,6 @@ where
     L: lock_api::RawMutex,
     S: BuildHasher,
 {
-    #[cfg(feature = "std")]
     /// Creates an empty map which will use `hash_builder` to hash keys.
     ///
     /// The created map has the default initial capacity.
@@ -217,7 +212,10 @@ where
             count: AtomicUsize::new(0),
             size_ctl: AtomicIsize::new(0),
             build_hasher: hash_builder,
+            #[cfg(feature = "std")]
             collector: epoch::default_collector().clone(),
+            #[cfg(not(feature = "std"))]
+            collector: epoch::Collector::new(),
         }
     }
 
@@ -264,7 +262,6 @@ where
         }
     }
 
-    #[cfg(feature = "std")]
     /// Creates an empty map with the specified `capacity`, using `hash_builder` to hash the keys.
     ///
     /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
@@ -756,7 +753,6 @@ where
         }
     }
 
-    #[cfg_attr(not(feature = "std"), allow(dead_code))]
     fn put_all<I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &Guard) {
         for (key, value) in iter {
             self.put(key, value, false, guard);
@@ -1804,7 +1800,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 impl<K, V, L, S> PartialEq for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
@@ -1820,7 +1815,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 impl<K, V, L, S> Eq for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Eq + Hash,
@@ -1830,7 +1824,6 @@ where
 {
 }
 
-#[cfg(feature = "std")]
 impl<K, V, L, S> fmt::Debug for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Debug + Eq + Hash,
@@ -1839,7 +1832,7 @@ where
     L: lock_api::RawMutex,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let guard = self.collector.register().pin();
+        let guard = self.guard();
         f.debug_map().entries(self.iter(&guard)).finish()
     }
 }
@@ -1872,7 +1865,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 impl<K, V, L, S> Extend<(K, V)> for &ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -1900,7 +1892,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 impl<'a, K, V, L, S> Extend<(&'a K, &'a V)> for &ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -1914,7 +1905,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 impl<K, V, L, S> FromIterator<(K, V)> for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
@@ -1943,7 +1933,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 impl<'a, K, V, L, S> FromIterator<(&'a K, &'a V)> for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -1957,7 +1946,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 impl<'a, K, V, L, S> FromIterator<&'a (K, V)> for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -1971,7 +1959,6 @@ where
     }
 }
 
-#[cfg(feature = "std")]
 impl<K, V, L, S> Clone for ConcurrentHashMap<K, V, L, S>
 where
     K: Sync + Send + Clone + Hash + Eq,
