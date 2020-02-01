@@ -29,8 +29,8 @@
 //!
 //! # Consistency
 //!
-//! Retrieval operations (including [`get`](HashMap::get)) generally do not block, so may
-//! overlap with update operations (including [`insert`](HashMap::insert)). Retrievals
+//! Retrieval operations (including [`get`](ConcurrentHashMap::get)) generally do not block, so may
+//! overlap with update operations (including [`insert`](ConcurrentHashMap::insert)). Retrievals
 //! reflect the results of the most recently *completed* update operations holding upon their
 //! onset. (More formally, an update operation for a given key bears a _happens-before_ relation
 //! with any successful retrieval for that key reporting the updated value.)
@@ -38,11 +38,11 @@
 //! Operations that inspect the map as a whole, rather than a single key, operate on a snapshot of
 //! the underlying table. For example, iterators return elements reflecting the state of the hash
 //! table at some point at or since the creation of the iterator. Aggregate status methods like
-//! [`len`](HashMap::len) are typically useful only when a map is not undergoing concurrent
-//! updates in other threads. Otherwise the results of these methods reflect transient states that
-//! may be adequate for monitoring or estimation purposes, but not for program control.
-//! Similarly, [`Clone`](std::clone::Clone) may not produce a "perfect" clone if the underlying
-//! map is being concurrently modified.
+//! [`len`](ConcurrentHashMap::len) are typically useful only when a map is not undergoing
+//! concurrent updates in other threads. Otherwise the results of these methods reflect transient
+//! states that may be adequate for monitoring or estimation purposes, but not for program control.
+//! Similarly, [`Clone`](std::clone::Clone) may not produce a "perfect" clone if the underlying map
+//! is being concurrently modified.
 //!
 //! # Resizing behavior
 //!
@@ -53,7 +53,7 @@
 //! and removed, but overall, this maintains a commonly accepted time/space tradeoff for hash
 //! tables.  However, resizing this or any other kind of hash table may be a relatively slow
 //! operation. When possible, it is a good idea to provide a size estimate by using the
-//! [`with_capacity`](HashMap::with_capacity) constructor. Note that using many keys with
+//! [`with_capacity`](ConcurrentHashMap::with_capacity) constructor. Note that using many keys with
 //! exactly the same [`Hash`](std::hash::Hash) value is a sure way to slow down performance of any
 //! hash table. /* TODO: dynamic load factor */
 //!

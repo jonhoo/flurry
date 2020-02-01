@@ -63,7 +63,7 @@ pub type HashMap<K, V, S = crate::DefaultHashBuilder> =
 
 /// A concurrent hash table.
 ///
-/// Prefer the type alias [`HashMap`].
+/// Prefer the type alias [`HashMap`] unless you are on `no_std`.
 ///
 /// See the [crate-level documentation](index.html) for details.
 pub struct ConcurrentHashMap<K: 'static, V: 'static, L, S = crate::DefaultHashBuilder>
@@ -266,7 +266,7 @@ where
     ///
     /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
     /// (assuming uniformly distributed hashes). If `capacity` is 0, the call will not allocate,
-    /// and is equivalent to [`HashMap::new`].
+    /// and is equivalent to [`ConcurrentHashMap::new`].
     ///
     /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
     /// to be resistant to attacks that cause many collisions and very poor performance.
@@ -368,7 +368,7 @@ where
     ///
     /// Returns `None` if this map contains no mapping for the key.
     ///
-    /// To obtain a `Guard`, use [`HashMap::guard`].
+    /// To obtain a `Guard`, use [`ConcurrentHashMap::guard`].
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
@@ -479,7 +479,8 @@ where
     #[inline]
     /// Maps `key` to `value` in this table.
     ///
-    /// The value can be retrieved by calling [`HashMap::get`] with a key that is equal to the original key.
+    /// The value can be retrieved by calling [`ConcurrentHashMap::get`] with a key that is equal
+    /// to the original key.
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.check_guard(guard);
         self.put(key, value, false, guard)
@@ -1692,7 +1693,8 @@ where
     ///
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
-    /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
+    /// If you want the removal to happen even in the case of concurrent modification, use
+    /// [`ConcurrentHashMap::retain_force`].
     pub fn retain<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
@@ -1712,7 +1714,8 @@ where
     /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
-    /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
+    /// even if if the value is updated concurrently. If you do not want that behavior, use
+    /// [`ConcurrentHashMap::retain`].
     pub fn retain_force<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
