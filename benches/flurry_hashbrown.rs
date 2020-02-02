@@ -51,14 +51,14 @@ macro_rules! bench_suite {
 macro_rules! bench_insert {
     ($group:ident, $keydist:expr, $bench_id: expr) => {
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
+            let map: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
             b.iter(|| {
-                let mut map: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
-
                 let guard = epoch::pin();
+                map.clear(&guard);
                 ($keydist).take(SIZE).for_each(|i| {
                     map.insert(i, i, &guard);
                 });
-                black_box(&mut map);
+                black_box(&map);
             });
         });
     };
