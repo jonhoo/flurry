@@ -1197,7 +1197,7 @@ where
                     .cas_bin(
                         i,
                         Shared::null(),
-                        Owned::new(BinEntry::Moved(next_table as *const _)),
+                        table.get_moved(next_table as *const _, guard),
                         guard,
                     )
                     .is_ok();
@@ -1310,7 +1310,7 @@ where
 
                     next_table.store_bin(i, low_bin);
                     next_table.store_bin(i + n, high_bin);
-                    table.store_bin(i, Owned::new(BinEntry::Moved(next_table as *const _)));
+                    table.store_bin(i, table.get_moved(next_table as *const _, guard));
 
                     // everything up to last_run in the _old_ bin linked list is now garbage.
                     // those nodes have all been re-allocated in the new bin linked list.
