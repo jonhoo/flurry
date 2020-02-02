@@ -1,23 +1,60 @@
 use crate::node::*;
 use crossbeam_epoch::{Atomic, Guard, Owned, Pointer, Shared};
+use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::sync::atomic::Ordering;
 
 #[derive(Debug)]
 pub(crate) struct Table<K, V> {
     bins: Box<[Atomic<BinEntry<K, V>>]>,
-    // if a table contains moved bins, the BinEntry::Moved referring
-    // to the new table looks exactly the same for all moved bins.
-    // thus, we share the Moved across the table and store a reference
-    // to it here
+
+    // since a Moved does not contain associated information,
+    // one instance is sufficient and shared across all bins in this table
     moved: Atomic<BinEntry<K, V>>,
+
+    // since the information content of moved nodes is the same across
+    // the table, we share this information
+    //
+    // safety: next_table is a valid pointer if it was read as consequence of loading _this_
+    // table as `map::HashMap.table` and reading a BinEntry::Moved while still holding the
+    // guard used for this load:
+    //
+    // When loading the current table of the HashMap with a guard g, the current epoch will be
+    // pinned by g. This happens _before_ the resize which put the Moved entry into the this
+    // table finishes, as otherwise a different table would have been loaded (see
+    // `map::HashMap::transfer`).
+    //
+    // Hence:
+    //
+    //   - When trying to access next_table during the current resize, it points to
+    //     map::HashMap.next_table and is thus valid.
+    //
+    //   - After the current resize and before another resize, `next_table == map::HashMap.table`
+    //     as the "next table" it pointed to during the resize has become the current table. Thus,
+    //     next_table is still valid.
+    //
+    //   - The above is true until a subsequent resize ends, at which point `map::HashMap.table´ is
+    //     set to another new table != next_table and next_table is `epoch::Guard::defer_destroy`ed
+    //     (again, see `map::HashMap::transfer`). At this point, next_table is not referenced by the
+    //     map anymore. However, the guard g used to load _this_ table is still pinning the epoch at
+    //     the time of the call to `defer_destroy`. Thus, next_table remains valid for at least the
+    //     lifetime of g and, in particular, cannot be dropped before _this_ table.
+    //
+    //   - After releasing g, either the current resize is finished and operations on the map
+    //     cannot access next_table anymore (as a more recent table will be loaded as the current
+    //     table; see once again `map::HashMap::transfer`), or the argument is as above.
+    //
+    // Since finishing a resize is the only time a table is `defer_destroy`ed, the above covers
+    // all cases.
+    next_table: Atomic<Table<K, V>>,
 }
 
 impl<K, V> From<Vec<Atomic<BinEntry<K, V>>>> for Table<K, V> {
     fn from(bins: Vec<Atomic<BinEntry<K, V>>>) -> Self {
         Self {
             bins: bins.into_boxed_slice(),
-            moved: Atomic::null(),
+            moved: Atomic::from(Owned::new(BinEntry::Moved)),
+            next_table: Atomic::null(),
         }
     }
 }
@@ -37,25 +74,93 @@ impl<K, V> Table<K, V> {
 
     pub(crate) fn get_moved<'g>(
         &'g self,
-        for_table: *const Table<K, V>,
+        for_table: Shared<'g, Table<K, V>>,
         guard: &'g Guard,
     ) -> Shared<'g, BinEntry<K, V>> {
-        match self.moved.load(Ordering::SeqCst, guard) {
-            s if s.is_null() => {
-                // if a BinEntry::Moved associated with this table does not yet exist,
-                // create one and store it in `self.moved`
-                self.moved
-                    .store(Owned::new(BinEntry::Moved(for_table)), Ordering::SeqCst);
-                self.moved.load(Ordering::SeqCst, guard)
+        match self.next_table(guard) {
+            t if t.is_null() => {
+                // if a no next table is yet associated with this table,
+                // create one and store it in `self.next_table`
+                match self.next_table.compare_and_set(
+                    Shared::null(),
+                    for_table,
+                    Ordering::SeqCst,
+                    guard,
+                ) {
+                    Ok(_) => {}
+                    Err(changed) => {
+                        assert!(!changed.current.is_null());
+                        assert_eq!(changed.current, for_table);
+                    }
+                }
             }
-            s => {
-                // safety: we only drop self.moved when we drop the table and
-                // it is not null, so until then it points to valid memory
-                if let BinEntry::Moved(ref table) = unsafe { s.deref() } {
-                    assert_eq!(for_table, *table);
-                    s
-                } else {
-                    unreachable!();
+            t => {
+                assert_eq!(t, for_table);
+            }
+        }
+        // return a shared pointer to BinEntry::Moved
+        self.moved.load(Ordering::SeqCst, guard)
+    }
+
+    pub(crate) fn find<'g, Q>(
+        &'g self,
+        bin: &BinEntry<K, V>,
+        hash: u64,
+        key: &Q,
+        guard: &'g Guard,
+    ) -> Shared<'g, BinEntry<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Eq,
+    {
+        match *bin {
+            BinEntry::Node(_) => {
+                let mut node = bin;
+                loop {
+                    let n = if let BinEntry::Node(ref n) = node {
+                        n
+                    } else {
+                        unreachable!("BinEntry::Node only points to BinEntry::Node");
+                    };
+
+                    if n.hash == hash && n.key.borrow() == key {
+                        return Shared::from(node as *const _);
+                    }
+                    let next = n.next.load(Ordering::SeqCst, guard);
+                    if next.is_null() {
+                        return Shared::null();
+                    }
+                    // safety: next will only be dropped, if bin are dropped. bin won't be dropped until
+                    // an epoch passes, which is protected by guard.
+                    node = unsafe { next.deref() };
+                }
+            }
+            BinEntry::Moved => {
+                // safety: `self` is a reference to the old table. We got that under the given Guard.
+                // Since we have not yet dropped that guard, _this_ table has not been garbage collected,
+                // and so the _later_ table in `next_table`, _definitely_ hasn't.
+                let mut table = unsafe { self.next_table(guard).deref() };
+
+                loop {
+                    if table.is_empty() {
+                        return Shared::null();
+                    }
+                    let bini = table.bini(hash);
+                    let bin = table.bin(bini, guard);
+                    if bin.is_null() {
+                        return Shared::null();
+                    }
+                    // safety: the table is protected by the guard, and so is the bin.
+                    let bin = unsafe { bin.deref() };
+
+                    match *bin {
+                        BinEntry::Node(_) => break table.find(bin, hash, key, guard),
+                        BinEntry::Moved => {
+                            // safety: same as above.
+                            table = unsafe { table.next_table(guard).deref() };
+                            continue;
+                        }
+                    }
                 }
             }
         }
@@ -79,7 +184,7 @@ impl<K, V> Table<K, V> {
             // safety: same as above
             let bin_entry = unsafe { bin.load(Ordering::SeqCst, guard).deref() };
             match *bin_entry {
-                BinEntry::Moved(_) => {}
+                BinEntry::Moved => {}
                 BinEntry::Node(_) => {
                     // safety: same as above + we own the bin - Node are not shared across the table
                     let mut p = unsafe { bin.into_owned() };
@@ -120,30 +225,44 @@ impl<K, V> Drop for Table<K, V> {
         // since BinEntry::Nodes are either dropped by drop_bins or transferred to a new table,
         // all bins are empty or contain a Shared pointing to shared the BinEntry::Moved (if
         // self.bins was not replaced by drop_bins anyway)
-        for bin in &self.bins[..] {
-            let bin = bin.swap(Shared::null(), Ordering::SeqCst, guard);
-            // TODO: do we need the safety check against moved or do we assume the above invariant here?
-            if bin.is_null() {
-                continue;
-            } else {
-                // safety: we have mut access to self, so no-one else will drop this value under us.
-                let bin = unsafe { bin.deref() };
-                if let BinEntry::Moved(_) = *bin {
+        let bins = Vec::from(std::mem::replace(&mut self.bins, vec![].into_boxed_slice()));
+
+        // when testing, we check the above invariant. in production, we assume it to be true
+        if cfg!(debug_assertions) {
+            for bin in bins.iter() {
+                let bin = bin.load(Ordering::SeqCst, guard);
+                if bin.is_null() {
+                    continue;
                 } else {
-                    unreachable!("dropped table with non-empty bin");
+                    // safety: we have mut access to self, so no-one else will drop this value under us.
+                    let bin = unsafe { bin.deref() };
+                    if let BinEntry::Moved = *bin {
+                    } else {
+                        unreachable!("dropped table with non-empty bin");
+                    }
                 }
             }
         }
 
-        // we need to drop the shared forwarding node if it exists (since it is heap allocated).
+        // as outlined above, at this point `bins` may still contain pointers to the shared
+        // forwarding node. dropping `bins` here makes sure there is no way to accidentally access
+        // the shared Moved after it gets dropped below.
+        drop(bins);
+
+        // we need to drop the shared forwarding node (since it is heap allocated).
         // Note that this needs to happen _independently_ of whether or not there was
         // a previous call to drop_bins.
         let moved = self.moved.swap(Shared::null(), Ordering::SeqCst, guard);
-        if !moved.is_null() {
-            // safety: we have mut access to self, so no-one else will drop this value under us.
-            let moved = unsafe { moved.into_owned() };
-            drop(moved);
-        }
+        assert!(
+            !moved.is_null(),
+            "self.moved is initialized together with the table"
+        );
+
+        // safety: we have mut access to self, so no-one else will drop this value under us.
+        let moved = unsafe { moved.into_owned() };
+        drop(moved);
+
+        // NOTE that the current table _is not_ responsible for `defer_destroy`ing the _next_ table
     }
 }
 
@@ -180,5 +299,10 @@ impl<K, V> Table<K, V> {
     #[inline]
     pub(crate) fn store_bin<P: Pointer<BinEntry<K, V>>>(&self, i: usize, new: P) {
         self.bins[i].store(new, Ordering::Release)
+    }
+
+    #[inline]
+    pub(crate) fn next_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
+        self.next_table.load(Ordering::SeqCst, guard)
     }
 }

@@ -328,7 +328,7 @@ where
         // swap happened, it must have happened _after_ we read. since we did the read while
         // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
         // are holding up by holding on to our guard).
-        let node = unsafe { bin.deref() }.find(h, key, guard);
+        let node = table.find(unsafe { bin.deref() }, h, key, guard);
         if node.is_null() {
             return None;
         }
@@ -472,8 +472,8 @@ where
             // Safety: node is a valid pointer because we checked
             // it in the above if stmt.
             match unsafe { raw_node.deref() } {
-                BinEntry::Moved(next_table) => {
-                    table = self.help_transfer(table, *next_table, guard);
+                BinEntry::Moved => {
+                    table = self.help_transfer(table, guard);
                     // start from the first bin again in the new table
                     idx = 0;
                 }
@@ -574,7 +574,7 @@ where
             //  3. if table is set by a Moved node (below) through help_transfer, it will _either_
             //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
             //     pointer from inside the Moved. to see that if a Moved(t) is _read_, then t must
-            //     still be valid, see the safety comment on BinEntry::Moved.
+            //     still be valid, see the safety comment on Table.next_table.
             let t = unsafe { table.deref() };
 
             let bini = t.bini(h);
@@ -612,8 +612,8 @@ where
             // are holding up by holding on to our guard).
             let key = &node.as_node().unwrap().key;
             match *unsafe { bin.deref() } {
-                BinEntry::Moved(next_table) => {
-                    table = self.help_transfer(table, next_table, guard);
+                BinEntry::Moved => {
+                    table = self.help_transfer(table, guard);
                 }
                 BinEntry::Node(ref head)
                     if no_replacement && head.hash == h && &head.key == key =>
@@ -781,7 +781,7 @@ where
             //  3. if table is set by a Moved node (below) through help_transfer, it will _either_
             //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
             //     pointer from inside the Moved. to see that if a Moved(t) is _read_, then t must
-            //     still be valid, see the safety comment on BinEntry::Moved.
+            //     still be valid, see the safety comment on Table.next_table.
             let t = unsafe { table.deref() };
 
             let bini = t.bini(h);
@@ -807,8 +807,8 @@ where
             // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
             // are holding up by holding on to our guard).
             match *unsafe { bin.deref() } {
-                BinEntry::Moved(next_table) => {
-                    table = self.help_transfer(table, next_table, guard);
+                BinEntry::Moved => {
+                    table = self.help_transfer(table, guard);
                 }
                 BinEntry::Node(ref head) => {
                     // bin is non-empty, need to link into it, so we must take the lock
@@ -947,19 +947,22 @@ where
     fn help_transfer<'g>(
         &'g self,
         table: Shared<'g, Table<K, V>>,
-        next_table: *const Table<K, V>,
         guard: &'g Guard,
     ) -> Shared<'g, Table<K, V>> {
-        if table.is_null() || next_table.is_null() {
+        if table.is_null() {
             return table;
         }
-
-        let next_table = Shared::from(next_table);
 
         // safety: table is only dropped on the next epoch change after it is swapped to null.
         // we read it as not null, so it must not be dropped until a subsequent epoch. since we
         // held `guard` at the time, we know that the current epoch continues to persist, and that
         // our reference is therefore valid.
+        let next_table = unsafe { table.deref() }.next_table(guard);
+        if next_table.is_null() {
+            return table;
+        }
+
+        // safety: same as above
         let rs = Self::resize_stamp(unsafe { table.deref() }.len()) << RESIZE_STAMP_SHIFT;
 
         while next_table == self.next_table.load(Ordering::SeqCst, guard)
@@ -1189,20 +1192,16 @@ where
             // are no longer active. these references are still active (marked by the guard), so
             // the target of these references won't be dropped while the guard remains active.
             let table = unsafe { table.deref() };
-            let next_table = unsafe { next_table.deref() };
 
             let bin = table.bin(i as usize, guard);
             if bin.is_null() {
                 advance = table
-                    .cas_bin(
-                        i,
-                        Shared::null(),
-                        table.get_moved(next_table as *const _, guard),
-                        guard,
-                    )
+                    .cas_bin(i, Shared::null(), table.get_moved(next_table, guard), guard)
                     .is_ok();
                 continue;
             }
+            // safety: as for table above
+            let next_table = unsafe { next_table.deref() };
 
             // safety: bin is a valid pointer.
             //
@@ -1219,7 +1218,7 @@ where
             // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
             // are holding up by holding on to our guard).
             match *unsafe { bin.deref() } {
-                BinEntry::Moved(_) => {
+                BinEntry::Moved => {
                     // already processed
                     advance = true;
                 }
@@ -1310,7 +1309,10 @@ where
 
                     next_table.store_bin(i, low_bin);
                     next_table.store_bin(i + n, high_bin);
-                    table.store_bin(i, table.get_moved(next_table as *const _, guard));
+                    table.store_bin(
+                        i,
+                        table.get_moved(Shared::from(next_table as *const _), guard),
+                    );
 
                     // everything up to last_run in the _old_ bin linked list is now garbage.
                     // those nodes have all been re-allocated in the new bin linked list.
@@ -1521,7 +1523,7 @@ where
             //
             //  2. if table is set by a Moved node (below) through help_transfer, it will use the
             //     `next_table` raw pointer from inside the Moved. to see that if a Moved(t) is
-            //     _read_, then t must still be valid, see the safety comment on BinEntry::Moved.
+            //     _read_, then t must still be valid, see the safety comment on Table.next_table.
             let t = unsafe { table.deref() };
             let n = t.len() as u64;
             if n == 0 {
@@ -1548,8 +1550,8 @@ where
             // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
             // are holding up by holding on to our guard).
             match *unsafe { bin.deref() } {
-                BinEntry::Moved(next_table) => {
-                    table = self.help_transfer(table, next_table, guard);
+                BinEntry::Moved => {
+                    table = self.help_transfer(table, guard);
                 }
                 BinEntry::Node(ref head) => {
                     let head_lock = head.lock.lock();
