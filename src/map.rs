@@ -210,11 +210,10 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, DefaultHashBuilder, epoch};
+    /// use flurry::{HashMap, DefaultHashBuilder};
     ///
-    /// let guard = epoch::pin();
     /// let map = HashMap::with_hasher(DefaultHashBuilder::default());
-    /// map.insert(1, 2, &guard);
+    /// map.pin().insert(1, 2);
     /// ```
     pub fn with_hasher(hash_builder: S) -> Self {
         Self {
@@ -284,11 +283,10 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, DefaultHashBuilder, epoch};
+    /// use flurry::{HashMap, DefaultHashBuilder};
     ///
-    /// let guard = epoch::pin();
     /// let map = HashMap::with_capacity_and_hasher(10, DefaultHashBuilder::default());
-    /// map.insert(1, 2, &guard);
+    /// map.pin().insert(1, 2);
     /// ```
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
         if capacity == 0 {
@@ -329,13 +327,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// let guard = epoch::pin();
-    /// map.insert(1, "a", &guard);
-    /// assert_eq!(map.contains_key(&1, &guard), true);
-    /// assert_eq!(map.contains_key(&2, &guard), false);
+    /// map.pin().insert(1, "a");
+    /// assert_eq!(map.pin().contains_key(&1), true);
+    /// assert_eq!(map.pin().contains_key(&2), false);
     /// ```
     pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
     where
@@ -412,13 +409,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// let guard = epoch::pin();
-    /// map.insert(1, "a", &guard);
-    /// assert_eq!(map.get(&1, &guard), Some(&"a"));
-    /// assert_eq!(map.get(&2, &guard), None);
+    /// map.pin().insert(1, "a");
+    /// assert_eq!(map.pin().get(&1), Some(&"a"));
+    /// assert_eq!(map.pin().get(&2), None);
     /// ```
     // TODO: implement a guard API of our own
     pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
@@ -455,7 +451,7 @@ where
     ///
     /// let map = HashMap::new();
     /// let guard = epoch::pin();
-    /// map.insert(1, 42, &guard);
+    /// map.pin().insert(1, 42);
     /// assert_eq!(map.get_and(&1, |num| num * 2, &guard), Some(84));
     /// assert_eq!(map.get_and(&8, |num| num * 2, &guard), None);
     /// ```
@@ -546,16 +542,15 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// let guard = epoch::pin();
-    /// assert_eq!(map.insert(37, "a", &guard), None);
-    /// assert_eq!(map.is_empty(), false);
+    /// assert_eq!(map.pin().insert(37, "a"), None);
+    /// assert_eq!(map.pin().is_empty(), false);
     ///
-    /// map.insert(37, "b", &guard);
-    /// assert_eq!(map.insert(37, "c", &guard), Some(&"b"));
-    /// assert_eq!(map.get(&37, &guard), Some(&"c"));
+    /// map.pin().insert(37, "b");
+    /// assert_eq!(map.pin().insert(37, "c"), Some(&"b"));
+    /// assert_eq!(map.pin().get(&37), Some(&"c"));
     /// ```
     ///
     /// # Notes
@@ -577,14 +572,13 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// let guard = epoch::pin();
     ///
-    /// map.insert(1, "a", &guard);
-    /// map.clear(&guard);
-    /// assert!(map.is_empty());
+    /// map.pin().insert(1, "a");
+    /// map.pin().clear();
+    /// assert!(map.pin().is_empty());
     /// ```
     pub fn clear(&self, guard: &Guard) {
         // Negative number of deletions
@@ -1601,12 +1595,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map: HashMap<&str, i32> = HashMap::new();
-    /// let guard = epoch::pin();
     ///
-    /// map.reserve(10, &guard);
+    /// map.pin().reserve(10);
     /// ```
     ///
     /// # Note
@@ -1632,13 +1625,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// let guard = epoch::pin();
-    /// map.insert(1, "a", &guard);
-    /// assert_eq!(map.remove(&1, &guard), Some(&"a"));
-    /// assert_eq!(map.remove(&1, &guard), None);
+    /// map.pin().insert(1, "a");
+    /// assert_eq!(map.pin().remove(&1), Some(&"a"));
+    /// assert_eq!(map.pin().remove(&1), None);
     /// ```
     pub fn remove<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
     where
@@ -1825,16 +1817,15 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// let guard = epoch::pin();
     ///
     /// for i in 0..8 {
-    ///     map.insert(i, i*10, &guard);
+    ///     map.pin().insert(i, i*10);
     /// }
-    /// map.retain(|&k, _| k % 2 == 0, &guard);
-    /// assert_eq!(map.len(), 4);
+    /// map.pin().retain(|&k, _| k % 2 == 0);
+    /// assert_eq!(map.pin().len(), 4);
     /// ```
     ///
     /// # Note
@@ -1863,16 +1854,15 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// let guard = epoch::pin();
     ///
     /// for i in 0..8 {
-    ///     map.insert(i, i*10, &guard);
+    ///     map.pin().insert(i, i*10);
     /// }
-    /// map.retain_force(|&k, _| k % 2 == 0, &guard);
-    /// assert_eq!(map.len(), 4);
+    /// map.pin().retain_force(|&k, _| k % 2 == 0);
+    /// assert_eq!(map.pin().len(), 4);
     /// ```
     ///
     /// # Note
@@ -1932,14 +1922,13 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// let guard = epoch::pin();
     ///
-    /// map.insert(1, "a", &guard);
-    /// map.insert(2, "b", &guard);
-    /// assert!(map.len() == 2);
+    /// map.pin().insert(1, "a");
+    /// map.pin().insert(2, "b");
+    /// assert!(map.pin().len() == 2);
     /// ```
     pub fn len(&self) -> usize {
         self.count.load(Ordering::Relaxed)
@@ -1967,13 +1956,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, epoch};
+    /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// assert!(map.is_empty());
-    /// let guard = epoch::pin();
-    /// map.insert("a", 1, &guard);
-    /// assert!(!map.is_empty());
+    /// assert!(map.pin().is_empty());
+    /// map.pin().insert("a", 1);
+    /// assert!(!map.pin().is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
         self.len() == 0
