@@ -210,8 +210,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, DefaultHashBuilder};
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, DefaultHashBuilder, epoch};
     ///
     /// let guard = epoch::pin();
     /// let map = HashMap::with_hasher(DefaultHashBuilder::default());
@@ -285,8 +284,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, DefaultHashBuilder};
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, DefaultHashBuilder, epoch};
     ///
     /// let guard = epoch::pin();
     /// let map = HashMap::with_capacity_and_hasher(10, DefaultHashBuilder::default());
@@ -331,8 +329,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map = HashMap::new();
     /// let guard = epoch::pin();
@@ -415,8 +412,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map = HashMap::new();
     /// let guard = epoch::pin();
@@ -455,8 +451,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map = HashMap::new();
     /// let guard = epoch::pin();
@@ -551,8 +546,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map = HashMap::new();
     /// let guard = epoch::pin();
@@ -583,8 +577,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map = HashMap::new();
     /// let guard = epoch::pin();
@@ -1608,8 +1601,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map: HashMap<&str, i32> = HashMap::new();
     /// let guard = epoch::pin();
@@ -1640,8 +1632,7 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map = HashMap::new();
     /// let guard = epoch::pin();
@@ -1834,8 +1825,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map = HashMap::new();
     /// let guard = epoch::pin();
@@ -1924,8 +1914,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map = HashMap::new();
     /// let guard = epoch::pin();
@@ -1960,8 +1949,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use flurry::HashMap;
-    /// use crossbeam_epoch as epoch;
+    /// use flurry::{HashMap, epoch};
     ///
     /// let map = HashMap::new();
     /// assert!(map.is_empty());
