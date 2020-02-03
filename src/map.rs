@@ -574,7 +574,7 @@ where
 
     /// Clears the map, removing all key-value pairs.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use flurry::{HashMap, epoch};
@@ -1822,7 +1822,7 @@ where
     ///
     /// In other words, remove all pairs `(k, v)` such that `f(&k,&v)` returns `false`.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use flurry::{HashMap, epoch};
@@ -1911,7 +1911,7 @@ where
     #[inline]
     /// Returns the number of entries in the map.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use flurry::{HashMap, epoch};
@@ -1946,7 +1946,7 @@ where
     #[inline]
     /// Returns `true` if the map is empty. Otherwise returns `false`.
     ///
-    /// # Example
+    /// # Examples
     ///
     /// ```
     /// use flurry::{HashMap, epoch};
