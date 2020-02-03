@@ -80,7 +80,7 @@
 //! and to support high initial insertion rates on an empty table by many threads.
 //!
 //! This map usually acts as a binned (bucketed) hash table.  Each key-value mapping is held in a
-//! `BinEntry.  Most nodes are of type `BinEntry::Node` with hash, key, value, and a `next` field.
+//! `BinEntry`.  Most nodes are of type `BinEntry::Node` with hash, key, value, and a `next` field.
 //!  However, some nodes are of type `BinEntry::Moved`; these "forwarding nodes" are placed at the
 //!  heads of bins during resizing. The Java version also has other special node types, but these
 //!  have not yet been implemented in this port. These special nodes are all either uncommon or
