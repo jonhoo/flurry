@@ -55,11 +55,15 @@
 //! operation. When possible, it is a good idea to provide a size estimate by using the
 //! [`with_capacity`](HashMap::with_capacity) constructor. Note that using many keys with
 //! exactly the same [`Hash`](std::hash::Hash) value is a sure way to slow down performance of any
-//! hash table. /* TODO: dynamic load factor */
+//! hash table.
 //!
-//! /* TODO: set projection */
-//! /* TODO: frequency map through computeIfAbsent */
-//! /* TODO: bulk operations like forEach, search, and reduce */
+//! TODO: dynamic load factor
+//!
+//! TODO: set projection
+//!
+//! TODO: frequency map through computeIfAbsent
+//!
+//! TODO: bulk operations like forEach, search, and reduce
 //!
 //! # Implementation notes
 //!
@@ -81,7 +85,8 @@
 //!  heads of bins during resizing. The Java version also has other special node types, but these
 //!  have not yet been implemented in this port. These special nodes are all either uncommon or
 //!  transient.
-//! /* TODO: TreeNodes, ReservationNodes */
+//!
+//! TODO: TreeNodes, ReservationNodes
 //!
 //! The table is lazily initialized to a power-of-two size upon the first insertion.  Each bin in
 //! the table normally contains a list of nodes (most often, the list has only zero or one
@@ -146,7 +151,8 @@
 //! Upon transfer, the old table bin contains only a special forwarding node (`BinEntry::Moved`)
 //! that contains the next table as its key. On encountering a forwarding node, access and update
 //! operations restart, using the new table.
-//! /* TODO: note on TreeBins */
+//!
+//! TODO: note on TreeBins
 //!
 //! Each bin transfer requires its bin lock, which can stall waiting for locks while resizing.
 //! However, because other threads can join in and help resize rather than contend for locks,
@@ -164,6 +170,7 @@
 //!
 //! /*
 //! TODO:
+//!
 //! Lazy table initialization minimizes footprint until first use, and also avoids resizings when
 //! the first operation is from a `from_iter`, `From::from`, or deserialization. These cases
 //! attempt to override the initial capacity settings, but harmlessly fail to take effect in cases
@@ -171,7 +178,8 @@
 //! */
 //!
 //! /*
-//! TODO
+//! TODO:
+//!
 //! The element count is maintained using a specialization of LongAdder. We need to incorporate a
 //! specialization rather than just use a LongAdder in order to access implicit contention-sensing
 //! that leads to creation of multiple CounterCells.  The counter mechanics avoid contention on
@@ -182,7 +190,9 @@
 //! after resizing, many fewer do so).
 //! */
 //!
-//! /* TODO: TreeBins comparisons and locking */
+//! /* TODO:
+//!
+//! TreeBins comparisons and locking */
 //!
 //! ## Garbage collection
 //!
