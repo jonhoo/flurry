@@ -578,7 +578,21 @@ where
         self.put(key, value, false, guard)
     }
 
-    /// Removes all entries from this map.
+    /// Clears the map, removing all key-value pairs.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use crossbeam_epoch as epoch;
+    ///
+    /// let map = HashMap::new();
+    /// let guard = epoch::pin();
+    ///
+    /// map.insert(1, "a", &guard);
+    /// map.clear(&guard);
+    /// assert!(map.is_empty());
+    /// ```
     pub fn clear(&self, guard: &Guard) {
         // Negative number of deletions
         let mut delta = 0;
