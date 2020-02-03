@@ -27,8 +27,22 @@ crossbeam-epoch = "0.9"
 parking_lot = "0.10"
 num_cpus = "1.12.0"
 
+[dependencies.ahash]
+version = "0.3.2"
+default-features = false
+
 [dev-dependencies]
 rand = "0.7"
+rayon = "1.3"
+criterion = "0.3"
+
+[[bench]]
+name = "flurry_dashmap" 
+harness = false
+
+[[bench]]
+name = "flurry_hashbrown" 
+harness = false
 
 [patch.crates-io]
 crossbeam-epoch = { git = "https://github.com/cynecx/crossbeam.git", branch = "fix-unsoundness" }

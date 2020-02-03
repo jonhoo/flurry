@@ -8,6 +8,21 @@ fn new() {
 }
 
 #[test]
+fn clear() {
+    let map = HashMap::<usize, usize>::new();
+    let guard = epoch::pin();
+    {
+        map.insert(0, 1, &guard);
+        map.insert(1, 1, &guard);
+        map.insert(2, 1, &guard);
+        map.insert(3, 1, &guard);
+        map.insert(4, 1, &guard);
+    }
+    map.clear(&guard);
+    assert!(map.is_empty());
+}
+
+#[test]
 fn insert() {
     let map = HashMap::<usize, usize>::new();
     let guard = epoch::pin();
@@ -165,6 +180,48 @@ fn update() {
 }
 
 #[test]
+fn compute_if_present() {
+    let map = HashMap::<usize, usize>::new();
+
+    let guard = epoch::pin();
+    map.insert(42, 0, &guard);
+    let new = map.compute_if_present(&42, |_, v| Some(v + 1), &guard);
+    assert_eq!(new, Some(&1));
+    {
+        let guard = epoch::pin();
+        let e = map.get(&42, &guard).unwrap();
+        assert_eq!(e, &1);
+    }
+}
+
+#[test]
+fn compute_if_present_empty() {
+    let map = HashMap::<usize, usize>::new();
+
+    let guard = epoch::pin();
+    let new = map.compute_if_present(&42, |_, v| Some(v + 1), &guard);
+    assert!(new.is_none());
+    {
+        let guard = epoch::pin();
+        assert!(map.get(&42, &guard).is_none());
+    }
+}
+
+#[test]
+fn compute_if_present_remove() {
+    let map = HashMap::<usize, usize>::new();
+
+    let guard = epoch::pin();
+    map.insert(42, 0, &guard);
+    let new = map.compute_if_present(&42, |_, _| None, &guard);
+    assert!(new.is_none());
+    {
+        let guard = epoch::pin();
+        assert!(map.get(&42, &guard).is_none());
+    }
+}
+
+#[test]
 fn concurrent_insert() {
     let map = Arc::new(HashMap::<usize, usize>::new());
 
@@ -231,6 +288,89 @@ fn concurrent_remove() {
     let guard = epoch::pin();
     for i in 0..64 {
         assert!(map.get(&i, &guard).is_none());
+    }
+}
+
+#[test]
+fn concurrent_compute_if_present() {
+    let map = Arc::new(HashMap::<usize, usize>::new());
+
+    {
+        let guard = epoch::pin();
+        for i in 0..64 {
+            map.insert(i, i, &guard);
+        }
+    }
+
+    let map1 = map.clone();
+    let t1 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        for i in 0..64 {
+            let new = map1.compute_if_present(&i, |_, _| None, &guard);
+            assert!(new.is_none());
+        }
+    });
+    let map2 = map.clone();
+    let t2 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        for i in 0..64 {
+            let new = map2.compute_if_present(&i, |_, _| None, &guard);
+            assert!(new.is_none());
+        }
+    });
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    // after joining the threads, the map should be empty
+    let guard = epoch::pin();
+    for i in 0..64 {
+        assert!(map.get(&i, &guard).is_none());
+    }
+}
+
+#[test]
+fn concurrent_resize_and_get() {
+    let map = Arc::new(HashMap::<usize, usize>::new());
+    {
+        let guard = epoch::pin();
+        for i in 0..1024 {
+            map.insert(i, i, &guard);
+        }
+    }
+
+    let map1 = map.clone();
+    // t1 is using reserve to trigger a bunch of resizes
+    let t1 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        // there should be 2 ** 10 capacity already, so trigger additional resizes
+        for power in 11..16 {
+            map1.reserve(1 << power, &guard);
+        }
+    });
+    let map2 = map.clone();
+    // t2 is retrieving existing keys a lot, attempting to encounter a BinEntry::Moved
+    let t2 = std::thread::spawn(move || {
+        let guard = epoch::pin();
+        for _ in 0..32 {
+            for i in 0..1024 {
+                let v = map2.get(&i, &guard).unwrap();
+                assert_eq!(v, &i);
+            }
+        }
+    });
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    // make sure all the entries still exist after all the resizes
+    {
+        let guard = epoch::pin();
+
+        for i in 0..1024 {
+            let v = map.get(&i, &guard).unwrap();
+            assert_eq!(v, &i);
+        }
     }
 }
 
@@ -368,7 +508,7 @@ fn get_and() {
     let guard = epoch::pin();
     map.insert(42, 32, &guard);
 
-    assert_eq!(map.get_and(&42, |value| *value + 10), Some(42));
+    assert_eq!(map.get_and(&42, |value| *value + 10, &guard), Some(42));
 }
 
 #[test]
@@ -448,47 +588,53 @@ fn from_iter_empty() {
 
 #[test]
 fn retain_empty() {
+    let guard = epoch::pin();
     let map = HashMap::<&'static str, u32>::new();
-    map.retain(|_, _| false);
+    map.retain(|_, _| false, &guard);
     assert_eq!(map.len(), 0);
 }
 
 #[test]
 fn retain_all_false() {
+    let guard = epoch::pin();
     let map: HashMap<u32, u32> = (0..10 as u32).map(|x| (x, x)).collect();
-    map.retain(|_, _| false);
+    map.retain(|_, _| false, &guard);
     assert_eq!(map.len(), 0);
 }
 
 #[test]
 fn retain_all_true() {
     let size = 10usize;
+    let guard = epoch::pin();
     let map: HashMap<usize, usize> = (0..size).map(|x| (x, x)).collect();
-    map.retain(|_, _| true);
+    map.retain(|_, _| true, &guard);
     assert_eq!(map.len(), size);
 }
 
 #[test]
 fn retain_some() {
+    let guard = epoch::pin();
     let map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
     let expected_map: HashMap<u32, u32> = (5..10).map(|x| (x, x)).collect();
-    map.retain(|_, v| *v >= 5);
+    map.retain(|_, v| *v >= 5, &guard);
     assert_eq!(map.len(), 5);
     assert_eq!(map, expected_map);
 }
 
 #[test]
 fn retain_force_empty() {
+    let guard = epoch::pin();
     let map = HashMap::<&'static str, u32>::new();
-    map.retain_force(|_, _| false);
+    map.retain_force(|_, _| false, &guard);
     assert_eq!(map.len(), 0);
 }
 
 #[test]
 fn retain_force_some() {
+    let guard = epoch::pin();
     let map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
     let expected_map: HashMap<u32, u32> = (5..10).map(|x| (x, x)).collect();
-    map.retain_force(|_, v| *v >= 5);
+    map.retain_force(|_, v| *v >= 5, &guard);
     assert_eq!(map.len(), 5);
     assert_eq!(map, expected_map);
 }
