@@ -1858,7 +1858,25 @@ where
 
     /// Retains only the elements specified by the predicate.
     ///
-    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    /// In other words, remove all pairs `(k, v)` such that `f(&k,&v)` returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::{HashMap, epoch};
+    ///
+    /// let map = HashMap::new();
+    /// let guard = epoch::pin();
+    ///
+    /// for i in 0..8 {
+    ///     map.insert(i, i*10, &guard);
+    /// }
+    /// map.retain_force(|&k, _| k % 2 == 0, &guard);
+    /// assert_eq!(map.len(), 4);
+    /// ```
+    ///
+    /// # Note
+    ///
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
     /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
