@@ -1,8 +1,6 @@
 use crate::raw::Table;
-use crossbeam_epoch::{Atomic, Guard, Shared};
+use crossbeam_epoch::Atomic;
 use parking_lot::Mutex;
-use std::borrow::Borrow;
-use std::sync::atomic::Ordering;
 
 /// Entry in a bin.
 ///
@@ -10,37 +8,7 @@ use std::sync::atomic::Ordering;
 #[derive(Debug)]
 pub(crate) enum BinEntry<K, V> {
     Node(Node<K, V>),
-    // safety: the pointer t to the next table inside Moved(t) is a valid pointer if the Moved(t)
-    // entry was read after loading `map::HashMap.table` while the guard used to load that table is
-    // still alive:
-    //
-    // When loading the current table of the HashMap with a guard g, the current epoch will be
-    // pinned by g. This happens _before_ the resize which put the Moved entry into the current
-    // table finishes, as otherwise a different table would have been loaded (see
-    // `map::HashMap::transfer`).
-    //
-    // Hence, for the Moved(t) read from the loaded table:
-    //
-    //   - When trying to access t during the current resize, t points to map::HashMap.next_table
-    //     and is thus valid.
-    //
-    //   - After the current resize and before another resize, `t == map::HashMap.table` as the
-    //     "next table" t pointed to during the resize has become the current table. Thus t is
-    //     still valid.
-    //
-    //   - The above is true until a subsequent resize ends, at which point `map::HashMap.table´ is
-    //     set to another new table != t and t is `epoch::Guard::defer_destroy`ed (again, see
-    //     `map::HashMap::transfer`). At this point, t is not referenced by the map anymore.
-    //     However, the guard g used to load the table is still pinning the epoch at the time of
-    //     the call to `defer_destroy`. Thus, t remains valid for at least the lifetime of g.
-    //
-    //   - After releasing g, either the current resize is finished and operations on the map
-    //     cannot access t anymore as a more recent table will be loaded as the current table
-    //     (see once again `map::HashMap::transfer`), or the argument is as above.
-    //
-    // Since finishing a resize is the only time a table is `defer_destroy`ed, the above covers
-    // all cases.
-    Moved(*const Table<K, V>),
+    Moved,
 }
 
 unsafe impl<K, V> Send for BinEntry<K, V>
@@ -71,72 +39,6 @@ impl<K, V> BinEntry<K, V> {
     }
 }
 
-impl<K, V> BinEntry<K, V> {
-    pub(crate) fn find<'g, Q>(
-        &'g self,
-        hash: u64,
-        key: &Q,
-        guard: &'g Guard,
-    ) -> Shared<'g, BinEntry<K, V>>
-    where
-        K: Borrow<Q>,
-        Q: ?Sized + Eq,
-    {
-        match *self {
-            BinEntry::Node(_) => {
-                let mut node = self;
-                loop {
-                    let n = if let BinEntry::Node(ref n) = node {
-                        n
-                    } else {
-                        unreachable!();
-                    };
-
-                    if n.hash == hash && n.key.borrow() == key {
-                        return Shared::from(node as *const _);
-                    }
-                    let next = n.next.load(Ordering::SeqCst, guard);
-                    if next.is_null() {
-                        return Shared::null();
-                    }
-                    // safety: next will only be dropped, if we are dropped. we won't be dropped until epoch
-                    // passes, which is protected by guard.
-                    node = unsafe { next.deref() };
-                }
-            }
-            BinEntry::Moved(next_table) => {
-                // safety: We have a reference to the old table, otherwise we wouldn't have a reference to
-                // self. We got that under the given Guard. Since we have not yet dropped that
-                // guard, _this_ table has not been garbage collected, and so the _later_ table in
-                // next_table, _definitely_ hasn't.
-                let mut table = unsafe { &*next_table };
-
-                loop {
-                    if table.is_empty() {
-                        return Shared::null();
-                    }
-                    let bini = table.bini(hash);
-                    let bin = table.bin(bini, guard);
-                    if bin.is_null() {
-                        return Shared::null();
-                    }
-                    // safety: the table is protected by the guard, and so is the bin.
-                    let bin = unsafe { bin.deref() };
-
-                    match *bin {
-                        BinEntry::Node(_) => break bin.find(hash, key, guard),
-                        BinEntry::Moved(next_table) => {
-                            // safety: same as above.
-                            table = unsafe { &*next_table };
-                            continue;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 /// Key-value entry.
 #[derive(Debug)]
 pub(crate) struct Node<K, V> {
@@ -151,6 +53,7 @@ pub(crate) struct Node<K, V> {
 mod tests {
     use super::*;
     use crossbeam_epoch::Owned;
+    use std::sync::atomic::Ordering;
 
     fn new_node(hash: u64, key: usize, value: usize) -> Node<usize, usize> {
         Node {
@@ -162,16 +65,6 @@ mod tests {
         }
     }
 
-    fn drop_entry(entry: BinEntry<usize, usize>) {
-        // currently bins don't handle dropping their
-        // own values the Table is responsible. This
-        // makes use of the tables implementation for
-        // convenience in the unit test
-        let mut table = Table::<usize, usize>::new(1);
-        table.store_bin(0, Owned::new(entry));
-        table.drop_bins();
-    }
-
     #[test]
     fn find_node_no_match() {
         let guard = &crossbeam_epoch::pin();
@@ -179,23 +72,28 @@ mod tests {
         let entry2 = BinEntry::Node(node2);
         let node1 = new_node(1, 2, 3);
         node1.next.store(Owned::new(entry2), Ordering::SeqCst);
-        let entry1 = BinEntry::Node(node1);
-        assert!(entry1.find(1, &0, guard).is_null());
-        drop_entry(entry1);
+        let entry1 = Owned::new(BinEntry::Node(node1)).into_shared(guard);
+        let mut tab = Table::from(vec![Atomic::from(entry1)]);
+
+        // safety: we have not yet dropped entry1
+        assert!(tab.find(unsafe { entry1.deref() }, 1, &0, guard).is_null());
+        tab.drop_bins();
     }
 
     #[test]
     fn find_node_single_match() {
         let guard = &crossbeam_epoch::pin();
-        let entry = BinEntry::Node(new_node(1, 2, 3));
+        let entry = Owned::new(BinEntry::Node(new_node(1, 2, 3))).into_shared(guard);
+        let mut tab = Table::from(vec![Atomic::from(entry)]);
         assert_eq!(
-            unsafe { entry.find(1, &2, guard).deref() }
+            // safety: we have not yet dropped entry
+            unsafe { tab.find(entry.deref(), 1, &2, guard).deref() }
                 .as_node()
                 .unwrap()
                 .key,
             2
         );
-        drop_entry(entry);
+        tab.drop_bins();
     }
 
     #[test]
@@ -205,56 +103,84 @@ mod tests {
         let entry2 = BinEntry::Node(node2);
         let node1 = new_node(1, 2, 3);
         node1.next.store(Owned::new(entry2), Ordering::SeqCst);
-        let entry1 = BinEntry::Node(node1);
+        let entry1 = Owned::new(BinEntry::Node(node1)).into_shared(guard);
+        let mut tab = Table::from(vec![Atomic::from(entry1)]);
         assert_eq!(
-            unsafe { entry1.find(4, &5, guard).deref() }
+            // safety: we have not yet dropped entry1
+            unsafe { tab.find(entry1.deref(), 4, &5, guard).deref() }
                 .as_node()
                 .unwrap()
                 .key,
             5
         );
-        drop_entry(entry1);
+        tab.drop_bins();
     }
 
     #[test]
     fn find_moved_empty_bins_no_match() {
         let guard = &crossbeam_epoch::pin();
-        let table = &Table::<usize, usize>::new(1);
-        let entry = BinEntry::<usize, usize>::Moved(table as *const _);
-        assert!(entry.find(1, &2, guard).is_null());
+        let mut table = Table::<usize, usize>::new(1);
+        let mut table2 = Owned::new(Table::new(1)).into_shared(guard);
+
+        let entry = table.get_moved(table2, guard);
+        table.store_bin(0, entry);
+        assert!(table.find(&BinEntry::Moved, 1, &2, guard).is_null());
+        table.drop_bins();
+        // safety: table2 is still valid and not accessed by different threads
+        unsafe { table2.deref_mut() }.drop_bins();
+        unsafe { guard.defer_destroy(table2) };
     }
 
     #[test]
     fn find_moved_no_bins_no_match() {
         let guard = &crossbeam_epoch::pin();
-        let table = &Table::<usize, usize>::new(0);
-        let entry = BinEntry::<usize, usize>::Moved(table as *const _);
-        assert!(entry.find(1, &2, guard).is_null());
+        let mut table = Table::<usize, usize>::new(1);
+        let mut table2 = Owned::new(Table::new(0)).into_shared(guard);
+        let entry = table.get_moved(table2, guard);
+        table.store_bin(0, entry);
+        assert!(table.find(&BinEntry::Moved, 1, &2, guard).is_null());
+        table.drop_bins();
+        // safety: table2 is still valid and not accessed by different threads
+        unsafe { table2.deref_mut() }.drop_bins();
+        unsafe { guard.defer_destroy(table2) };
     }
 
     #[test]
     fn find_moved_null_bin_no_match() {
         let guard = &crossbeam_epoch::pin();
-        let table = &mut Table::<usize, usize>::new(2);
-        table.store_bin(1, Owned::new(BinEntry::Node(new_node(1, 2, 3))));
-        let entry = BinEntry::<usize, usize>::Moved(table as *const _);
-        assert!(entry.find(0, &1, guard).is_null());
+        let mut table = Table::<usize, usize>::new(1);
+        let mut table2 = Owned::new(Table::new(2)).into_shared(guard);
+        unsafe { table2.deref() }.store_bin(0, Owned::new(BinEntry::Node(new_node(1, 2, 3))));
+        let entry = table.get_moved(table2, guard);
+        table.store_bin(0, entry);
+        assert!(table.find(&BinEntry::Moved, 0, &1, guard).is_null());
         table.drop_bins();
+        // safety: table2 is still valid and not accessed by different threads
+        unsafe { table2.deref_mut() }.drop_bins();
+        unsafe { guard.defer_destroy(table2) };
     }
 
     #[test]
     fn find_moved_match() {
         let guard = &crossbeam_epoch::pin();
-        let table = &mut Table::<usize, usize>::new(1);
-        table.store_bin(0, Owned::new(BinEntry::Node(new_node(1, 2, 3))));
-        let entry = BinEntry::<usize, usize>::Moved(table as *const _);
+        let mut table = Table::<usize, usize>::new(1);
+        let mut table2 = Owned::new(Table::new(1)).into_shared(guard);
+        // safety: table2 is still valid
+        unsafe { table2.deref() }.store_bin(0, Owned::new(BinEntry::Node(new_node(1, 2, 3))));
+        let entry = table.get_moved(table2, guard);
+        table.store_bin(0, entry);
         assert_eq!(
-            unsafe { entry.find(1, &2, guard).deref() }
+            // safety: entry is still valid since the table was not dropped and the
+            // entry was not removed
+            unsafe { table.find(&BinEntry::Moved, 1, &2, guard).deref() }
                 .as_node()
                 .unwrap()
                 .key,
             2
         );
         table.drop_bins();
+        // safety: table2 is still valid and not accessed by different threads
+        unsafe { table2.deref_mut() }.drop_bins();
+        unsafe { guard.defer_destroy(table2) };
     }
 }

@@ -148,10 +148,10 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
                 // safety: flurry does not drop or move until after guard drop
                 let bin = unsafe { bin.deref() };
                 match bin {
-                    BinEntry::Moved(next_table) => {
+                    BinEntry::Moved => {
                         // recurse down into the target table
-                        // safety: same argument as for following Moved in BinEntry::find
-                        self.table = Some(unsafe { &**next_table });
+                        // safety: same argument as for following Moved in Table::find
+                        self.table = Some(unsafe { t.next_table(self.guard).deref() });
                         self.prev = None;
                         // make sure we can get back "up" to where we're at
                         self.push_state(t, i, n);
@@ -248,15 +248,22 @@ mod tests {
             next: Atomic::null(),
             lock: Mutex::new(()),
         }));
-        let mut deep_table = Owned::new(Table::from(deep_bins));
-        // construct the forwarded-from table
-        let mut bins = vec![Atomic::null(); 16];
-        for bin in &mut bins[8..] {
-            *bin = Atomic::new(BinEntry::Moved(&*deep_table as *const _));
-        }
-        let table = Owned::new(Table::<usize, usize>::from(bins));
         let guard = epoch::pin();
-        let table = table.into_shared(&guard);
+        let deep_table = Owned::new(Table::from(deep_bins)).into_shared(&guard);
+
+        // construct the forwarded-from table
+        let mut bins = vec![Shared::null(); 16];
+        let table = Table::<usize, usize>::new(bins.len());
+        for bin in &mut bins[8..] {
+            // this also sets table.next_table to deep_table
+            *bin = table.get_moved(deep_table, &guard);
+        }
+        // this cannot use Table::from(bins), since we need the table to get
+        // the Moved and set its next_table
+        for i in 0..bins.len() {
+            table.store_bin(i, bins[i]);
+        }
+        let table = Owned::new(table).into_shared(&guard);
         {
             let mut iter = NodeIter::new(table, &guard);
             let e = iter.next().unwrap();
@@ -267,6 +274,7 @@ mod tests {
         // safety: nothing holds on to references into the table any more
         let mut t = unsafe { table.into_owned() };
         t.drop_bins();
-        deep_table.drop_bins();
+        // no one besides this test case uses deep_table
+        unsafe { deep_table.into_owned() }.drop_bins();
     }
 }
