@@ -210,13 +210,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::HashMap;
+    /// use flurry::{HashMap, DefaultHashBuilder};
     /// use crossbeam_epoch as epoch;
-    /// use std::collections::hash_map::RandomState;
     ///
-    /// let s = RandomState::new();
     /// let guard = epoch::pin();
-    /// let map = HashMap::with_hasher(s);
+    /// let map = HashMap::with_hasher(DefaultHashBuilder::default());
     /// map.insert(1, 2, &guard);
     /// ```
     pub fn with_hasher(hash_builder: S) -> Self {
@@ -287,13 +285,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::HashMap;
+    /// use flurry::{HashMap, DefaultHashBuilder};
     /// use crossbeam_epoch as epoch;
-    /// use std::collections::hash_map::RandomState;
     ///
-    /// let s = RandomState::new();
     /// let guard = epoch::pin();
-    /// let map = HashMap::with_capacity_and_hasher(10, s);
+    /// let map = HashMap::with_capacity_and_hasher(10, DefaultHashBuilder::default());
     /// map.insert(1, 2, &guard);
     /// ```
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
