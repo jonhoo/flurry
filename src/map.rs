@@ -57,10 +57,7 @@ macro_rules! load_factor {
 ///
 /// Flurry uses an [`Guards`] to control the lifetime of the resources
 /// that get stored and extracted from the map.
-///
-/// [`Guards`] are acquired through the [`epoch::pin`], [`HashMap::pin`] and
-/// [`HashMap::guard`] functions.
-///
+/// [`Guards`] are acquired through the [`epoch::pin`], [`HashMap::pin`] and [`HashMap::guard`] functions.
 /// For more information, see the [`notes in the crate-level
 /// documentation`].
 ///
@@ -304,7 +301,7 @@ where
     /// use flurry::HashMap;
     /// use std::collections::hash_map::RandomState;
     ///
-    ///let s = RandomState::new();
+    /// let s = RandomState::new();
     /// let map = HashMap::with_capacity_and_hasher(10, s);
     /// map.pin().insert(1, 2);
     /// ```
@@ -1881,7 +1878,6 @@ where
     /// ```
     ///
     /// # Notes
-    ///
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
     /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
