@@ -577,16 +577,6 @@ where
     /// assert_eq!(mref.insert(37, "c"), Some(&"b"));
     /// assert_eq!(mref.get(&37), Some(&"c"));
     /// ```
-    ///
-    /// # Notes
-    ///
-    /// Flurry uses an [`epoch::pin`] to control the lifetime of the resources
-    /// that get extracted from the map.
-    ///
-    /// For more information, see the [`epoch::pin`] notes in the crate-level
-    /// documentation.
-    ///
-    /// [`epoch::pin`]: index.html#a-note-on-guard-and-memory-use
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.check_guard(guard);
         self.put(key, value, false, guard)
@@ -1910,8 +1900,6 @@ where
 
     /// An iterator visiting all key-value pairs in arbitrary order.
     /// The iterator element type is `(&'g K, &'g V)`.
-    ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
     pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V> {
         self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
@@ -1921,8 +1909,6 @@ where
 
     /// An iterator visiting all keys in arbitrary order.
     /// The iterator element type is `&'g K`.
-    ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
     pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V> {
         self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
@@ -1932,8 +1918,6 @@ where
 
     /// An iterator visiting all values in arbitrary order.
     /// The iterator element type is `&'g V`.
-    ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
     pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V> {
         self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
