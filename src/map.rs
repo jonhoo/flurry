@@ -175,7 +175,6 @@ where
         Self::default()
     }
 
-    /// If `capacity` is 0, the hash map will not allocate
     /// Creates an empty `HashMap` with the specified capacity.
     ///
     /// The hash map will be able to hold at least `capacity` elements without
