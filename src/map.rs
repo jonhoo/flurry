@@ -186,6 +186,15 @@ where
     /// use flurry::HashMap;
     /// let map: HashMap<&str, i32> = HashMap::with_capacity(10);
     /// ```
+    ///
+    /// # Notes
+    ///
+    /// There is no guarantee that the HashMap will not resize if `capacity`
+    /// elements are inserted. The map will resize based on key collision, so
+    /// bad key distribution may cause a resize before `capacity` is reached.
+    /// For more information see the [`resizing behavior`]
+    ///
+    /// [`resizing behavior`]: index.html#resizing-behavior
     pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
     }
