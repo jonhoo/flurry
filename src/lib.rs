@@ -55,12 +55,17 @@
 //! operation. When possible, it is a good idea to provide a size estimate by using the
 //! [`with_capacity`](HashMap::with_capacity) constructor. Note that using many keys with
 //! exactly the same [`Hash`](std::hash::Hash) value is a sure way to slow down performance of any
-//! hash table. /* TODO: dynamic load factor */
+//! hash table.
 //!
-//! /* TODO: set projection */
-//! /* TODO: frequency map through computeIfAbsent */
-//! /* TODO: bulk operations like forEach, search, and reduce */
+/*
+//! TODO: dynamic load factor
 //!
+//! TODO: set projection
+//!
+//! TODO: frequency map through computeIfAbsent
+//!
+//! TODO: bulk operations like forEach, search, and reduce
+//! */
 //! # Implementation notes
 //!
 //! This data-structure is a pretty direct port of Java's `java.util.concurrent.ConcurrentHashMap`
@@ -76,13 +81,15 @@
 //! and to support high initial insertion rates on an empty table by many threads.
 //!
 //! This map usually acts as a binned (bucketed) hash table.  Each key-value mapping is held in a
-//! `BinEntry.  Most nodes are of type `BinEntry::Node` with hash, key, value, and a `next` field.
+//! `BinEntry`.  Most nodes are of type `BinEntry::Node` with hash, key, value, and a `next` field.
 //!  However, some nodes are of type `BinEntry::Moved`; these "forwarding nodes" are placed at the
 //!  heads of bins during resizing. The Java version also has other special node types, but these
 //!  have not yet been implemented in this port. These special nodes are all either uncommon or
 //!  transient.
-//! /* TODO: TreeNodes, ReservationNodes */
 //!
+/*
+//! TODO: TreeNodes, ReservationNodes
+*/
 //! The table is lazily initialized to a power-of-two size upon the first insertion.  Each bin in
 //! the table normally contains a list of nodes (most often, the list has only zero or one
 //! `BinEntry`). Table accesses require atomic reads, writes, and CASes.
@@ -129,7 +136,8 @@
 //! Similarly for dumb or hostile usages in which multiple keys are designed to have identical hash
 //! codes or ones that differs only in masked-out high bits. Here, the Java implementation uses an
 //! optimization where a bin is turned into a binary tree, but this has not yet been ported over to
-//! the Rust version. /* TODO */
+//! the Rust version.
+/* TODO */
 //!
 //! The table is resized when occupancy exceeds a percentage threshold (nominally, 0.75, but see
 //! below).  Any thread noticing an overfull bin may assist in resizing after the initiating thread
@@ -146,7 +154,8 @@
 //! Upon transfer, the old table bin contains only a special forwarding node (`BinEntry::Moved`)
 //! that contains the next table as its key. On encountering a forwarding node, access and update
 //! operations restart, using the new table.
-//! /* TODO: note on TreeBins */
+//!
+/* TODO: note on TreeBins */
 //!
 //! Each bin transfer requires its bin lock, which can stall waiting for locks while resizing.
 //! However, because other threads can join in and help resize rather than contend for locks,
@@ -162,16 +171,16 @@
 //! use a simple caching scheme to avoid creating so many new `TableStack` nodes. (Thanks to Peter
 //! Levart for suggesting use of a stack here.)
 //!
-//! /*
-//! TODO:
+/* TODO:
+//!
 //! Lazy table initialization minimizes footprint until first use, and also avoids resizings when
 //! the first operation is from a `from_iter`, `From::from`, or deserialization. These cases
 //! attempt to override the initial capacity settings, but harmlessly fail to take effect in cases
 //! of races.
-//! */
+*/
+/*
+//! TODO:
 //!
-//! /*
-//! TODO
 //! The element count is maintained using a specialization of LongAdder. We need to incorporate a
 //! specialization rather than just use a LongAdder in order to access implicit contention-sensing
 //! that leads to creation of multiple CounterCells.  The counter mechanics avoid contention on
@@ -181,8 +190,10 @@
 //! occurring at threshold is around 13%, meaning that only about 1 in 8 puts check threshold (and
 //! after resizing, many fewer do so).
 //! */
+/* TODO:
 //!
-//! /* TODO: TreeBins comparisons and locking */
+//! TreeBins comparisons and locking
+*/
 //!
 //! ## Garbage collection
 //!

@@ -55,7 +55,14 @@ macro_rules! load_factor {
 
 /// A concurrent hash table.
 ///
-/// See the [crate-level documentation](index.html) for details.
+/// Flurry uses an [`Guards`] to control the lifetime of the resources
+/// that get stored and extracted from the map.
+/// [`Guards`] are acquired through the [`epoch::pin`], [`HashMap::pin`] and [`HashMap::guard`] functions.
+/// For more information, see the [`notes in the crate-level
+/// documentation`].
+///
+/// [`notes in the crate-level documentation`]: index.html#a-note-on-guard-and-memory-use
+/// [`Guards`]: index.html#a-note-on-guard-and-memory-use
 pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
@@ -159,15 +166,43 @@ where
     K: Sync + Send + Clone + Hash + Eq,
     V: Sync + Send,
 {
-    /// Creates a new, empty map with the default initial table size (16).
+    /// Creates an empty `HashMap`.
+    ///
+    /// The hash map is initially created with a capacity of 0, so it will not allocate until it
+    /// is first inserted into.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// let map: HashMap<&str, i32> = HashMap::new();
+    /// ```
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Creates a new, empty map with an initial table size accommodating the specified number of
-    /// elements without the need to dynamically resize.
-    pub fn with_capacity(n: usize) -> Self {
-        Self::with_capacity_and_hasher(n, crate::DefaultHashBuilder::default())
+    /// Creates an empty `HashMap` with the specified capacity.
+    ///
+    /// The hash map will be able to hold at least `capacity` elements without
+    /// reallocating. If `capacity` is 0, the hash map will not allocate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// let map: HashMap<&str, i32> = HashMap::with_capacity(10);
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// There is no guarantee that the HashMap will not resize if `capacity`
+    /// elements are inserted. The map will resize based on key collision, so
+    /// bad key distribution may cause a resize before `capacity` is reached.
+    /// For more information see the [`resizing behavior`]
+    ///
+    /// [`resizing behavior`]: index.html#resizing-behavior
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
     }
 }
 
@@ -185,6 +220,15 @@ where
     /// allow the map to be resistant to attacks that cause many collisions and
     /// very poor performance. Setting it manually using this
     /// function can expose a DoS attack vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::{HashMap, DefaultHashBuilder};
+    ///
+    /// let map = HashMap::with_hasher(DefaultHashBuilder::default());
+    /// map.pin().insert(1, 2);
+    /// ```
     pub fn with_hasher(hash_builder: S) -> Self {
         Self {
             table: Atomic::null(),
@@ -249,6 +293,17 @@ where
     /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
     /// to be resistant to attacks that cause many collisions and very poor performance.
     /// Setting it manually using this function can expose a DoS attack vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use std::collections::hash_map::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let map = HashMap::with_capacity_and_hasher(10, s);
+    /// map.pin().insert(1, 2);
+    /// ```
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
         if capacity == 0 {
             return Self::with_hasher(hash_builder);
@@ -276,10 +331,26 @@ where
     }
 
     #[inline]
-    /// Tests if `key` is a key in this table.
+    /// Returns `true` if the map contains a value for the specified key.
     ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    /// let mref = map.pin();
+    /// mref.insert(1, "a");
+    /// assert_eq!(mref.contains_key(&1), true);
+    /// assert_eq!(mref.contains_key(&2), false);
+    /// ```
     pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
     where
         K: Borrow<Q>,
@@ -341,14 +412,28 @@ where
         )
     }
 
-    /// Returns the value to which `key` is mapped.
+    /// Returns a reference to the value corresponding to the key.
     ///
-    /// Returns `None` if this map contains no mapping for the key.
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
     ///
     /// To obtain a `Guard`, use [`HashMap::guard`].
     ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    /// let mref = map.pin();
+    /// mref.insert(1, "a");
+    /// assert_eq!(mref.get(&1), Some(&"a"));
+    /// assert_eq!(mref.get(&2), None);
+    /// ```
     // TODO: implement a guard API of our own
     pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
     where
@@ -367,12 +452,27 @@ where
     }
 
     #[inline]
-    /// Obtains the value to which `key` is mapped and passes it through the closure `then`.
-    ///
+    /// Apply `then` to the mapping for `key` and get its result.
     /// Returns `None` if this map contains no mapping for `key`.
     ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::{HashMap, epoch};
+    ///
+    /// let map = HashMap::new();
+    /// let guard = epoch::pin();
+    /// map.pin().insert(1, 42);
+    /// assert_eq!(map.get_and(&1, |num| num * 2, &guard), Some(84));
+    /// assert_eq!(map.get_and(&8, |num| num * 2, &guard), None);
+    /// ```
     pub fn get_and<Q, R, F>(&self, key: &Q, then: F, guard: &Guard) -> Option<R>
     where
         K: Borrow<Q>,
@@ -445,15 +545,52 @@ where
     }
 
     #[inline]
-    /// Maps `key` to `value` in this table.
+    /// Inserts a key-value pair into the map.
     ///
-    /// The value can be retrieved by calling [`HashMap::get`] with a key that is equal to the original key.
+    /// If the map did not have this key present, [`None`] is returned.
+    ///
+    /// If the map did have this key present, the value is updated, and the old
+    /// value is returned. The key is not updated, though; this matters for
+    /// types that can be `==` without being identical. See the [std-collections
+    /// documentation] for more.
+    ///
+    /// [`None`]: std::option::Option::None
+    /// [std-collections documentation]: https://doc.rust-lang.org/std/collections/index.html#insert-and-complex-keys
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    /// assert_eq!(map.pin().insert(37, "a"), None);
+    /// assert_eq!(map.pin().is_empty(), false);
+    ///
+    /// // you can also re-use a map pin like so:
+    /// let mref = map.pin();
+    ///
+    /// mref.insert(37, "b");
+    /// assert_eq!(mref.insert(37, "c"), Some(&"b"));
+    /// assert_eq!(mref.get(&37), Some(&"c"));
+    /// ```
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.check_guard(guard);
         self.put(key, value, false, guard)
     }
 
-    /// Removes all entries from this map.
+    /// Clears the map, removing all key-value pairs.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    ///
+    /// map.pin().insert(1, "a");
+    /// map.pin().clear();
+    /// assert!(map.pin().is_empty());
+    /// ```
     pub fn clear(&self, guard: &Guard) {
         // Negative number of deletions
         let mut delta = 0;
@@ -1462,20 +1599,50 @@ where
     }
 
     #[inline]
-    /// Tries to reserve capacity for at least additional more elements.
-    /// The collection may reserve more space to avoid frequent reallocations.
+    /// Tries to reserve capacity for at least `additional` more elements to
+    /// be inserted in the `HashMap`. The collection may reserve more space to
+    /// avoid frequent reallocations.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map: HashMap<&str, i32> = HashMap::new();
+    ///
+    /// map.pin().reserve(10);
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// Reserving does not panic in flurry. If the new size is invalid, no
+    /// reallocation takes place.
     pub fn reserve(&self, additional: usize, guard: &Guard) {
         self.check_guard(guard);
         let absolute = self.len() + additional;
         self.try_presize(absolute, guard);
     }
 
-    /// Removes the key (and its corresponding value) from this map.
-    /// This method does nothing if the key is not in the map.
-    /// Returns the previous value associated with the given key.
+    /// Removes a key from the map, returning a reference to the value at the
+    /// key if the key was previously in the map.
     ///
-    /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the key type.
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    /// map.pin().insert(1, "a");
+    /// assert_eq!(map.pin().remove(&1), Some(&"a"));
+    /// assert_eq!(map.pin().remove(&1), None);
+    /// ```
     pub fn remove<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
     where
         K: Borrow<Q>,
@@ -1656,7 +1823,23 @@ where
 
     /// Retains only the elements specified by the predicate.
     ///
-    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    /// In other words, remove all pairs `(k, v)` such that `f(&k,&v)` returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    ///
+    /// for i in 0..8 {
+    ///     map.pin().insert(i, i*10);
+    /// }
+    /// map.pin().retain(|&k, _| k % 2 == 0);
+    /// assert_eq!(map.pin().len(), 4);
+    /// ```
+    ///
+    /// # Notes
     ///
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
@@ -1677,7 +1860,23 @@ where
 
     /// Retains only the elements specified by the predicate.
     ///
-    /// In other words, remove all pairs (k, v) such that f(&k,&v) returns false.
+    /// In other words, remove all pairs `(k, v)` such that `f(&k,&v)` returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    ///
+    /// for i in 0..8 {
+    ///     map.pin().insert(i, i*10);
+    /// }
+    /// map.pin().retain_force(|&k, _| k % 2 == 0);
+    /// assert_eq!(map.pin().len(), 4);
+    /// ```
+    ///
+    /// # Notes
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
     /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
@@ -1696,8 +1895,6 @@ where
 
     /// An iterator visiting all key-value pairs in arbitrary order.
     /// The iterator element type is `(&'g K, &'g V)`.
-    ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
     pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V> {
         self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
@@ -1707,8 +1904,6 @@ where
 
     /// An iterator visiting all keys in arbitrary order.
     /// The iterator element type is `&'g K`.
-    ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
     pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V> {
         self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
@@ -1718,8 +1913,6 @@ where
 
     /// An iterator visiting all values in arbitrary order.
     /// The iterator element type is `&'g V`.
-    ///
-    /// To obtain a `Guard`, use [`epoch::pin`].
     pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V> {
         self.check_guard(guard);
         let table = self.table.load(Ordering::SeqCst, guard);
@@ -1729,6 +1922,18 @@ where
 
     #[inline]
     /// Returns the number of entries in the map.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    ///
+    /// map.pin().insert(1, "a");
+    /// map.pin().insert(2, "b");
+    /// assert!(map.pin().len() == 2);
+    /// ```
     pub fn len(&self) -> usize {
         self.count.load(Ordering::Relaxed)
     }
@@ -1751,6 +1956,17 @@ where
 
     #[inline]
     /// Returns `true` if the map is empty. Otherwise returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    /// assert!(map.pin().is_empty());
+    /// map.pin().insert("a", 1);
+    /// assert!(!map.pin().is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
