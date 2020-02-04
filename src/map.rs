@@ -291,9 +291,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::{HashMap, DefaultHashBuilder};
+    /// use flurry::HashMap;
+    /// use std::collections::hash_map::RandomState;
     ///
-    /// let map = HashMap::with_capacity_and_hasher(10, DefaultHashBuilder::default());
+    ///let s = RandomState::new();
+    /// let map = HashMap::with_capacity_and_hasher(10, s);
     /// map.pin().insert(1, 2);
     /// ```
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
