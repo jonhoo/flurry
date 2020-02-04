@@ -560,9 +560,12 @@ where
     /// assert_eq!(map.pin().insert(37, "a"), None);
     /// assert_eq!(map.pin().is_empty(), false);
     ///
-    /// map.pin().insert(37, "b");
-    /// assert_eq!(map.pin().insert(37, "c"), Some(&"b"));
-    /// assert_eq!(map.pin().get(&37), Some(&"c"));
+    /// // you can also re-use a map pin like so:
+    /// let mref = map.pin();
+    ///
+    /// mref.insert(37, "b");
+    /// assert_eq!(mref.insert(37, "c"), Some(&"b"));
+    /// assert_eq!(mref.get(&37), Some(&"c"));
     /// ```
     ///
     /// # Notes
