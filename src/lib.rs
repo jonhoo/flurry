@@ -86,8 +86,8 @@
 //!  heads of bins during resizing. The Java version also has other special node types, but these
 //!  have not yet been implemented in this port. These special nodes are all either uncommon or
 //!  transient.
-/*
 //!
+/*
 //! TODO: TreeNodes, ReservationNodes
 */
 //! The table is lazily initialized to a power-of-two size upon the first insertion.  Each bin in
