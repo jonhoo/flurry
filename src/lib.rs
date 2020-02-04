@@ -171,7 +171,6 @@
 //! use a simple caching scheme to avoid creating so many new `TableStack` nodes. (Thanks to Peter
 //! Levart for suggesting use of a stack here.)
 //!
-//! /*
 /* TODO:
 //!
 //! Lazy table initialization minimizes footprint until first use, and also avoids resizings when
