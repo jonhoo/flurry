@@ -340,9 +340,10 @@ where
     /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// map.pin().insert(1, "a");
-    /// assert_eq!(map.pin().contains_key(&1), true);
-    /// assert_eq!(map.pin().contains_key(&2), false);
+    /// let mref = map.pin();
+    /// mref.insert(1, "a");
+    /// assert_eq!(mref.contains_key(&1), true);
+    /// assert_eq!(mref.contains_key(&2), false);
     /// ```
     pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
     where
@@ -422,9 +423,10 @@ where
     /// use flurry::HashMap;
     ///
     /// let map = HashMap::new();
-    /// map.pin().insert(1, "a");
-    /// assert_eq!(map.pin().get(&1), Some(&"a"));
-    /// assert_eq!(map.pin().get(&2), None);
+    /// let mref = map.pin();
+    /// mref.insert(1, "a");
+    /// assert_eq!(mref.get(&1), Some(&"a"));
+    /// assert_eq!(mref.get(&2), None);
     /// ```
     // TODO: implement a guard API of our own
     pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
