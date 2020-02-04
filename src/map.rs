@@ -82,8 +82,7 @@ pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     /// unsoundness as described in https://github.com/jonhoo/flurry/issues/46. Specifically, a
     /// user can do:
     ///
-    /// ```rust,ignore
-    /// # // this test should be should_panic, not ignore, but that makes ASAN crash..?
+    /// ```rust,should_panic
     /// # use flurry::HashMap;
     /// # use crossbeam_epoch;
     /// let map: HashMap<_, _> = HashMap::default();
