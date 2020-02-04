@@ -3,6 +3,10 @@ coverage:
   range: 85..100
   round: down
   precision: 2
+  status:
+    project:
+      default:
+        threshold: 1%
 
 # Tests and Java files aren't important for coverage
 ignore:
