@@ -42,20 +42,20 @@ jobs:
            - clippy
      - bash: cargo clippy --all-features -- -D warnings
        displayName: cargo clippy -- -D warnings
-# - job: miri
-#   displayName: "Run miri on test suite"
-#   dependsOn: deny
-#   pool:
-#     vmImage: ubuntu-16.04
-#   steps:
-#     - template: install-rust.yml@templates
-#       parameters:
-#         rust: nightly
-#         components:
-#           - miri
-#     # ignore leaks due to https://github.com/crossbeam-rs/crossbeam/issues/464
-#     - bash: yes | cargo miri -Zmiri-ignore-leaks test
-#       displayName: cargo miri test
+ - job: miri
+   displayName: "Run miri on test suite"
+   dependsOn: deny
+   pool:
+     vmImage: ubuntu-16.04
+   steps:
+     - template: install-rust.yml@templates
+       parameters:
+         rust: nightly
+         components:
+           - miri
+     # ignore leaks due to https://github.com/crossbeam-rs/crossbeam/issues/464
+     - bash: yes | cargo miri -Zmiri-ignore-leaks test
+       displayName: cargo miri test
  - job: asan
    dependsOn: deny
    displayName: "Run address sanitizer on test suite"
