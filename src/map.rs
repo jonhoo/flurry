@@ -1617,7 +1617,7 @@ where
     /// map.pin().reserve(10);
     /// ```
     ///
-    /// # Note
+    /// # Notes
     ///
     /// Reserving does not panic in flurry. If the new size is invalid, no
     /// reallocation takes place.
@@ -1843,7 +1843,7 @@ where
     /// assert_eq!(map.pin().len(), 4);
     /// ```
     ///
-    /// # Note
+    /// # Notes
     ///
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
@@ -1880,7 +1880,7 @@ where
     /// assert_eq!(map.pin().len(), 4);
     /// ```
     ///
-    /// # Note
+    /// # Notes
     ///
     ///
     /// This method always deletes any key/value pair that `f` returns `false` for,
