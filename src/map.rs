@@ -55,7 +55,17 @@ macro_rules! load_factor {
 
 /// A concurrent hash table.
 ///
-/// See the [crate-level documentation](index.html) for details.
+/// Flurry uses an [`Guards`] to control the lifetime of the resources
+/// that get stored and extracted from the map.
+///
+/// [`Guards`] are acquired through the [`epoch::pin`], [`HashMap::pin`] and
+/// [`HashMap::guard`] functions.
+///
+/// For more information, see the [`notes in the crate-level
+/// documentation`].
+///
+/// [`notes in the crate-level documentation`]: index.html#a-note-on-guard-and-memory-use
+/// [`Guards`]: index.html#a-note-on-guard-and-memory-use
 pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
