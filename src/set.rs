@@ -9,7 +9,7 @@ use crate::epoch::{self, Guard};
 use crate::iter::Keys;
 use crate::HashMap;
 
-/// A concurrent hash set implemented as a `FlurryHashMap` where the value is `()`.
+/// A concurrent hash set implemented as a `HashMap` where the value is `()`.
 ///
 /// # Examples
 ///
@@ -245,7 +245,7 @@ where
 
     /// An iterator over the set's values.
     ///
-    /// See [`FlurryHashMap::keys`] for details.
+    /// See [`HashMap::keys`] for details.
     ///
     /// # Examples
     ///
