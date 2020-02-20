@@ -1,7 +1,6 @@
 jobs:
  - template: default.yml@templates
    parameters:
-     codecov_token: $(CODECOV_TOKEN_SECRET)
      minrust: 1.36.0 # parking_lot 0.10
  - job: deny
    displayName: "Disallowed attributes"
@@ -90,6 +89,11 @@ jobs:
      - script: |
            env RUSTFLAGS="-Z sanitizer=leak" cargo test --features sanitize --target x86_64-unknown-linux-gnu
        displayName: cargo -Z sanitizer=leak test
+ - template: coverage.yml@templates
+   parameters:
+     token: $(CODECOV_TOKEN_SECRET)
+     nightly: true
+     doctests: true
 
 resources:
   repositories:
