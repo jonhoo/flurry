@@ -278,7 +278,6 @@ fn clone_map_empty() {
 }
 
 #[test]
-// TODO: Should this test really fail?
 // Test that same values exists in both maps (original and cloned)
 fn clone_map_filled() {
     let map = HashMap::<&'static str, u32>::new();
@@ -289,9 +288,10 @@ fn clone_map_filled() {
     assert_eq!(map.len(), cloned_map.len());
     assert_eq!(&map, &cloned_map);
 
-    // test that we are not mapping the same tables
+    // test that both maps are equal,
+    // because the ref and the cloned ref, point to the same map
     map.insert("NewItem", 100);
-    assert_ne!(&map, &cloned_map);
+    assert_eq!(&map, &cloned_map);
 }
 
 #[test]
