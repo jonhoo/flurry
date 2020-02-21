@@ -67,8 +67,16 @@ fn stress_insert_thread(env: Arc<Environment>) {
             let key = env.keys[idx];
             let val1 = env.val_dist1.sample(&mut rng);
             let val2 = env.val_dist2.sample(&mut rng);
-            let res1 = env.table1.insert(key, val1, &guard).map_or(true, |_| false);
-            let res2 = env.table2.insert(key, val2, &guard).map_or(true, |_| false);
+            let res1 = if !env.table1.contains_key(&key, &guard) {
+                env.table1.insert(key, val1, &guard).map_or(true, |_| false)
+            } else {
+                false
+            };
+            let res2 = if !env.table2.contains_key(&key, &guard) {
+                env.table2.insert(key, val2, &guard).map_or(true, |_| false)
+            } else {
+                false
+            };
             let mut in_table = env.in_table.lock();
             assert_ne!(res1, (*in_table)[idx]);
             assert_ne!(res2, (*in_table)[idx]);
@@ -86,21 +94,75 @@ fn stress_insert_thread(env: Arc<Environment>) {
     }
 }
 
+fn stress_delete_thread(env: Arc<Environment>) {
+    let mut rng = rand::thread_rng();
+    let guard = epoch::pin();
+    while !env.finished.load(Ordering::SeqCst) {
+        let idx = env.ind_dist.sample(&mut rng);
+        let in_use = env.in_use.lock();
+        if (*in_use)[idx].compare_and_swap(false, true, Ordering::SeqCst) {
+            let key = env.keys[idx];
+            let res1 = env.table1.remove(&key, &guard).map_or(false, |_| true);
+            let res2 = env.table2.remove(&key, &guard).map_or(false, |_| true);
+            let mut in_table = env.in_table.lock();
+            assert_eq!(res1, (*in_table)[idx]);
+            assert_eq!(res2, (*in_table)[idx]);
+            if res1 {
+                assert!(env.table1.get(&key, &guard).is_none());
+                assert!(env.table2.get(&key, &guard).is_none());
+                (*in_table)[idx] = false;
+            }
+            (*in_use)[idx].swap(false, Ordering::SeqCst);
+        }
+    }
+}
+
+fn stress_find_thread(env: Arc<Environment>) {
+    let mut rng = rand::thread_rng();
+    let guard = epoch::pin();
+    while !env.finished.load(Ordering::SeqCst) {
+        let idx = env.ind_dist.sample(&mut rng);
+        let in_use = env.in_use.lock();
+        if (*in_use)[idx].compare_and_swap(false, true, Ordering::SeqCst) {
+            let key = env.keys[idx];
+            let in_table = env.in_table.lock();
+            let val1 = (*env.vals1.lock())[idx];
+            let val2 = (*env.vals2.lock())[idx];
+
+            let value = env.table1.get(&key, &guard);
+            if value.is_some() {
+                assert_eq!(&val1, value.unwrap());
+                assert!((*in_table)[idx]);
+            }
+            let value = env.table2.get(&key, &guard);
+            if value.is_some() {
+                assert_eq!(&val2, value.unwrap());
+                assert!((*in_table)[idx]);
+            }
+            (*in_use)[idx].swap(false, Ordering::SeqCst);
+        }
+    }
+}
+
 #[test]
 fn stress_test() {
-    let env = Arc::new(Environment::new());
+    let root = Arc::new(Environment::new());
     let mut threads = Vec::new();
     for _ in 0..NUM_THREADS {
-        let env = Arc::clone(&env);
+        let env = Arc::clone(&root);
         threads.push(thread::spawn(move || stress_insert_thread(env)));
+        let env = Arc::clone(&root);
+        threads.push(thread::spawn(move || stress_delete_thread(env)));
+        let env = Arc::clone(&root);
+        threads.push(thread::spawn(move || stress_find_thread(env)));
     }
     thread::sleep(std::time::Duration::from_millis(TEST_LEN));
-    env.finished.swap(true, Ordering::SeqCst);
+    root.finished.swap(true, Ordering::SeqCst);
     for t in threads {
         t.join().expect("failed to join thread");
     }
-    let in_table = &*env.in_table.lock();
+    let in_table = &*root.in_table.lock();
     let num_filled = in_table.iter().filter(|b| **b).count();
-    assert_eq!(num_filled, env.table1.len());
-    assert_eq!(num_filled, env.table2.len());
+    assert_eq!(num_filled, root.table1.len());
+    assert_eq!(num_filled, root.table2.len());
 }
