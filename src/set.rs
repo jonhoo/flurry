@@ -128,9 +128,7 @@ where
     /// let set: HashSet<i32> = HashSet::new();
     /// ```
     pub fn new() -> Self {
-        Self {
-            map: HashMap::default(),
-        }
+        Self::default()
     }
 
     /// Creates an empty `HashSet` with the specified capacity.
