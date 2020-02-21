@@ -90,7 +90,9 @@ pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
     ///
     // this should be:
     // ```rust,should_panic
-    // but that won't work with coverage at the moment
+    // but that won't work with coverage at the moment:
+    // https://github.com/xd009642/tarpaulin/issues/344
+    // so:
     /// ```rust,no_run
     /// # use flurry::HashMap;
     /// # use crossbeam_epoch;
