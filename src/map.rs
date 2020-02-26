@@ -62,7 +62,7 @@ macro_rules! load_factor {
 ///
 /// [`notes in the crate-level documentation`]: index.html#a-note-on-guard-and-memory-use
 /// [`Guards`]: index.html#a-note-on-guard-and-memory-use
-pub struct HashMap<K: 'static, V: 'static, S = crate::DefaultHashBuilder> {
+pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// The array of bins. Lazily initialized upon first insertion.
     /// Size is always a power of two. Accessed directly by iterators.
     table: Atomic<Table<K, V>>,
@@ -154,22 +154,14 @@ fn disallow_evil() {
     assert_eq!(oops.unwrap(), "hello");
 }
 
-impl<K, V, S> Default for HashMap<K, V, S>
-where
-    K: Sync + Send + Clone + Hash + Eq,
-    V: Sync + Send,
-    S: BuildHasher + Default,
-{
-    fn default() -> Self {
-        Self::with_hasher(S::default())
-    }
-}
+// ===
+// the following methods only see Ks and Vs if there have been inserts.
+// modifications to the map are all guarded by thread-safety bounds (Send + Sync + 'static).
+// but _these_ methods do not need to be, since they will never introduce keys or values, only give
+// out ones that have already been inserted (which implies they must be thread-safe).
+// ===
 
-impl<K, V> HashMap<K, V, crate::DefaultHashBuilder>
-where
-    K: Sync + Send + Clone + Hash + Eq,
-    V: Sync + Send,
-{
+impl<K, V> HashMap<K, V, crate::DefaultHashBuilder> {
     /// Creates an empty `HashMap`.
     ///
     /// The hash map is initially created with a capacity of 0, so it will not allocate until it
@@ -184,38 +176,18 @@ where
     pub fn new() -> Self {
         Self::default()
     }
+}
 
-    /// Creates an empty `HashMap` with the specified capacity.
-    ///
-    /// The hash map will be able to hold at least `capacity` elements without
-    /// reallocating. If `capacity` is 0, the hash map will not allocate.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashMap;
-    /// let map: HashMap<&str, i32> = HashMap::with_capacity(10);
-    /// ```
-    ///
-    /// # Notes
-    ///
-    /// There is no guarantee that the HashMap will not resize if `capacity`
-    /// elements are inserted. The map will resize based on key collision, so
-    /// bad key distribution may cause a resize before `capacity` is reached.
-    /// For more information see the [`resizing behavior`]
-    ///
-    /// [`resizing behavior`]: index.html#resizing-behavior
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
+impl<K, V, S> Default for HashMap<K, V, S>
+where
+    S: Default,
+{
+    fn default() -> Self {
+        Self::with_hasher(S::default())
     }
 }
 
-impl<K, V, S> HashMap<K, V, S>
-where
-    K: Sync + Send + Clone + Hash + Eq,
-    V: Sync + Send,
-    S: BuildHasher,
-{
+impl<K, V, S> HashMap<K, V, S> {
     /// Creates an empty map which will use `hash_builder` to hash keys.
     ///
     /// The created map has the default initial capacity.
@@ -288,6 +260,131 @@ where
         }
     }
 
+    #[inline]
+    /// Returns the number of entries in the map.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    ///
+    /// map.pin().insert(1, "a");
+    /// map.pin().insert(2, "b");
+    /// assert!(map.pin().len() == 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        self.count.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    /// Returns `true` if the map is empty. Otherwise returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    /// assert!(map.pin().is_empty());
+    /// map.pin().insert("a", 1);
+    /// assert!(!map.pin().is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    #[inline]
+    #[cfg(test)]
+    /// Returns the capacity of the map.
+    fn capacity(&self, guard: &Guard) -> usize {
+        self.check_guard(guard);
+        let table = self.table.load(Ordering::Relaxed, &guard);
+
+        if table.is_null() {
+            0
+        } else {
+            // Safety: we loaded `table` under the `guard`,
+            // so it must still be valid here
+            unsafe { table.deref() }.len()
+        }
+    }
+
+    /// Returns the stamp bits for resizing a table of size n.
+    /// Must be negative when shifted left by `RESIZE_STAMP_SHIFT`.
+    fn resize_stamp(n: usize) -> isize {
+        n.leading_zeros() as isize | (1_isize << (RESIZE_STAMP_BITS - 1))
+    }
+
+    /// An iterator visiting all key-value pairs in arbitrary order.
+    /// The iterator element type is `(&'g K, &'g V)`.
+    pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V> {
+        self.check_guard(guard);
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Iter { node_iter, guard }
+    }
+
+    /// An iterator visiting all keys in arbitrary order.
+    /// The iterator element type is `&'g K`.
+    pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V> {
+        self.check_guard(guard);
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Keys { node_iter }
+    }
+
+    /// An iterator visiting all values in arbitrary order.
+    /// The iterator element type is `&'g V`.
+    pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V> {
+        self.check_guard(guard);
+        let table = self.table.load(Ordering::SeqCst, guard);
+        let node_iter = NodeIter::new(table, guard);
+        Values { node_iter, guard }
+    }
+}
+
+// ===
+// the following methods require Clone, since they ultimately call `transfer`, which needs to be
+// able to clone keys. however, they do _not_ need to require thread-safety bounds (Send + Sync +
+// 'static) since if the bounds do not hold, the map is empty, so no keys or values will be
+// transfered anyway.
+// ===
+
+impl<K, V> HashMap<K, V, crate::DefaultHashBuilder>
+where
+    K: Clone,
+{
+    /// Creates an empty `HashMap` with the specified capacity.
+    ///
+    /// The hash map will be able to hold at least `capacity` elements without
+    /// reallocating. If `capacity` is 0, the hash map will not allocate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// let map: HashMap<&str, i32> = HashMap::with_capacity(10);
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// There is no guarantee that the HashMap will not resize if `capacity`
+    /// elements are inserted. The map will resize based on key collision, so
+    /// bad key distribution may cause a resize before `capacity` is reached.
+    /// For more information see the [`resizing behavior`]
+    ///
+    /// [`resizing behavior`]: index.html#resizing-behavior
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
+    }
+}
+
+impl<K, V, S> HashMap<K, V, S>
+where
+    K: Clone,
+{
     /// Creates an empty map with the specified `capacity`, using `hash_builder` to hash the keys.
     ///
     /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
@@ -320,48 +417,600 @@ where
         map.try_presize(capacity, unsafe { epoch::unprotected() });
         map
     }
-}
 
-impl<K, V, S> HashMap<K, V, S>
-where
-    K: Sync + Send + Clone + Hash + Eq,
-    V: Sync + Send,
-    S: BuildHasher,
-{
-    fn hash<Q: ?Sized + Hash>(&self, key: &Q) -> u64 {
-        let mut h = self.build_hasher.build_hasher();
-        key.hash(&mut h);
-        h.finish()
+    /// Tries to presize table to accommodate the given number of elements.
+    fn try_presize(&self, size: usize, guard: &Guard) {
+        let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
+            MAXIMUM_CAPACITY
+        } else {
+            // round the requested_capacity to the next power of to from 1.5 * size + 1
+            // TODO: find out if this is neccessary
+            let size = size + (size >> 1) + 1;
+
+            std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
+        } as isize;
+
+        loop {
+            let size_ctl = self.size_ctl.load(Ordering::SeqCst);
+            if size_ctl < 0 {
+                break;
+            }
+
+            let table = self.table.load(Ordering::SeqCst, &guard);
+
+            // The current capacity == the number of bins in the current table
+            let current_capactity = if table.is_null() {
+                0
+            } else {
+                unsafe { table.deref() }.len()
+            };
+
+            if current_capactity == 0 {
+                // the table has not yet been initialized, so we can just create it
+                // with as many bins as were requested
+
+                // since the map is uninitialized, size_ctl describes the initial capacity
+                let initial_capacity = size_ctl;
+
+                // the new capacity is either the requested capacity or the initial capacity (size_ctl)
+                let new_capacity = requested_capacity.max(initial_capacity) as usize;
+
+                // try to aquire the initialization "lock" to indicate that we are initializing the table.
+                if self
+                    .size_ctl
+                    .compare_and_swap(size_ctl, -1, Ordering::SeqCst)
+                    != size_ctl
+                {
+                    // somebody else is already initializing the table (or has already finished).
+                    continue;
+                }
+
+                // we got the initialization `lock`; Make sure the table is still unitialized
+                // (or is the same table with 0 bins we read earlier, althought that should not be the case)
+                if self.table.load(Ordering::SeqCst, guard) != table {
+                    // NOTE: this could probably be `!self.table.load(...).is_null()`
+                    // if we decide that tables can never have 0 bins.
+
+                    // the table is already initialized; Write the `size_ctl` value it had back to it's
+                    // `size_ctl` field to release the initialization "lock"
+                    self.size_ctl.store(size_ctl, Ordering::SeqCst);
+                    continue;
+                }
+
+                // create a table with `new_capacity` empty bins
+                let new_table = Owned::new(Table::new(new_capacity)).into_shared(guard);
+
+                // store the new table to `self.table`
+                let old_table = self.table.swap(new_table, Ordering::SeqCst, &guard);
+
+                // old_table should be `null`, since we don't ever initialize a table with 0 bins
+                // and this branch only happens if table has not yet been initialized or it's length is 0.
+                assert!(old_table.is_null());
+
+                // TODO: if we allow tables with 0 bins. `defer_destroy` `old_table` if it's not `null`:
+                // if !old_table.is_null() {
+                //     // TODO: safety argument, for why this is okay
+                //     unsafe { guard.defer_destroy(old_table) }
+                // }
+
+                // resize the table once it is 75% full
+                let new_load_to_resize_at = load_factor!(new_capacity as isize);
+
+                // store the next load at which the table should resize to it's size_ctl field
+                // and thus release the initialization "lock"
+                self.size_ctl.store(new_load_to_resize_at, Ordering::SeqCst);
+            } else if requested_capacity <= size_ctl || current_capactity >= MAXIMUM_CAPACITY {
+                // Either the `requested_capacity` was smaller than or equal to the load we would resize at (size_ctl)
+                // and we don't need to resize, since our load factor will still be acceptable if we don't
+
+                // Or it was larger than the `MAXIMUM_CAPACITY` of the map and we refuse
+                // to resize to an invalid capacity
+                break;
+            } else if table == self.table.load(Ordering::SeqCst, &guard) {
+                // The table is initialized, try to resize it to the requested capacity
+
+                let rs: isize = Self::resize_stamp(current_capactity) << RESIZE_STAMP_SHIFT;
+                // TODO: see #29: `rs` is postive even though `resize_stamp` says:
+                // "Must be negative when shifted left by RESIZE_STAMP_SHIFT"
+                // and since our size_control field needs to be negative
+                // to indicate a resize this needs to be addressed
+
+                if self
+                    .size_ctl
+                    .compare_and_swap(size_ctl, rs + 2, Ordering::SeqCst)
+                    == size_ctl
+                {
+                    // someone else already started to resize the table
+                    // TODO: can we `self.help_transfer`?
+                    self.transfer(table, Shared::null(), &guard);
+                }
+            }
+        }
+    }
+
+    // NOTE: transfer requires that K and V are Send + Sync if it will actually transfer anything.
+    // If K/V aren't Send + Sync, the map must be empty, and therefore calling tansfer is fine.
+    fn transfer<'g>(
+        &'g self,
+        table: Shared<'g, Table<K, V>>,
+        mut next_table: Shared<'g, Table<K, V>>,
+        guard: &'g Guard,
+    ) {
+        // safety: table was read while `guard` was held. the code that drops table only drops it
+        // after it is no longer reachable, and any outstanding references are no longer active.
+        // this references is still active (marked by the guard), so the target of the references
+        // won't be dropped while the guard remains active.
+        let n = unsafe { table.deref() }.len();
+        let ncpu = num_cpus();
+
+        let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n };
+        let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
+
+        if next_table.is_null() {
+            // we are initiating a resize
+            let table = Owned::new(Table::new(n << 1));
+            let now_garbage = self.next_table.swap(table, Ordering::SeqCst, guard);
+            assert!(now_garbage.is_null());
+            self.transfer_index.store(n as isize, Ordering::SeqCst);
+            next_table = self.next_table.load(Ordering::Relaxed, guard);
+        }
+
+        // safety: same argument as for table above
+        let next_n = unsafe { next_table.deref() }.len();
+
+        let mut advance = true;
+        let mut finishing = false;
+        let mut i = 0;
+        let mut bound = 0;
+        loop {
+            // try to claim a range of bins for us to transfer
+            while advance {
+                i -= 1;
+                if i >= bound || finishing {
+                    advance = false;
+                    break;
+                }
+
+                let next_index = self.transfer_index.load(Ordering::SeqCst);
+                if next_index <= 0 {
+                    i = -1;
+                    advance = false;
+                    break;
+                }
+
+                let next_bound = if next_index > stride {
+                    next_index - stride
+                } else {
+                    0
+                };
+                if self
+                    .transfer_index
+                    .compare_and_swap(next_index, next_bound, Ordering::SeqCst)
+                    == next_index
+                {
+                    bound = next_bound;
+                    i = next_index;
+                    advance = false;
+                    break;
+                }
+            }
+
+            if i < 0 || i as usize >= n || i as usize + n >= next_n {
+                // the resize has finished
+
+                if finishing {
+                    // this branch is only taken for one thread partaking in the resize!
+                    self.next_table.store(Shared::null(), Ordering::SeqCst);
+                    let now_garbage = self.table.swap(next_table, Ordering::SeqCst, guard);
+                    // safety: need to guarantee that now_garbage is no longer reachable. more
+                    // specifically, no thread that executes _after_ this line can ever get a
+                    // reference to now_garbage.
+                    //
+                    // first, we need to argue that there is no _other_ way to get to now_garbage.
+                    //
+                    //  - it is _not_ accessible through self.table any more
+                    //  - it is _not_ accessible through self.next_table any more
+                    //  - what about forwarding nodes (BinEntry::Moved)?
+                    //    the only BinEntry::Moved that point to now_garbage, are the ones in
+                    //    _previous_ tables. to get to those previous tables, one must ultimately
+                    //    have arrived through self.table (because that's where all operations
+                    //    start their search). since self.table has now changed, only "old" threads
+                    //    can still be accessing them. no new thread can get to past tables, and
+                    //    therefore they also cannot get to ::Moved that point to now_garbage, so
+                    //    we're fine.
+                    //
+                    // this means that no _future_ thread (i.e., in a later epoch where the value
+                    // may be freed) can get a reference to now_garbage.
+                    //
+                    // next, let's talk about threads with _existing_ references to now_garbage.
+                    // such a thread must have gotten that reference before the call to swap.
+                    // because of this, that thread must be pinned to an epoch <= the epoch of our
+                    // guard (since our guard is pinning the epoch). since the garbage is placed in
+                    // our epoch, it won't be freed until the _next_ epoch, at which point, that
+                    // thread must have dropped its guard, and with it, any reference to the value.
+                    unsafe { guard.defer_destroy(now_garbage) };
+                    self.size_ctl
+                        .store(((n as isize) << 1) - ((n as isize) >> 1), Ordering::SeqCst);
+                    return;
+                }
+
+                let sc = self.size_ctl.load(Ordering::SeqCst);
+                if self.size_ctl.compare_and_swap(sc, sc - 1, Ordering::SeqCst) == sc {
+                    if (sc - 2) != Self::resize_stamp(n) << RESIZE_STAMP_SHIFT {
+                        return;
+                    }
+
+                    // we are the chosen thread to finish the resize!
+                    finishing = true;
+
+                    // ???
+                    advance = true;
+
+                    // NOTE: the java code says "recheck before commit" here
+                    i = n as isize;
+                }
+
+                continue;
+            }
+            let i = i as usize;
+
+            // safety: these were read while `guard` was held. the code that drops these, only
+            // drops them after a) they are no longer reachable, and b) any outstanding references
+            // are no longer active. these references are still active (marked by the guard), so
+            // the target of these references won't be dropped while the guard remains active.
+            let table = unsafe { table.deref() };
+
+            let bin = table.bin(i as usize, guard);
+            if bin.is_null() {
+                advance = table
+                    .cas_bin(i, Shared::null(), table.get_moved(next_table, guard), guard)
+                    .is_ok();
+                continue;
+            }
+            // safety: as for table above
+            let next_table = unsafe { next_table.deref() };
+
+            // safety: bin is a valid pointer.
+            //
+            // there are two cases when a bin pointer is invalidated:
+            //
+            //  1. if the table was resized, bin is a move entry, and the resize has completed. in
+            //     that case, the table (and all its heads) will be dropped in the next epoch
+            //     following that.
+            //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
+            //     will then be dropped in the following epoch after that happens.
+            //
+            // in both cases, we held the guard when we got the reference to the bin. if any such
+            // swap happened, it must have happened _after_ we read. since we did the read while
+            // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
+            // are holding up by holding on to our guard).
+            match *unsafe { bin.deref() } {
+                BinEntry::Moved => {
+                    // already processed
+                    advance = true;
+                }
+                BinEntry::Node(ref head) => {
+                    // bin is non-empty, need to link into it, so we must take the lock
+                    let head_lock = head.lock.lock();
+
+                    // need to check that this is _still_ the head
+                    let current_head = table.bin(i, guard);
+                    if current_head.as_raw() != bin.as_raw() {
+                        // nope -- try again from the start
+                        continue;
+                    }
+
+                    // yes, it is still the head, so we can now "own" the bin
+                    // note that there can still be readers in the bin!
+
+                    // TODO: TreeBin & ReservationNode
+
+                    let mut run_bit = head.hash & n as u64;
+                    let mut last_run = bin;
+                    let mut p = bin;
+                    loop {
+                        // safety: p is a valid pointer.
+                        //
+                        // p is only dropped in the next epoch following when its bin is replaced
+                        // with a move node (see safety comment near table.store_bin below). we
+                        // read the bin, and got to p, so its bin has not yet been swapped with a
+                        // move node. and, we have the epoch pinned, so the next epoch cannot have
+                        // arrived yet. therefore, it will be dropped in a future epoch, and is
+                        // safe to use now.
+                        let node = unsafe { p.deref() }.as_node().unwrap();
+                        let next = node.next.load(Ordering::SeqCst, guard);
+
+                        let b = node.hash & n as u64;
+                        if b != run_bit {
+                            run_bit = b;
+                            last_run = p;
+                        }
+
+                        if next.is_null() {
+                            break;
+                        }
+                        p = next;
+                    }
+
+                    let mut low_bin = Shared::null();
+                    let mut high_bin = Shared::null();
+                    if run_bit == 0 {
+                        // last run is all in the low bin
+                        low_bin = last_run;
+                    } else {
+                        // last run is all in the high bin
+                        high_bin = last_run;
+                    }
+
+                    p = bin;
+                    while p != last_run {
+                        // safety: p is a valid pointer.
+                        //
+                        // p is only dropped in the next epoch following when its bin is replaced
+                        // with a move node (see safety comment near table.store_bin below). we
+                        // read the bin, and got to p, so its bin has not yet been swapped with a
+                        // move node. and, we have the epoch pinned, so the next epoch cannot have
+                        // arrived yet. therefore, it will be dropped in a future epoch, and is
+                        // safe to use now.
+                        let node = unsafe { p.deref() }.as_node().unwrap();
+
+                        let link = if node.hash & n as u64 == 0 {
+                            // to the low bin!
+                            &mut low_bin
+                        } else {
+                            // to the high bin!
+                            &mut high_bin
+                        };
+
+                        *link = Owned::new(BinEntry::Node(Node {
+                            hash: node.hash,
+                            key: node.key.clone(),
+                            lock: parking_lot::Mutex::new(()),
+                            value: node.value.clone(),
+                            next: Atomic::from(*link),
+                        }))
+                        .into_shared(guard);
+
+                        p = node.next.load(Ordering::SeqCst, guard);
+                    }
+
+                    next_table.store_bin(i, low_bin);
+                    next_table.store_bin(i + n, high_bin);
+                    table.store_bin(
+                        i,
+                        table.get_moved(Shared::from(next_table as *const _), guard),
+                    );
+
+                    // everything up to last_run in the _old_ bin linked list is now garbage.
+                    // those nodes have all been re-allocated in the new bin linked list.
+                    p = bin;
+                    while p != last_run {
+                        // safety:
+                        //
+                        // we need to argue that there is no longer a way to access p. the only way
+                        // to get to p is through table[i]. since table[i] has been replaced by a
+                        // BinEntry::Moved, p is no longer accessible.
+                        //
+                        // any existing reference to p must have been taken before table.store_bin.
+                        // at that time we had the epoch pinned, so any threads that have such a
+                        // reference must be before or at our epoch. since the p isn't destroyed
+                        // until the next epoch, those old references are fine since they are tied
+                        // to those old threads' pins of the old epoch.
+                        let next = unsafe { p.deref() }
+                            .as_node()
+                            .unwrap()
+                            .next
+                            .load(Ordering::SeqCst, guard);
+                        unsafe { guard.defer_destroy(p) };
+                        p = next;
+                    }
+
+                    advance = true;
+
+                    drop(head_lock);
+                }
+            }
+        }
+    }
+
+    fn help_transfer<'g>(
+        &'g self,
+        table: Shared<'g, Table<K, V>>,
+        guard: &'g Guard,
+    ) -> Shared<'g, Table<K, V>> {
+        if table.is_null() {
+            return table;
+        }
+
+        // safety: table is only dropped on the next epoch change after it is swapped to null.
+        // we read it as not null, so it must not be dropped until a subsequent epoch. since we
+        // held `guard` at the time, we know that the current epoch continues to persist, and that
+        // our reference is therefore valid.
+        let next_table = unsafe { table.deref() }.next_table(guard);
+        if next_table.is_null() {
+            return table;
+        }
+
+        // safety: same as above
+        let rs = Self::resize_stamp(unsafe { table.deref() }.len()) << RESIZE_STAMP_SHIFT;
+
+        while next_table == self.next_table.load(Ordering::SeqCst, guard)
+            && table == self.table.load(Ordering::SeqCst, guard)
+        {
+            let sc = self.size_ctl.load(Ordering::SeqCst);
+            if sc >= 0
+                || sc == rs + MAX_RESIZERS
+                || sc == rs + 1
+                || self.transfer_index.load(Ordering::SeqCst) <= 0
+            {
+                break;
+            }
+
+            if self.size_ctl.compare_and_swap(sc, sc + 1, Ordering::SeqCst) == sc {
+                self.transfer(table, next_table, guard);
+                break;
+            }
+        }
+        next_table
+    }
+
+    fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard) {
+        // TODO: implement the Java CounterCell business here
+
+        use std::cmp;
+        let mut count = match n.cmp(&0) {
+            cmp::Ordering::Greater => {
+                let n = n as usize;
+                self.count.fetch_add(n, Ordering::SeqCst) + n
+            }
+            cmp::Ordering::Less => {
+                let n = n.abs() as usize;
+                self.count.fetch_sub(n, Ordering::SeqCst) - n
+            }
+            cmp::Ordering::Equal => self.count.load(Ordering::SeqCst),
+        };
+
+        // if resize_hint is None, it means the caller does not want us to consider a resize.
+        // if it is Some(n), the caller saw n entries in a bin
+        if resize_hint.is_none() {
+            return;
+        }
+
+        // TODO: use the resize hint
+        let _saw_bin_length = resize_hint.unwrap();
+
+        loop {
+            let sc = self.size_ctl.load(Ordering::SeqCst);
+            if (count as isize) < sc {
+                // we're not at the next resize point yet
+                break;
+            }
+
+            let table = self.table.load(Ordering::SeqCst, guard);
+            if table.is_null() {
+                // table will be initalized by another thread anyway
+                break;
+            }
+
+            // safety: table is only dropped on the next epoch change after it is swapped to null.
+            // we read it as not null, so it must not be dropped until a subsequent epoch. since we
+            // hold a Guard, we know that the current epoch will persist, and that our reference
+            // will therefore remain valid.
+            let n = unsafe { table.deref() }.len();
+            if n >= MAXIMUM_CAPACITY {
+                // can't resize any more anyway
+                break;
+            }
+
+            let rs = Self::resize_stamp(n) << RESIZE_STAMP_SHIFT;
+            if sc < 0 {
+                // ongoing resize! can we join the resize transfer?
+                if sc == rs + MAX_RESIZERS || sc == rs + 1 {
+                    break;
+                }
+                let nt = self.next_table.load(Ordering::SeqCst, guard);
+                if nt.is_null() {
+                    break;
+                }
+                if self.transfer_index.load(Ordering::SeqCst) <= 0 {
+                    break;
+                }
+
+                // try to join!
+                if self.size_ctl.compare_and_swap(sc, sc + 1, Ordering::SeqCst) == sc {
+                    self.transfer(table, nt, guard);
+                }
+            } else if self.size_ctl.compare_and_swap(sc, rs + 2, Ordering::SeqCst) == sc {
+                // a resize is needed, but has not yet started
+                // TODO: figure out why this is rs + 2, not just rs
+                // NOTE: this also applies to `try_presize`
+                self.transfer(table, Shared::null(), guard);
+            }
+
+            // another resize may be needed!
+            count = self.count.load(Ordering::SeqCst);
+        }
     }
 
     #[inline]
-    /// Returns `true` if the map contains a value for the specified key.
-    ///
-    /// The key may be any borrowed form of the map's key type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
-    /// the key type.
-    ///
-    /// [`Eq`]: std::cmp::Eq
-    /// [`Hash`]: std::hash::Hash
+    /// Tries to reserve capacity for at least `additional` more elements to
+    /// be inserted in the `HashMap`. The collection may reserve more space to
+    /// avoid frequent reallocations.
     ///
     /// # Examples
     ///
     /// ```
     /// use flurry::HashMap;
     ///
-    /// let map = HashMap::new();
-    /// let mref = map.pin();
-    /// mref.insert(1, "a");
-    /// assert_eq!(mref.contains_key(&1), true);
-    /// assert_eq!(mref.contains_key(&2), false);
+    /// let map: HashMap<&str, i32> = HashMap::new();
+    ///
+    /// map.pin().reserve(10);
     /// ```
-    pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
-    where
-        K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
-    {
+    ///
+    /// # Notes
+    ///
+    /// Reserving does not panic in flurry. If the new size is invalid, no
+    /// reallocation takes place.
+    pub fn reserve(&self, additional: usize, guard: &Guard) {
         self.check_guard(guard);
-        self.get(key, &guard).is_some()
+        let absolute = self.len() + additional;
+        self.try_presize(absolute, guard);
+    }
+
+    fn init_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
+        loop {
+            let table = self.table.load(Ordering::SeqCst, guard);
+            // safety: we loaded the table while epoch was pinned. table won't be deallocated until
+            // next epoch at the earliest.
+            if !table.is_null() && !unsafe { table.deref() }.is_empty() {
+                break table;
+            }
+            // try to allocate the table
+            let mut sc = self.size_ctl.load(Ordering::SeqCst);
+            if sc < 0 {
+                // we lost the initialization race; just spin
+                std::thread::yield_now();
+                continue;
+            }
+
+            if self.size_ctl.compare_and_swap(sc, -1, Ordering::SeqCst) == sc {
+                // we get to do it!
+                let mut table = self.table.load(Ordering::SeqCst, guard);
+
+                // safety: we loaded the table while epoch was pinned. table won't be deallocated
+                // until next epoch at the earliest.
+                if table.is_null() || unsafe { table.deref() }.is_empty() {
+                    let n = if sc > 0 {
+                        sc as usize
+                    } else {
+                        DEFAULT_CAPACITY
+                    };
+                    let new_table = Owned::new(Table::new(n));
+                    table = new_table.into_shared(guard);
+                    self.table.store(table, Ordering::SeqCst);
+                    sc = load_factor!(n as isize)
+                }
+                self.size_ctl.store(sc, Ordering::SeqCst);
+                break table;
+            }
+        }
+    }
+}
+
+// ===
+// the following methods never introduce new items (so they do not need the thread-safety bounds),
+// but they _do_ perform lookups, which require hashing and equality.
+// ===
+
+impl<K, V, S> HashMap<K, V, S>
+where
+    K: Hash + Eq,
+    S: BuildHasher,
+{
+    fn hash<Q: ?Sized + Hash>(&self, key: &Q) -> u64 {
+        let mut h = self.build_hasher.build_hasher();
+        key.hash(&mut h);
+        h.finish()
     }
 
     fn get_node<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g Node<K, V>>
@@ -414,6 +1063,36 @@ where
             node.as_node()
                 .expect("`BinEntry::find` should always return a Node"),
         )
+    }
+
+    #[inline]
+    /// Returns `true` if the map contains a value for the specified key.
+    ///
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    /// let mref = map.pin();
+    /// mref.insert(1, "a");
+    /// assert_eq!(mref.contains_key(&1), true);
+    /// assert_eq!(mref.contains_key(&2), false);
+    /// ```
+    pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        self.check_guard(guard);
+        self.get(key, &guard).is_some()
     }
 
     /// Returns a reference to the value corresponding to the key.
@@ -509,79 +1188,28 @@ where
         unsafe { v.as_ref() }.map(|v| (&node.key, v))
     }
 
-    fn init_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
-        loop {
-            let table = self.table.load(Ordering::SeqCst, guard);
-            // safety: we loaded the table while epoch was pinned. table won't be deallocated until
-            // next epoch at the earliest.
-            if !table.is_null() && !unsafe { table.deref() }.is_empty() {
-                break table;
-            }
-            // try to allocate the table
-            let mut sc = self.size_ctl.load(Ordering::SeqCst);
-            if sc < 0 {
-                // we lost the initialization race; just spin
-                std::thread::yield_now();
-                continue;
-            }
-
-            if self.size_ctl.compare_and_swap(sc, -1, Ordering::SeqCst) == sc {
-                // we get to do it!
-                let mut table = self.table.load(Ordering::SeqCst, guard);
-
-                // safety: we loaded the table while epoch was pinned. table won't be deallocated
-                // until next epoch at the earliest.
-                if table.is_null() || unsafe { table.deref() }.is_empty() {
-                    let n = if sc > 0 {
-                        sc as usize
-                    } else {
-                        DEFAULT_CAPACITY
-                    };
-                    let new_table = Owned::new(Table::new(n));
-                    table = new_table.into_shared(guard);
-                    self.table.store(table, Ordering::SeqCst);
-                    sc = load_factor!(n as isize)
-                }
-                self.size_ctl.store(sc, Ordering::SeqCst);
-                break table;
-            }
+    pub(crate) fn guarded_eq(&self, other: &Self, our_guard: &Guard, their_guard: &Guard) -> bool
+    where
+        V: PartialEq,
+    {
+        if self.len() != other.len() {
+            return false;
         }
-    }
 
-    #[inline]
-    /// Inserts a key-value pair into the map.
-    ///
-    /// If the map did not have this key present, [`None`] is returned.
-    ///
-    /// If the map did have this key present, the value is updated, and the old
-    /// value is returned. The key is not updated, though; this matters for
-    /// types that can be `==` without being identical. See the [std-collections
-    /// documentation] for more.
-    ///
-    /// [`None`]: std::option::Option::None
-    /// [std-collections documentation]: https://doc.rust-lang.org/std/collections/index.html#insert-and-complex-keys
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashMap;
-    ///
-    /// let map = HashMap::new();
-    /// assert_eq!(map.pin().insert(37, "a"), None);
-    /// assert_eq!(map.pin().is_empty(), false);
-    ///
-    /// // you can also re-use a map pin like so:
-    /// let mref = map.pin();
-    ///
-    /// mref.insert(37, "b");
-    /// assert_eq!(mref.insert(37, "c"), Some(&"b"));
-    /// assert_eq!(mref.get(&37), Some(&"c"));
-    /// ```
-    pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
-        self.check_guard(guard);
-        self.put(key, value, false, guard)
+        self.iter(our_guard)
+            .all(|(key, value)| other.get(key, their_guard).map_or(false, |v| *value == *v))
     }
+}
 
+// ===
+// the following methods only ever _remove_ items, but never introduce them, so they do not need
+// the thread-safety bounds.
+// ===
+
+impl<K, V, S> HashMap<K, V, S>
+where
+    K: Clone,
+{
     /// Clears the map, removing all key-value pairs.
     ///
     /// # Examples
@@ -670,6 +1298,52 @@ where
         if delta != 0 {
             self.add_count(delta, None, guard);
         }
+    }
+}
+
+// ===
+// the following methods _do_ introduce items into the map, and so must require that the keys and
+// values are thread safe, and can be garbage collected at a later time.
+// ===
+
+impl<K, V, S> HashMap<K, V, S>
+where
+    K: 'static + Sync + Send + Clone + Hash + Eq,
+    V: 'static + Sync + Send,
+    S: BuildHasher,
+{
+    #[inline]
+    /// Inserts a key-value pair into the map.
+    ///
+    /// If the map did not have this key present, [`None`] is returned.
+    ///
+    /// If the map did have this key present, the value is updated, and the old
+    /// value is returned. The key is not updated, though; this matters for
+    /// types that can be `==` without being identical. See the [std-collections
+    /// documentation] for more.
+    ///
+    /// [`None`]: std::option::Option::None
+    /// [std-collections documentation]: https://doc.rust-lang.org/std/collections/index.html#insert-and-complex-keys
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    /// assert_eq!(map.pin().insert(37, "a"), None);
+    /// assert_eq!(map.pin().is_empty(), false);
+    ///
+    /// // you can also re-use a map pin like so:
+    /// let mref = map.pin();
+    ///
+    /// mref.insert(37, "b");
+    /// assert_eq!(mref.insert(37, "c"), Some(&"b"));
+    /// assert_eq!(mref.get(&37), Some(&"c"));
+    /// ```
+    pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
+        self.check_guard(guard);
+        self.put(key, value, false, guard)
     }
 
     fn put<'g>(
@@ -1084,549 +1758,6 @@ where
         }
     }
 
-    fn help_transfer<'g>(
-        &'g self,
-        table: Shared<'g, Table<K, V>>,
-        guard: &'g Guard,
-    ) -> Shared<'g, Table<K, V>> {
-        if table.is_null() {
-            return table;
-        }
-
-        // safety: table is only dropped on the next epoch change after it is swapped to null.
-        // we read it as not null, so it must not be dropped until a subsequent epoch. since we
-        // held `guard` at the time, we know that the current epoch continues to persist, and that
-        // our reference is therefore valid.
-        let next_table = unsafe { table.deref() }.next_table(guard);
-        if next_table.is_null() {
-            return table;
-        }
-
-        // safety: same as above
-        let rs = Self::resize_stamp(unsafe { table.deref() }.len()) << RESIZE_STAMP_SHIFT;
-
-        while next_table == self.next_table.load(Ordering::SeqCst, guard)
-            && table == self.table.load(Ordering::SeqCst, guard)
-        {
-            let sc = self.size_ctl.load(Ordering::SeqCst);
-            if sc >= 0
-                || sc == rs + MAX_RESIZERS
-                || sc == rs + 1
-                || self.transfer_index.load(Ordering::SeqCst) <= 0
-            {
-                break;
-            }
-
-            if self.size_ctl.compare_and_swap(sc, sc + 1, Ordering::SeqCst) == sc {
-                self.transfer(table, next_table, guard);
-                break;
-            }
-        }
-        next_table
-    }
-
-    fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard) {
-        // TODO: implement the Java CounterCell business here
-
-        use std::cmp;
-        let mut count = match n.cmp(&0) {
-            cmp::Ordering::Greater => {
-                let n = n as usize;
-                self.count.fetch_add(n, Ordering::SeqCst) + n
-            }
-            cmp::Ordering::Less => {
-                let n = n.abs() as usize;
-                self.count.fetch_sub(n, Ordering::SeqCst) - n
-            }
-            cmp::Ordering::Equal => self.count.load(Ordering::SeqCst),
-        };
-
-        // if resize_hint is None, it means the caller does not want us to consider a resize.
-        // if it is Some(n), the caller saw n entries in a bin
-        if resize_hint.is_none() {
-            return;
-        }
-
-        // TODO: use the resize hint
-        let _saw_bin_length = resize_hint.unwrap();
-
-        loop {
-            let sc = self.size_ctl.load(Ordering::SeqCst);
-            if (count as isize) < sc {
-                // we're not at the next resize point yet
-                break;
-            }
-
-            let table = self.table.load(Ordering::SeqCst, guard);
-            if table.is_null() {
-                // table will be initalized by another thread anyway
-                break;
-            }
-
-            // safety: table is only dropped on the next epoch change after it is swapped to null.
-            // we read it as not null, so it must not be dropped until a subsequent epoch. since we
-            // hold a Guard, we know that the current epoch will persist, and that our reference
-            // will therefore remain valid.
-            let n = unsafe { table.deref() }.len();
-            if n >= MAXIMUM_CAPACITY {
-                // can't resize any more anyway
-                break;
-            }
-
-            let rs = Self::resize_stamp(n) << RESIZE_STAMP_SHIFT;
-            if sc < 0 {
-                // ongoing resize! can we join the resize transfer?
-                if sc == rs + MAX_RESIZERS || sc == rs + 1 {
-                    break;
-                }
-                let nt = self.next_table.load(Ordering::SeqCst, guard);
-                if nt.is_null() {
-                    break;
-                }
-                if self.transfer_index.load(Ordering::SeqCst) <= 0 {
-                    break;
-                }
-
-                // try to join!
-                if self.size_ctl.compare_and_swap(sc, sc + 1, Ordering::SeqCst) == sc {
-                    self.transfer(table, nt, guard);
-                }
-            } else if self.size_ctl.compare_and_swap(sc, rs + 2, Ordering::SeqCst) == sc {
-                // a resize is needed, but has not yet started
-                // TODO: figure out why this is rs + 2, not just rs
-                // NOTE: this also applies to `try_presize`
-                self.transfer(table, Shared::null(), guard);
-            }
-
-            // another resize may be needed!
-            count = self.count.load(Ordering::SeqCst);
-        }
-    }
-
-    fn transfer<'g>(
-        &'g self,
-        table: Shared<'g, Table<K, V>>,
-        mut next_table: Shared<'g, Table<K, V>>,
-        guard: &'g Guard,
-    ) {
-        // safety: table was read while `guard` was held. the code that drops table only drops it
-        // after it is no longer reachable, and any outstanding references are no longer active.
-        // this references is still active (marked by the guard), so the target of the references
-        // won't be dropped while the guard remains active.
-        let n = unsafe { table.deref() }.len();
-        let ncpu = num_cpus();
-
-        let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n };
-        let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
-
-        if next_table.is_null() {
-            // we are initiating a resize
-            let table = Owned::new(Table::new(n << 1));
-            let now_garbage = self.next_table.swap(table, Ordering::SeqCst, guard);
-            assert!(now_garbage.is_null());
-            self.transfer_index.store(n as isize, Ordering::SeqCst);
-            next_table = self.next_table.load(Ordering::Relaxed, guard);
-        }
-
-        // safety: same argument as for table above
-        let next_n = unsafe { next_table.deref() }.len();
-
-        let mut advance = true;
-        let mut finishing = false;
-        let mut i = 0;
-        let mut bound = 0;
-        loop {
-            // try to claim a range of bins for us to transfer
-            while advance {
-                i -= 1;
-                if i >= bound || finishing {
-                    advance = false;
-                    break;
-                }
-
-                let next_index = self.transfer_index.load(Ordering::SeqCst);
-                if next_index <= 0 {
-                    i = -1;
-                    advance = false;
-                    break;
-                }
-
-                let next_bound = if next_index > stride {
-                    next_index - stride
-                } else {
-                    0
-                };
-                if self
-                    .transfer_index
-                    .compare_and_swap(next_index, next_bound, Ordering::SeqCst)
-                    == next_index
-                {
-                    bound = next_bound;
-                    i = next_index;
-                    advance = false;
-                    break;
-                }
-            }
-
-            if i < 0 || i as usize >= n || i as usize + n >= next_n {
-                // the resize has finished
-
-                if finishing {
-                    // this branch is only taken for one thread partaking in the resize!
-                    self.next_table.store(Shared::null(), Ordering::SeqCst);
-                    let now_garbage = self.table.swap(next_table, Ordering::SeqCst, guard);
-                    // safety: need to guarantee that now_garbage is no longer reachable. more
-                    // specifically, no thread that executes _after_ this line can ever get a
-                    // reference to now_garbage.
-                    //
-                    // first, we need to argue that there is no _other_ way to get to now_garbage.
-                    //
-                    //  - it is _not_ accessible through self.table any more
-                    //  - it is _not_ accessible through self.next_table any more
-                    //  - what about forwarding nodes (BinEntry::Moved)?
-                    //    the only BinEntry::Moved that point to now_garbage, are the ones in
-                    //    _previous_ tables. to get to those previous tables, one must ultimately
-                    //    have arrived through self.table (because that's where all operations
-                    //    start their search). since self.table has now changed, only "old" threads
-                    //    can still be accessing them. no new thread can get to past tables, and
-                    //    therefore they also cannot get to ::Moved that point to now_garbage, so
-                    //    we're fine.
-                    //
-                    // this means that no _future_ thread (i.e., in a later epoch where the value
-                    // may be freed) can get a reference to now_garbage.
-                    //
-                    // next, let's talk about threads with _existing_ references to now_garbage.
-                    // such a thread must have gotten that reference before the call to swap.
-                    // because of this, that thread must be pinned to an epoch <= the epoch of our
-                    // guard (since our guard is pinning the epoch). since the garbage is placed in
-                    // our epoch, it won't be freed until the _next_ epoch, at which point, that
-                    // thread must have dropped its guard, and with it, any reference to the value.
-                    unsafe { guard.defer_destroy(now_garbage) };
-                    self.size_ctl
-                        .store(((n as isize) << 1) - ((n as isize) >> 1), Ordering::SeqCst);
-                    return;
-                }
-
-                let sc = self.size_ctl.load(Ordering::SeqCst);
-                if self.size_ctl.compare_and_swap(sc, sc - 1, Ordering::SeqCst) == sc {
-                    if (sc - 2) != Self::resize_stamp(n) << RESIZE_STAMP_SHIFT {
-                        return;
-                    }
-
-                    // we are the chosen thread to finish the resize!
-                    finishing = true;
-
-                    // ???
-                    advance = true;
-
-                    // NOTE: the java code says "recheck before commit" here
-                    i = n as isize;
-                }
-
-                continue;
-            }
-            let i = i as usize;
-
-            // safety: these were read while `guard` was held. the code that drops these, only
-            // drops them after a) they are no longer reachable, and b) any outstanding references
-            // are no longer active. these references are still active (marked by the guard), so
-            // the target of these references won't be dropped while the guard remains active.
-            let table = unsafe { table.deref() };
-
-            let bin = table.bin(i as usize, guard);
-            if bin.is_null() {
-                advance = table
-                    .cas_bin(i, Shared::null(), table.get_moved(next_table, guard), guard)
-                    .is_ok();
-                continue;
-            }
-            // safety: as for table above
-            let next_table = unsafe { next_table.deref() };
-
-            // safety: bin is a valid pointer.
-            //
-            // there are two cases when a bin pointer is invalidated:
-            //
-            //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-            //     that case, the table (and all its heads) will be dropped in the next epoch
-            //     following that.
-            //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-            //     will then be dropped in the following epoch after that happens.
-            //
-            // in both cases, we held the guard when we got the reference to the bin. if any such
-            // swap happened, it must have happened _after_ we read. since we did the read while
-            // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
-            // are holding up by holding on to our guard).
-            match *unsafe { bin.deref() } {
-                BinEntry::Moved => {
-                    // already processed
-                    advance = true;
-                }
-                BinEntry::Node(ref head) => {
-                    // bin is non-empty, need to link into it, so we must take the lock
-                    let head_lock = head.lock.lock();
-
-                    // need to check that this is _still_ the head
-                    let current_head = table.bin(i, guard);
-                    if current_head.as_raw() != bin.as_raw() {
-                        // nope -- try again from the start
-                        continue;
-                    }
-
-                    // yes, it is still the head, so we can now "own" the bin
-                    // note that there can still be readers in the bin!
-
-                    // TODO: TreeBin & ReservationNode
-
-                    let mut run_bit = head.hash & n as u64;
-                    let mut last_run = bin;
-                    let mut p = bin;
-                    loop {
-                        // safety: p is a valid pointer.
-                        //
-                        // p is only dropped in the next epoch following when its bin is replaced
-                        // with a move node (see safety comment near table.store_bin below). we
-                        // read the bin, and got to p, so its bin has not yet been swapped with a
-                        // move node. and, we have the epoch pinned, so the next epoch cannot have
-                        // arrived yet. therefore, it will be dropped in a future epoch, and is
-                        // safe to use now.
-                        let node = unsafe { p.deref() }.as_node().unwrap();
-                        let next = node.next.load(Ordering::SeqCst, guard);
-
-                        let b = node.hash & n as u64;
-                        if b != run_bit {
-                            run_bit = b;
-                            last_run = p;
-                        }
-
-                        if next.is_null() {
-                            break;
-                        }
-                        p = next;
-                    }
-
-                    let mut low_bin = Shared::null();
-                    let mut high_bin = Shared::null();
-                    if run_bit == 0 {
-                        // last run is all in the low bin
-                        low_bin = last_run;
-                    } else {
-                        // last run is all in the high bin
-                        high_bin = last_run;
-                    }
-
-                    p = bin;
-                    while p != last_run {
-                        // safety: p is a valid pointer.
-                        //
-                        // p is only dropped in the next epoch following when its bin is replaced
-                        // with a move node (see safety comment near table.store_bin below). we
-                        // read the bin, and got to p, so its bin has not yet been swapped with a
-                        // move node. and, we have the epoch pinned, so the next epoch cannot have
-                        // arrived yet. therefore, it will be dropped in a future epoch, and is
-                        // safe to use now.
-                        let node = unsafe { p.deref() }.as_node().unwrap();
-
-                        let link = if node.hash & n as u64 == 0 {
-                            // to the low bin!
-                            &mut low_bin
-                        } else {
-                            // to the high bin!
-                            &mut high_bin
-                        };
-
-                        *link = Owned::new(BinEntry::Node(Node {
-                            hash: node.hash,
-                            key: node.key.clone(),
-                            lock: parking_lot::Mutex::new(()),
-                            value: node.value.clone(),
-                            next: Atomic::from(*link),
-                        }))
-                        .into_shared(guard);
-
-                        p = node.next.load(Ordering::SeqCst, guard);
-                    }
-
-                    next_table.store_bin(i, low_bin);
-                    next_table.store_bin(i + n, high_bin);
-                    table.store_bin(
-                        i,
-                        table.get_moved(Shared::from(next_table as *const _), guard),
-                    );
-
-                    // everything up to last_run in the _old_ bin linked list is now garbage.
-                    // those nodes have all been re-allocated in the new bin linked list.
-                    p = bin;
-                    while p != last_run {
-                        // safety:
-                        //
-                        // we need to argue that there is no longer a way to access p. the only way
-                        // to get to p is through table[i]. since table[i] has been replaced by a
-                        // BinEntry::Moved, p is no longer accessible.
-                        //
-                        // any existing reference to p must have been taken before table.store_bin.
-                        // at that time we had the epoch pinned, so any threads that have such a
-                        // reference must be before or at our epoch. since the p isn't destroyed
-                        // until the next epoch, those old references are fine since they are tied
-                        // to those old threads' pins of the old epoch.
-                        let next = unsafe { p.deref() }
-                            .as_node()
-                            .unwrap()
-                            .next
-                            .load(Ordering::SeqCst, guard);
-                        unsafe { guard.defer_destroy(p) };
-                        p = next;
-                    }
-
-                    advance = true;
-
-                    drop(head_lock);
-                }
-            }
-        }
-    }
-
-    /// Returns the stamp bits for resizing a table of size n.
-    /// Must be negative when shifted left by RESIZE_STAMP_SHIFT.
-    fn resize_stamp(n: usize) -> isize {
-        n.leading_zeros() as isize | (1_isize << (RESIZE_STAMP_BITS - 1))
-    }
-
-    /// Tries to presize table to accommodate the given number of elements.
-    fn try_presize(&self, size: usize, guard: &Guard) {
-        let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
-            MAXIMUM_CAPACITY
-        } else {
-            // round the requested_capacity to the next power of to from 1.5 * size + 1
-            // TODO: find out if this is neccessary
-            let size = size + (size >> 1) + 1;
-
-            std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
-        } as isize;
-
-        loop {
-            let size_ctl = self.size_ctl.load(Ordering::SeqCst);
-            if size_ctl < 0 {
-                break;
-            }
-
-            let table = self.table.load(Ordering::SeqCst, &guard);
-
-            // The current capacity == the number of bins in the current table
-            let current_capactity = if table.is_null() {
-                0
-            } else {
-                unsafe { table.deref() }.len()
-            };
-
-            if current_capactity == 0 {
-                // the table has not yet been initialized, so we can just create it
-                // with as many bins as were requested
-
-                // since the map is uninitialized, size_ctl describes the initial capacity
-                let initial_capacity = size_ctl;
-
-                // the new capacity is either the requested capacity or the initial capacity (size_ctl)
-                let new_capacity = requested_capacity.max(initial_capacity) as usize;
-
-                // try to aquire the initialization "lock" to indicate that we are initializing the table.
-                if self
-                    .size_ctl
-                    .compare_and_swap(size_ctl, -1, Ordering::SeqCst)
-                    != size_ctl
-                {
-                    // somebody else is already initializing the table (or has already finished).
-                    continue;
-                }
-
-                // we got the initialization `lock`; Make sure the table is still unitialized
-                // (or is the same table with 0 bins we read earlier, althought that should not be the case)
-                if self.table.load(Ordering::SeqCst, guard) != table {
-                    // NOTE: this could probably be `!self.table.load(...).is_null()`
-                    // if we decide that tables can never have 0 bins.
-
-                    // the table is already initialized; Write the `size_ctl` value it had back to it's
-                    // `size_ctl` field to release the initialization "lock"
-                    self.size_ctl.store(size_ctl, Ordering::SeqCst);
-                    continue;
-                }
-
-                // create a table with `new_capacity` empty bins
-                let new_table = Owned::new(Table::new(new_capacity)).into_shared(guard);
-
-                // store the new table to `self.table`
-                let old_table = self.table.swap(new_table, Ordering::SeqCst, &guard);
-
-                // old_table should be `null`, since we don't ever initialize a table with 0 bins
-                // and this branch only happens if table has not yet been initialized or it's length is 0.
-                assert!(old_table.is_null());
-
-                // TODO: if we allow tables with 0 bins. `defer_destroy` `old_table` if it's not `null`:
-                // if !old_table.is_null() {
-                //     // TODO: safety argument, for why this is okay
-                //     unsafe { guard.defer_destroy(old_table) }
-                // }
-
-                // resize the table once it is 75% full
-                let new_load_to_resize_at = load_factor!(new_capacity as isize);
-
-                // store the next load at which the table should resize to it's size_ctl field
-                // and thus release the initialization "lock"
-                self.size_ctl.store(new_load_to_resize_at, Ordering::SeqCst);
-            } else if requested_capacity <= size_ctl || current_capactity >= MAXIMUM_CAPACITY {
-                // Either the `requested_capacity` was smaller than or equal to the load we would resize at (size_ctl)
-                // and we don't need to resize, since our load factor will still be acceptable if we don't
-
-                // Or it was larger than the `MAXIMUM_CAPACITY` of the map and we refuse
-                // to resize to an invalid capacity
-                break;
-            } else if table == self.table.load(Ordering::SeqCst, &guard) {
-                // The table is initialized, try to resize it to the requested capacity
-
-                let rs: isize = Self::resize_stamp(current_capactity) << RESIZE_STAMP_SHIFT;
-                // TODO: see #29: `rs` is postive even though `resize_stamp` says:
-                // "Must be negative when shifted left by RESIZE_STAMP_SHIFT"
-                // and since our size_control field needs to be negative
-                // to indicate a resize this needs to be addressed
-
-                if self
-                    .size_ctl
-                    .compare_and_swap(size_ctl, rs + 2, Ordering::SeqCst)
-                    == size_ctl
-                {
-                    // someone else already started to resize the table
-                    // TODO: can we `self.help_transfer`?
-                    self.transfer(table, Shared::null(), &guard);
-                }
-            }
-        }
-    }
-
-    #[inline]
-    /// Tries to reserve capacity for at least `additional` more elements to
-    /// be inserted in the `HashMap`. The collection may reserve more space to
-    /// avoid frequent reallocations.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashMap;
-    ///
-    /// let map: HashMap<&str, i32> = HashMap::new();
-    ///
-    /// map.pin().reserve(10);
-    /// ```
-    ///
-    /// # Notes
-    ///
-    /// Reserving does not panic in flurry. If the new size is invalid, no
-    /// reallocation takes place.
-    pub fn reserve(&self, additional: usize, guard: &Guard) {
-        self.check_guard(guard);
-        let absolute = self.len() + additional;
-        self.try_presize(absolute, guard);
-    }
-
     /// Removes a key from the map, returning a reference to the value at the
     /// key if the key was previously in the map.
     ///
@@ -1652,6 +1783,9 @@ where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
+        // NOTE: _technically_, this method shouldn't require the thread-safety bounds, but a) that
+        // would require special-casing replace_node for when new_value.is_none(), and b) it's sort
+        // of useless to call remove on a collection that you know you can never insert into.
         self.check_guard(guard);
         self.replace_node(key, None, None, guard)
     }
@@ -1896,102 +2030,12 @@ where
             }
         }
     }
-
-    /// An iterator visiting all key-value pairs in arbitrary order.
-    /// The iterator element type is `(&'g K, &'g V)`.
-    pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V> {
-        self.check_guard(guard);
-        let table = self.table.load(Ordering::SeqCst, guard);
-        let node_iter = NodeIter::new(table, guard);
-        Iter { node_iter, guard }
-    }
-
-    /// An iterator visiting all keys in arbitrary order.
-    /// The iterator element type is `&'g K`.
-    pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V> {
-        self.check_guard(guard);
-        let table = self.table.load(Ordering::SeqCst, guard);
-        let node_iter = NodeIter::new(table, guard);
-        Keys { node_iter }
-    }
-
-    /// An iterator visiting all values in arbitrary order.
-    /// The iterator element type is `&'g V`.
-    pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V> {
-        self.check_guard(guard);
-        let table = self.table.load(Ordering::SeqCst, guard);
-        let node_iter = NodeIter::new(table, guard);
-        Values { node_iter, guard }
-    }
-
-    #[inline]
-    /// Returns the number of entries in the map.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashMap;
-    ///
-    /// let map = HashMap::new();
-    ///
-    /// map.pin().insert(1, "a");
-    /// map.pin().insert(2, "b");
-    /// assert!(map.pin().len() == 2);
-    /// ```
-    pub fn len(&self) -> usize {
-        self.count.load(Ordering::Relaxed)
-    }
-
-    #[inline]
-    #[cfg(test)]
-    /// Returns the capacity of the map.
-    fn capacity(&self, guard: &Guard) -> usize {
-        self.check_guard(guard);
-        let table = self.table.load(Ordering::Relaxed, &guard);
-
-        if table.is_null() {
-            0
-        } else {
-            // Safety: we loaded `table` under the `guard`,
-            // so it must still be valid here
-            unsafe { table.deref() }.len()
-        }
-    }
-
-    #[inline]
-    /// Returns `true` if the map is empty. Otherwise returns `false`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashMap;
-    ///
-    /// let map = HashMap::new();
-    /// assert!(map.pin().is_empty());
-    /// map.pin().insert("a", 1);
-    /// assert!(!map.pin().is_empty());
-    /// ```
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    pub(crate) fn guarded_eq(&self, other: &Self, our_guard: &Guard, their_guard: &Guard) -> bool
-    where
-        V: PartialEq,
-    {
-        if self.len() != other.len() {
-            return false;
-        }
-
-        self.iter(our_guard)
-            .all(|(key, value)| other.get(key, their_guard).map_or(false, |v| *value == *v))
-    }
 }
 
 impl<K, V, S> PartialEq for HashMap<K, V, S>
 where
-    K: Sync + Send + Clone + Eq + Hash,
-    V: Sync + Send + PartialEq,
+    K: Eq + Hash,
+    V: PartialEq,
     S: BuildHasher,
 {
     fn eq(&self, other: &Self) -> bool {
@@ -2004,17 +2048,16 @@ where
 
 impl<K, V, S> Eq for HashMap<K, V, S>
 where
-    K: Sync + Send + Clone + Eq + Hash,
-    V: Sync + Send + Eq,
+    K: Eq + Hash,
+    V: Eq,
     S: BuildHasher,
 {
 }
 
 impl<K, V, S> fmt::Debug for HashMap<K, V, S>
 where
-    K: Sync + Send + Clone + Debug + Eq + Hash,
-    V: Sync + Send + Debug,
-    S: BuildHasher,
+    K: Debug,
+    V: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let guard = self.collector.register().pin();
@@ -2048,8 +2091,8 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
 
 impl<K, V, S> Extend<(K, V)> for &HashMap<K, V, S>
 where
-    K: Sync + Send + Clone + Hash + Eq,
-    V: Sync + Send,
+    K: 'static + Sync + Send + Clone + Hash + Eq,
+    V: 'static + Sync + Send,
     S: BuildHasher,
 {
     #[inline]
@@ -2074,8 +2117,8 @@ where
 
 impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &HashMap<K, V, S>
 where
-    K: Sync + Send + Copy + Hash + Eq,
-    V: Sync + Send + Copy,
+    K: 'static + Sync + Send + Copy + Hash + Eq,
+    V: 'static + Sync + Send + Copy,
     S: BuildHasher,
 {
     #[inline]
@@ -2086,8 +2129,8 @@ where
 
 impl<K, V, S> FromIterator<(K, V)> for HashMap<K, V, S>
 where
-    K: Sync + Send + Clone + Hash + Eq,
-    V: Sync + Send,
+    K: 'static + Sync + Send + Clone + Hash + Eq,
+    V: 'static + Sync + Send,
     S: BuildHasher + Default,
 {
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
@@ -2112,8 +2155,8 @@ where
 
 impl<'a, K, V, S> FromIterator<(&'a K, &'a V)> for HashMap<K, V, S>
 where
-    K: Sync + Send + Copy + Hash + Eq,
-    V: Sync + Send + Copy,
+    K: 'static + Sync + Send + Copy + Hash + Eq,
+    V: 'static + Sync + Send + Copy,
     S: BuildHasher + Default,
 {
     #[inline]
@@ -2124,8 +2167,8 @@ where
 
 impl<'a, K, V, S> FromIterator<&'a (K, V)> for HashMap<K, V, S>
 where
-    K: Sync + Send + Copy + Hash + Eq,
-    V: Sync + Send + Copy,
+    K: 'static + Sync + Send + Copy + Hash + Eq,
+    V: 'static + Sync + Send + Copy,
     S: BuildHasher + Default,
 {
     #[inline]
@@ -2136,8 +2179,8 @@ where
 
 impl<K, V, S> Clone for HashMap<K, V, S>
 where
-    K: Sync + Send + Clone + Hash + Eq,
-    V: Sync + Send + Clone,
+    K: 'static + Sync + Send + Clone + Hash + Eq,
+    V: 'static + Sync + Send + Clone,
     S: BuildHasher + Clone,
 {
     fn clone(&self) -> HashMap<K, V, S> {

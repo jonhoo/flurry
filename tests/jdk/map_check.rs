@@ -26,7 +26,7 @@ where
 
 fn t2<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: Sync + Send + Copy + Hash + Eq + std::fmt::Display,
+    K: 'static + Sync + Send + Copy + Hash + Eq + std::fmt::Display,
 {
     let mut sum = 0;
     let guard = epoch::pin();
@@ -40,7 +40,7 @@ where
 
 fn t3<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: Sync + Send + Copy + Hash + Eq,
+    K: 'static + Sync + Send + Copy + Hash + Eq,
 {
     let mut sum = 0;
     let guard = epoch::pin();
@@ -68,7 +68,7 @@ where
 
 fn t5<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: Sync + Send + Copy + Hash + Eq,
+    K: 'static + Sync + Send + Copy + Hash + Eq,
 {
     let mut sum = 0;
     let guard = epoch::pin();
