@@ -176,6 +176,30 @@ impl<K, V> HashMap<K, V, crate::DefaultHashBuilder> {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Creates an empty `HashMap` with the specified capacity.
+    ///
+    /// The hash map will be able to hold at least `capacity` elements without
+    /// reallocating. If `capacity` is 0, the hash map will not allocate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// let map: HashMap<&str, i32> = HashMap::with_capacity(10);
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// There is no guarantee that the HashMap will not resize if `capacity`
+    /// elements are inserted. The map will resize based on key collision, so
+    /// bad key distribution may cause a resize before `capacity` is reached.
+    /// For more information see the [`resizing behavior`]
+    ///
+    /// [`resizing behavior`]: index.html#resizing-behavior
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
+    }
 }
 
 impl<K, V, S> Default for HashMap<K, V, S>
@@ -215,6 +239,36 @@ impl<K, V, S> HashMap<K, V, S> {
             build_hasher: hash_builder,
             collector: epoch::default_collector().clone(),
         }
+    }
+
+    /// Creates an empty map with the specified `capacity`, using `hash_builder` to hash the keys.
+    ///
+    /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
+    /// (assuming uniformly distributed hashes). If `capacity` is 0, the call will not allocate,
+    /// and is equivalent to [`HashMap::new`].
+    ///
+    /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
+    /// to be resistant to attacks that cause many collisions and very poor performance.
+    /// Setting it manually using this function can expose a DoS attack vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    /// use std::collections::hash_map::RandomState;
+    ///
+    /// let s = RandomState::new();
+    /// let map = HashMap::with_capacity_and_hasher(10, s);
+    /// map.pin().insert(1, 2);
+    /// ```
+    pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
+        if capacity == 0 {
+            return Self::with_hasher(hash_builder);
+        }
+
+        let mut map = Self::with_hasher(hash_builder);
+        map.presize(capacity);
+        map
     }
 
     /*
@@ -382,6 +436,47 @@ impl<K, V, S> HashMap<K, V, S> {
             }
         }
     }
+
+    /// Presize the table to accommodate the given number of elements.
+    fn presize(&mut self, size: usize) {
+        // NOTE: this is a stripped-down version of try_presize for use only when we _know_ that
+        // the table is new, and that therefore we won't have to help out with transfers or deal
+        // with contending initializations.
+
+        // safety: we are creating this map, so no other thread can access it,
+        // while we are initializing it.
+        let guard = unsafe { epoch::unprotected() };
+
+        let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
+            MAXIMUM_CAPACITY
+        } else {
+            // round the requested_capacity to the next power of to from 1.5 * size + 1
+            // TODO: find out if this is neccessary
+            let size = size + (size >> 1) + 1;
+
+            std::cmp::min(MAXIMUM_CAPACITY, size.next_power_of_two())
+        } as usize;
+
+        // sanity check that the map has indeed not been set up already
+        assert_eq!(self.size_ctl.load(Ordering::SeqCst), 0);
+        assert!(self.table.load(Ordering::SeqCst, &guard).is_null());
+
+        // the table has not yet been initialized, so we can just create it
+        // with as many bins as were requested
+
+        // create a table with `new_capacity` empty bins
+        let new_table = Owned::new(Table::new(requested_capacity)).into_shared(guard);
+
+        // store the new table to `self.table`
+        self.table.store(new_table, Ordering::SeqCst);
+
+        // resize the table once it is 75% full
+        let new_load_to_resize_at = load_factor!(requested_capacity as isize);
+
+        // store the next load at which the table should resize to it's size_ctl field
+        // and thus release the initialization "lock"
+        self.size_ctl.store(new_load_to_resize_at, Ordering::SeqCst);
+    }
 }
 
 // ===
@@ -391,72 +486,10 @@ impl<K, V, S> HashMap<K, V, S> {
 // transfered anyway.
 // ===
 
-impl<K, V> HashMap<K, V, crate::DefaultHashBuilder>
-where
-    K: Clone,
-{
-    /// Creates an empty `HashMap` with the specified capacity.
-    ///
-    /// The hash map will be able to hold at least `capacity` elements without
-    /// reallocating. If `capacity` is 0, the hash map will not allocate.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashMap;
-    /// let map: HashMap<&str, i32> = HashMap::with_capacity(10);
-    /// ```
-    ///
-    /// # Notes
-    ///
-    /// There is no guarantee that the HashMap will not resize if `capacity`
-    /// elements are inserted. The map will resize based on key collision, so
-    /// bad key distribution may cause a resize before `capacity` is reached.
-    /// For more information see the [`resizing behavior`]
-    ///
-    /// [`resizing behavior`]: index.html#resizing-behavior
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
-    }
-}
-
 impl<K, V, S> HashMap<K, V, S>
 where
     K: Clone,
 {
-    /// Creates an empty map with the specified `capacity`, using `hash_builder` to hash the keys.
-    ///
-    /// The map will be sized to accommodate `capacity` elements with a low chance of reallocating
-    /// (assuming uniformly distributed hashes). If `capacity` is 0, the call will not allocate,
-    /// and is equivalent to [`HashMap::new`].
-    ///
-    /// Warning: `hash_builder` is normally randomly generated, and is designed to allow the map
-    /// to be resistant to attacks that cause many collisions and very poor performance.
-    /// Setting it manually using this function can expose a DoS attack vector.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashMap;
-    /// use std::collections::hash_map::RandomState;
-    ///
-    /// let s = RandomState::new();
-    /// let map = HashMap::with_capacity_and_hasher(10, s);
-    /// map.pin().insert(1, 2);
-    /// ```
-    pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
-        if capacity == 0 {
-            return Self::with_hasher(hash_builder);
-        }
-
-        let map = Self::with_hasher(hash_builder);
-
-        // safety: we are creating this map, so no other thread can access it,
-        // while we are initializing it.
-        map.try_presize(capacity, unsafe { epoch::unprotected() });
-        map
-    }
-
     /// Tries to presize table to accommodate the given number of elements.
     fn try_presize(&self, size: usize, guard: &Guard) {
         let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
