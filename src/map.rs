@@ -343,6 +343,45 @@ impl<K, V, S> HashMap<K, V, S> {
         let node_iter = NodeIter::new(table, guard);
         Values { node_iter, guard }
     }
+
+    fn init_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
+        loop {
+            let table = self.table.load(Ordering::SeqCst, guard);
+            // safety: we loaded the table while epoch was pinned. table won't be deallocated until
+            // next epoch at the earliest.
+            if !table.is_null() && !unsafe { table.deref() }.is_empty() {
+                break table;
+            }
+            // try to allocate the table
+            let mut sc = self.size_ctl.load(Ordering::SeqCst);
+            if sc < 0 {
+                // we lost the initialization race; just spin
+                std::thread::yield_now();
+                continue;
+            }
+
+            if self.size_ctl.compare_and_swap(sc, -1, Ordering::SeqCst) == sc {
+                // we get to do it!
+                let mut table = self.table.load(Ordering::SeqCst, guard);
+
+                // safety: we loaded the table while epoch was pinned. table won't be deallocated
+                // until next epoch at the earliest.
+                if table.is_null() || unsafe { table.deref() }.is_empty() {
+                    let n = if sc > 0 {
+                        sc as usize
+                    } else {
+                        DEFAULT_CAPACITY
+                    };
+                    let new_table = Owned::new(Table::new(n));
+                    table = new_table.into_shared(guard);
+                    self.table.store(table, Ordering::SeqCst);
+                    sc = load_factor!(n as isize)
+                }
+                self.size_ctl.store(sc, Ordering::SeqCst);
+                break table;
+            }
+        }
+    }
 }
 
 // ===
@@ -955,45 +994,6 @@ where
         self.check_guard(guard);
         let absolute = self.len() + additional;
         self.try_presize(absolute, guard);
-    }
-
-    fn init_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
-        loop {
-            let table = self.table.load(Ordering::SeqCst, guard);
-            // safety: we loaded the table while epoch was pinned. table won't be deallocated until
-            // next epoch at the earliest.
-            if !table.is_null() && !unsafe { table.deref() }.is_empty() {
-                break table;
-            }
-            // try to allocate the table
-            let mut sc = self.size_ctl.load(Ordering::SeqCst);
-            if sc < 0 {
-                // we lost the initialization race; just spin
-                std::thread::yield_now();
-                continue;
-            }
-
-            if self.size_ctl.compare_and_swap(sc, -1, Ordering::SeqCst) == sc {
-                // we get to do it!
-                let mut table = self.table.load(Ordering::SeqCst, guard);
-
-                // safety: we loaded the table while epoch was pinned. table won't be deallocated
-                // until next epoch at the earliest.
-                if table.is_null() || unsafe { table.deref() }.is_empty() {
-                    let n = if sc > 0 {
-                        sc as usize
-                    } else {
-                        DEFAULT_CAPACITY
-                    };
-                    let new_table = Owned::new(Table::new(n));
-                    table = new_table.into_shared(guard);
-                    self.table.store(table, Ordering::SeqCst);
-                    sc = load_factor!(n as isize)
-                }
-                self.size_ctl.store(sc, Ordering::SeqCst);
-                break table;
-            }
-        }
     }
 }
 
