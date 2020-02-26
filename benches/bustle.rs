@@ -1,35 +1,75 @@
 use bustle::*;
 use flurry::*;
+use std::hash::Hash;
 use std::sync::Arc;
 
-#[derive(Clone)]
-struct Table<K: 'static + Send + Sync>(Arc<HashMap<K, ()>>);
+const REPIN_EVERY: usize = 1024;
 
-impl<K> BenchmarkTarget for Table<K>
+struct Table<K>(Arc<HashMap<K, ()>>);
+
+impl<K> Collection for Table<K>
 where
-    K: Sync + Send + From<u64> + Copy + 'static + std::hash::Hash + Eq + std::fmt::Debug,
+    K: Sync + Send + 'static + From<u64> + Copy + Hash + Eq,
 {
-    type Key = K;
+    type Handle = TableHandle<K>;
 
     fn with_capacity(capacity: usize) -> Self {
         Self(Arc::new(HashMap::with_capacity(capacity)))
     }
 
+    fn pin(&self) -> Self::Handle {
+        let map = Arc::clone(&self.0);
+        let guard = map.guard();
+        TableHandle {
+            map,
+            guard,
+            i: REPIN_EVERY,
+        }
+    }
+}
+
+struct TableHandle<K> {
+    map: Arc<HashMap<K, ()>>,
+    guard: epoch::Guard,
+    i: usize,
+}
+
+impl<K> TableHandle<K> {
+    #[inline(always)]
+    fn maybe_repin(&mut self) {
+        self.i -= 1;
+        if self.i == 0 {
+            self.i = REPIN_EVERY;
+            self.guard.repin();
+        }
+    }
+}
+
+impl<K> CollectionHandle for TableHandle<K>
+where
+    K: Sync + Send + 'static + From<u64> + Copy + Hash + Eq,
+{
+    type Key = K;
+
     fn get(&mut self, key: &Self::Key) -> bool {
-        self.0.pin().get(key).is_some()
+        self.maybe_repin();
+        self.map.with_guard(&self.guard).get(key).is_some()
     }
 
     fn insert(&mut self, key: &Self::Key) -> bool {
-        self.0.pin().insert(*key, ()).is_some()
+        self.maybe_repin();
+        self.map.with_guard(&self.guard).insert(*key, ()).is_some()
     }
 
     fn remove(&mut self, key: &Self::Key) -> bool {
-        self.0.pin().remove(key).is_some()
+        self.maybe_repin();
+        self.map.with_guard(&self.guard).remove(key).is_some()
     }
 
     fn update(&mut self, key: &Self::Key) -> bool {
-        self.0
-            .pin()
+        self.maybe_repin();
+        self.map
+            .with_guard(&self.guard)
             .compute_if_present(key, |_, _| Some(()))
             .is_some()
     }
