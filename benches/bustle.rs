@@ -76,5 +76,7 @@ where
 }
 
 fn main() {
-    Workload::new(1, Mix::read_heavy()).run::<Table<u64>>();
+    for n in 1..=num_cpus::get() {
+        Workload::new(n, Mix::read_heavy()).run::<Table<u64>>();
+    }
 }
