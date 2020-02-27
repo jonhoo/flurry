@@ -5,6 +5,7 @@ use std::hash::Hash;
 
 const SIZE: usize = 50_000;
 const ABSENT_SIZE: usize = 1 << 17;
+const ABSENT_MASK: usize = ABSENT_SIZE - 1;
 
 fn t1<K, V>(map: &HashMap<K, V>, keys: &[K], expect: usize)
 where
@@ -82,6 +83,24 @@ where
     assert_eq!(sum, expect);
 }
 
+fn t6<K, V>(map: &HashMap<K, V>, keys1: &[K], keys2: &[K], expect: usize)
+where
+    K: Sync + Send + Clone + Hash + Eq,
+    V: Sync + Send,
+{
+    let mut sum = 0;
+    let guard = epoch::pin();
+    for i in 0..expect {
+        if map.get(&keys1[i], &guard).is_some() {
+            sum += 1;
+        }
+        if map.get(&keys2[i & ABSENT_MASK], &guard).is_some() {
+            sum += 1;
+        }
+    }
+    assert_eq!(sum, expect);
+}
+
 fn t7<K>(map: &HashMap<K, usize>, k1: &[K], k2: &[K])
 where
     K: Sync + Send + Copy + Hash + Eq,
@@ -155,6 +174,8 @@ fn everything() {
     t4(&map, &keys[..], SIZE);
     // contains_key (absent)
     t4(&map, &absent_keys[..], 0);
+    // get
+    t6(&map, &keys[..], &absent_keys[..], SIZE);
     // get (present)
     t1(&map, &keys[..], SIZE);
     // get (absent)
