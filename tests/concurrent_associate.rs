@@ -26,7 +26,7 @@ fn insert(map: Arc<HashMap<KeyVal, KeyVal>>, g: &Guard, k: KeyVal) {
 }
 
 #[test]
-fn test_insert<'g>() {
+fn test_concurrent_insert<'g>() {
     test(insert);
 }
 
