@@ -502,16 +502,6 @@ fn default() {
 }
 
 #[test]
-fn get_and() {
-    let map: HashMap<usize, usize> = HashMap::new();
-
-    let guard = epoch::pin();
-    map.insert(42, 32, &guard);
-
-    assert_eq!(map.get_and(&42, |value| *value + 10, &guard), Some(42));
-}
-
-#[test]
 fn debug() {
     let map: HashMap<usize, usize> = HashMap::new();
 
