@@ -111,7 +111,7 @@ impl<K, V> Table<K, V> {
     ) -> Shared<'g, BinEntry<K, V>>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Eq,
+        Q: ?Sized + Ord,
     {
         match *bin {
             BinEntry::Node(_) => {
@@ -160,9 +160,15 @@ impl<K, V> Table<K, V> {
                             table = unsafe { table.next_table(guard).deref() };
                             continue;
                         }
+                        BinEntry::TreeNode(_) => break table.find(bin, hash, key, guard),
+                        BinEntry::Tree(_) => break table.find(bin, hash, key, guard),
                     }
                 }
             }
+            BinEntry::TreeNode(_) => {
+                TreeNode::find_tree_node(Shared::from(bin as *const _), hash, key, guard)
+            }
+            BinEntry::Tree(_) => TreeBin::find(Shared::from(bin as *const _), hash, key, guard),
         }
     }
 
@@ -186,7 +192,7 @@ impl<K, V> Table<K, V> {
             match *bin_entry {
                 BinEntry::Moved => {}
                 BinEntry::Node(_) => {
-                    // safety: same as above + we own the bin - Node are not shared across the table
+                    // safety: same as above + we own the bin - Nodes are not shared across the table
                     let mut p = unsafe { bin.into_owned() };
                     loop {
                         // safety below:
@@ -210,6 +216,36 @@ impl<K, V> Table<K, V> {
                         p = unsafe { node.next.into_owned() };
                     }
                 }
+                BinEntry::Tree(_) => {
+                    // safety: same as for BinEntry::Node
+                    let p = unsafe { bin.into_owned() };
+                    let bin = if let BinEntry::Tree(bin) = *p.into_box() {
+                        bin
+                    } else {
+                        unreachable!();
+                    };
+
+                    let p = bin.first.load(Ordering::SeqCst, guard);
+                    if p.is_null() {
+                        // TreeBin is empty
+                        continue;
+                    }
+                    let mut p = unsafe { p.into_owned() };
+                    loop {
+                        let node = if let BinEntry::TreeNode(node) = *p.into_box() {
+                            node
+                        } else {
+                            unreachable!("Trees can only ever contain TreeNodes");
+                        };
+                        if node.node.next.load(Ordering::SeqCst, guard).is_null() {
+                            break;
+                        }
+                        p = unsafe { node.node.next.into_owned() };
+                    }
+                }
+                BinEntry::TreeNode(_) => unreachable!(
+                    "The head of a bin cannot be a TreeNode directly without BinEntry::Tree"
+                ),
             }
         }
     }

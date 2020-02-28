@@ -24,6 +24,24 @@ const MAXIMUM_CAPACITY: usize = 1 << 30; // TODO: use ISIZE_BITS
 /// (i.e., at least 1) and at most `MAXIMUM_CAPACITY`.
 const DEFAULT_CAPACITY: usize = 16;
 
+/// The bin count threshold for using a tree rather than list for a bin. Bins are
+/// converted to trees when adding an element to a bin with at least this many
+/// nodes. The value must be greater than 2, and should be at least 8 to mesh
+/// with assumptions in tree removal about conversion back to plain bins upon
+/// shrinkage.
+const TREEIFY_THRESHOLD: usize = 8;
+
+/// The bin count threshold for untreeifying a (split) bin during a resize
+/// operation. Should be less than TREEIFY_THRESHOLD, and at most 6 to mesh with
+/// shrinkage detection under removal.
+const UNTREEIFY_THRESHOLD: usize = 6;
+
+/// The smallest table capacity for which bins may be treeified. (Otherwise the
+/// table is resized if too many nodes in a bin.) The value should be at least 4
+/// * TREEIFY_THRESHOLD to avoid conflicts between resizing and treeification
+/// thresholds.
+const MIN_TREEIFY_CAPACITY: usize = 64;
+
 /// Minimum number of rebinnings per transfer step. Ranges are
 /// subdivided to allow multiple resizer threads.  This value
 /// serves as a lower bound to avoid resizers encountering
@@ -1050,7 +1068,7 @@ where
     fn get_node<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g Node<K, V>>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         let table = self.table.load(Ordering::SeqCst, guard);
         if table.is_null() {
@@ -1122,7 +1140,7 @@ where
     pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.check_guard(guard);
         self.get(key, &guard).is_some()
@@ -1154,7 +1172,7 @@ where
     pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.check_guard(guard);
         let node = self.get_node(key, guard)?;
@@ -1178,7 +1196,7 @@ where
     pub fn get_key_value<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.check_guard(guard);
         let node = self.get_node(key, guard)?;
@@ -1190,7 +1208,13 @@ where
         // until at least after the guard goes out of scope
         unsafe { v.as_ref() }.map(|v| (&node.key, v))
     }
+}
 
+impl<K, V, S> HashMap<K, V, S>
+where
+    K: Hash + Ord,
+    S: BuildHasher,
+{
     pub(crate) fn guarded_eq(&self, other: &Self, our_guard: &Guard, their_guard: &Guard) -> bool
     where
         V: PartialEq,
@@ -2071,9 +2095,138 @@ where
     }
 }
 
+impl<K, V, S> HashMap<K, V, S>
+where
+    K: Clone + Ord,
+{
+    /// Replaces all linked nodes in the bin at the given index unless the table
+    /// is too small, in which case a resize is initiated instead.
+    fn treeify_bin<'g>(&'g self, tab: Shared<'g, Table<K, V>>, index: usize, guard: &'g Guard) {
+        if tab.is_null() {
+            return;
+        }
+
+        let tab_deref = tab.deref();
+        let n = tab_deref.len();
+        if n < MIN_TREEIFY_CAPACITY {
+            self.try_presize(n << 1, guard);
+        } else {
+            let b = tab_deref.bin(index, guard);
+            if !b.is_null() {
+                if let BinEntry::Node(ref node) = b.deref() {
+                    let lock = node.lock.lock();
+                    // check if `b` is still the head
+                    if tab_deref.bin(index, guard) == b {
+                        let mut e = b;
+                        let mut head = Shared::null();
+                        let mut last_tree_node = Shared::null();
+                        while !e.is_null() {
+                            let e_deref = e.deref().as_node().unwrap();
+                            let new_tree_node = TreeNode::new(
+                                e_deref.key.clone(),
+                                e_deref.value.clone(), // this uses a load with Ordering::Relaxed, but write access is synchronized through the bin lock
+                                e_deref.hash,
+                                Atomic::null(),
+                                Atomic::null(),
+                            );
+                            new_tree_node.prev.store(last_tree_node, Ordering::Relaxed);
+                            let new_tree_node =
+                                Owned::new(BinEntry::TreeNode(new_tree_node)).into_shared(guard);
+                            if last_tree_node.is_null() {
+                                // this was the first TreeNode, so it becomes the head
+                                head = new_tree_node;
+                            } else {
+                                // safety: if `last_tree_node` is not `null`, we
+                                // have just created it in the last iteration,
+                                // thus the pointer is valid
+                                unsafe { last_tree_node.deref() }
+                                    .as_tree_node()
+                                    .unwrap()
+                                    .node
+                                    .next
+                                    .store(new_tree_node, Ordering::Relaxed);
+                            }
+                            last_tree_node = new_tree_node;
+                            e = e_deref.next.load(Ordering::SeqCst, guard);
+                        }
+                        tab_deref.store_bin(
+                            index,
+                            Owned::new(BinEntry::Tree(TreeBin::new(head, guard))),
+                        );
+                        // make sure the old bin entries get dropped
+                        e = b;
+                        while !e.is_null() {
+                            // safety: we just replaced the bin containing this
+                            // BinEntry, making it unreachable for other threads
+                            // since subsequent loads will see the new bin.
+                            // Threads with existing references to `e` must have
+                            // obtained them in this or an earlier epoch, and
+                            // this epoch is pinned by our guard. Thus, `e` will
+                            // only be dropped after these threads release their
+                            // guard, at which point they can no longer hold
+                            // their reference to `e`.
+                            // The BinEntry pointers are valid to deref for the
+                            // same reason as above.
+                            //
+                            // NOTE: we do not drop the value, since it gets
+                            // moved to the new TreeNode
+                            unsafe {
+                                guard.defer_destroy(e);
+                                e = e
+                                    .deref()
+                                    .as_node()
+                                    .unwrap()
+                                    .next
+                                    .load(Ordering::SeqCst, guard);
+                            }
+                        }
+                    }
+                    drop(lock);
+                }
+            }
+        }
+    }
+
+    /// Returns a list of non-TreeNodes replacing those in the given list. Does
+    /// _not_ clean up old TreeNodes, as they may still be reachable.
+    fn untreeify<'g>(
+        node: Shared<'g, BinEntry<K, V>>,
+        guard: &'g Guard,
+    ) -> Shared<'g, BinEntry<K, V>> {
+        let mut head = Shared::null();
+        let mut last_node: Shared<'_, BinEntry<K, V>> = Shared::null();
+        let mut q = node;
+        while !q.is_null() {
+            let q_deref = q.deref().as_tree_node().unwrap();
+            let new_node = Owned::new(BinEntry::Node(Node {
+                hash: q_deref.node.hash,
+                key: q_deref.node.key.clone(),
+                value: q_deref.node.value.clone(),
+                next: Atomic::null(),
+                lock: parking_lot::Mutex::new(()),
+            }))
+            .into_shared(guard);
+            if last_node.is_null() {
+                head = new_node;
+            } else {
+                // safety: if `last_node` is not `null`, we have just created it
+                // in the last iteration, thus the pointer is valid
+                unsafe { last_node.deref() }
+                    .as_node()
+                    .unwrap()
+                    .next
+                    .store(new_node, Ordering::Relaxed);
+            }
+            last_node = new_node;
+            q = q_deref.node.next.load(Ordering::Relaxed, guard);
+        }
+
+        head
+    }
+}
 impl<K, V, S> PartialEq for HashMap<K, V, S>
 where
-    K: Eq + Hash,
+    K: Ord + Hash,
     V: PartialEq,
     S: BuildHasher,
 {
@@ -2087,7 +2240,7 @@ where
 
 impl<K, V, S> Eq for HashMap<K, V, S>
 where
-    K: Eq + Hash,
+    K: Ord + Hash,
     V: Eq,
     S: BuildHasher,
 {
