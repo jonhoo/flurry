@@ -114,7 +114,7 @@ where
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.contains_key(key, &self.guard)
     }
@@ -125,7 +125,7 @@ where
     pub fn get<'g, Q>(&'g self, key: &Q) -> Option<&'g V>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.get(key, &self.guard)
     }
@@ -136,7 +136,7 @@ where
     pub fn get_key_value<'g, Q>(&'g self, key: &Q) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.get_key_value(key, &self.guard)
     }
@@ -223,7 +223,7 @@ impl<K, V, S> Clone for HashMapRef<'_, K, V, S> {
 
 impl<K, V, S> PartialEq for HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     V: PartialEq,
     S: BuildHasher,
 {
@@ -234,7 +234,7 @@ where
 
 impl<K, V, S> PartialEq<HashMap<K, V, S>> for HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     V: PartialEq,
     S: BuildHasher,
 {
@@ -245,7 +245,7 @@ where
 
 impl<K, V, S> PartialEq<HashMapRef<'_, K, V, S>> for HashMap<K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     V: PartialEq,
     S: BuildHasher,
 {
@@ -256,7 +256,7 @@ where
 
 impl<K, V, S> Eq for HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     V: Eq,
     S: BuildHasher,
 {
@@ -265,7 +265,7 @@ where
 impl<K, Q, V, S> Index<&'_ Q> for HashMapRef<'_, K, V, S>
 where
     K: Hash + Eq + Borrow<Q>,
-    Q: ?Sized + Hash + Eq,
+    Q: ?Sized + Hash + Ord,
     S: BuildHasher,
 {
     type Output = V;

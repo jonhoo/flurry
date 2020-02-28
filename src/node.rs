@@ -1,8 +1,9 @@
 use crate::raw::Table;
-use core::sync::atomic::{AtomicBool, Ordering};
-use crossbeam_epoch::{Atomic, Guard, Shared};
+use core::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use crossbeam_epoch::{Atomic, Guard, Owned, Shared};
 use parking_lot::Mutex;
-use std::thread::{current, Thread};
+use std::borrow::Borrow;
+use std::thread::{current, park, Thread};
 
 /// Entry in a bin.
 ///
@@ -45,6 +46,13 @@ impl<K, V> BinEntry<K, V> {
     pub(crate) fn as_tree_node(&self) -> Option<&TreeNode<K, V>> {
         if let BinEntry::TreeNode(ref n) = *self {
             Some(n)
+        } else {
+            None
+        }
+    }
+    pub(crate) fn as_tree_bin(&self) -> Option<&TreeBin<K, V>> {
+        if let BinEntry::Tree(ref bin) = *self {
+            Some(bin)
         } else {
             None
         }
@@ -100,11 +108,85 @@ impl<K, V> TreeNode<K, V> {
             red: AtomicBool::new(false),
         }
     }
+
+    /// Returns the `TreeNode` (or `Shared::null()` if not found) for the given
+    /// key, starting at the given node.
+    pub(crate) fn find_tree_node<'g, Q>(
+        mut p: Shared<'g, BinEntry<K, V>>,
+        hash: u64,
+        key: &Q,
+        guard: &'g Guard,
+    ) -> Shared<'g, BinEntry<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Ord,
+    {
+        // NOTE: in the Java code, this method is implemented on the `TreeNode`
+        // instance directly, as they don't need to worry about shared pointers.
+        // The Java code then uses a do-while loop here, as `self`/`this` always
+        // exists so the condition below will always be satisfied on the first
+        // iteration. We however _do_ have shared pointers and _do not_ have
+        // do-while loops, so we end up with one extra check since we also need
+        // to introduce some `continue` due to the extraction of local
+        // assignments from checks.
+        while !p.is_null() {
+            let p_deref = Self::get_tree_node(p);
+            let p_left = p_deref.left.load(Ordering::SeqCst, guard);
+            let p_right = p_deref.right.load(Ordering::SeqCst, guard);
+            let p_hash = p_deref.node.hash;
+
+            // first attempt to follow the tree order with the given hash
+            if p_hash > hash {
+                p = p_left;
+                continue;
+            }
+            if p_hash < hash {
+                p = p_right;
+                continue;
+            }
+
+            // if the hash matches, check if the given key also matches. If so,
+            // we have found the target node.
+            let p_key = &p_deref.node.key;
+            if p_key.borrow() == key {
+                return p;
+            }
+
+            // If the key does not match, we need to descend down the tree.
+            // If one of the children is empty, there is only one child to check.
+            if p_left.is_null() {
+                p = p_right;
+                continue;
+            }
+            if p_right.is_null() {
+                p = p_left;
+                continue;
+            }
+
+            // Otherwise, we compare keys to find the next child to look at.
+            let dir = match p_key.borrow().cmp(&key) {
+                std::cmp::Ordering::Greater => -1,
+                std::cmp::Ordering::Less => 1,
+                std::cmp::Ordering::Equal => {
+                    unreachable!("Ord and Eq have to match and Eq is checked above")
+                }
+            };
+            p = if dir < 0 { p_left } else { p_right };
+
+            // NOTE: the Java code has some addional cases here in case the keys
+            // _are not_ equal (p_key != key and !key.equals(p_key)), but
+            // _compare_ equal (k.compareTo(p_key) == 0). In this case, both
+            // children are searched. Since `Eq` and `Ord` must match, these
+            // cases cannot occur here.
+        }
+
+        return Shared::null();
+    }
 }
 
-const WRITER: u64 = 1; // set while holding write lock
-const WAITER: u64 = 2; // set when waiting for write lock
-const READER: u64 = 4; // increment value for setting read lock
+const WRITER: i64 = 1; // set while holding write lock
+const WAITER: i64 = 2; // set when waiting for write lock
+const READER: i64 = 4; // increment value for setting read lock
 
 /// TreeNodes used at the heads of bins. TreeBins do not hold user keys or
 /// values, but instead point to a list of TreeNodes and their root. They also
@@ -115,13 +197,13 @@ const READER: u64 = 4; // increment value for setting read lock
 pub(crate) struct TreeBin<K, V> {
     pub(crate) root: Atomic<BinEntry<K, V>>,
     pub(crate) first: Atomic<BinEntry<K, V>>,
-    pub(crate) waiter: Option<Thread>,
-    pub(crate) lock_state: Atomic<u64>,
+    pub(crate) waiter: Atomic<Thread>,
+    pub(crate) lock_state: AtomicI64,
 }
 
 impl<K, V> TreeBin<K, V>
 where
-    K: Ord + PartialOrd,
+    K: Ord,
 {
     pub fn new<'g>(bin: Shared<'g, BinEntry<K, V>>, guard: &'g Guard) -> Self {
         let mut root: Shared<'_, BinEntry<K, V>> = Shared::null();
@@ -152,14 +234,14 @@ where
             loop {
                 let dir: i8;
                 let pd = TreeNode::get_tree_node(p);
-                let pk = &pd.node.key;
-                let ph = pd.node.hash;
-                if ph > hash {
+                let p_key = &pd.node.key;
+                let p_hash = pd.node.hash;
+                if p_hash > hash {
                     dir = -1;
-                } else if ph < hash {
+                } else if p_hash < hash {
                     dir = 1;
                 } else {
-                    dir = match pk.cmp(&key) {
+                    dir = match p_key.cmp(&key) {
                         std::cmp::Ordering::Greater => -1,
                         std::cmp::Ordering::Less => 1,
                         std::cmp::Ordering::Equal => unreachable!("one key references two nodes"),
@@ -194,9 +276,474 @@ where
         TreeBin {
             root: Atomic::from(root),
             first: Atomic::from(bin),
-            waiter: None,
-            lock_state: Atomic::new(0),
+            waiter: Atomic::null(),
+            lock_state: AtomicI64::new(0),
         }
+    }
+}
+
+impl<K, V> TreeBin<K, V> {
+    /// Acquires write lock for tree restucturing.
+    fn lock_root(&self) {
+        if self
+            .lock_state
+            .compare_and_swap(0, WRITER, Ordering::SeqCst)
+            != 0
+        {
+            // the current lock state is non-zero, which means the lock is contended
+            self.contended_lock();
+        }
+    }
+
+    /// Releases write lock for tree restructuring.
+    fn unlock_root(&self) {
+        self.lock_state.store(0, Ordering::Release);
+    }
+
+    /// Possibly blocks awaiting root lock.
+    fn contended_lock(&self) {
+        let mut waiting = false;
+        let mut state: i64;
+        loop {
+            state = self.lock_state.load(Ordering::Acquire);
+            if state & !WAITER == 0 {
+                // there are no writing or reading threads
+                if self
+                    .lock_state
+                    .compare_and_swap(state, WRITER, Ordering::SeqCst)
+                    == state
+                {
+                    // we won the race for the lock and get to return from blocking
+                    if waiting {
+                        self.waiter.store(Shared::null(), Ordering::SeqCst);
+                    }
+                    return;
+                }
+            } else if state & WAITER == 0 {
+                // we have not indicated yet that we are waiting, so we need to
+                // do that now
+                if self
+                    .lock_state
+                    .compare_and_swap(state, state | WAITER, Ordering::SeqCst)
+                    == state
+                {
+                    waiting = true;
+                    self.waiter.store(Owned::new(current()), Ordering::SeqCst);
+                }
+            } else if waiting {
+                park();
+            }
+        }
+    }
+
+    /// Returns matching node or `Shared::null()` if none. Tries to search using
+    /// tree comparisons from root, but continues linear search when lock not
+    /// available.
+    pub(crate) fn find<'g, Q>(
+        bin: Shared<'g, BinEntry<K, V>>,
+        hash: u64,
+        key: &Q,
+        guard: &'g Guard,
+    ) -> Shared<'g, BinEntry<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Ord,
+    {
+        let bin_deref = bin.deref().as_tree_bin().unwrap();
+        let mut element = bin_deref.first.load(Ordering::SeqCst, guard);
+        while !element.is_null() {
+            let s = bin_deref.lock_state.load(Ordering::SeqCst);
+            if s & (WAITER | WRITER) != 0 {
+                // another thread is modifying or wants to modify the tree
+                // (write). As long as that's the case, we follow the `next`
+                // pointers of the `TreeNode` linearly, as we cannot trust the
+                // tree's structure.
+                let element_deref = TreeNode::get_tree_node(element);
+                let element_key = &element_deref.node.key;
+                if element_deref.node.hash == hash && element_key.borrow() == key {
+                    return element;
+                }
+                element = element_deref.node.next.load(Ordering::SeqCst, guard);
+            } else if bin_deref
+                .lock_state
+                .compare_and_swap(s, s + READER, Ordering::SeqCst)
+                == s
+            {
+                // the current lock state indicates no waiter or writer and we
+                // acquired a read lock
+                // FIXME: try finally?
+                let root = bin_deref.root.load(Ordering::SeqCst, guard);
+                let p = if root.is_null() {
+                    Shared::null()
+                } else {
+                    TreeNode::find_tree_node(root, hash, key, guard)
+                };
+                if bin_deref.lock_state.fetch_add(-READER, Ordering::SeqCst) == (READER | WRITER) {
+                    // check if another thread is waiting and, if so, unpark it
+                    let waiter = &bin_deref.waiter.load(Ordering::SeqCst, guard);
+                    if !waiter.is_null() {
+                        waiter.deref().unpark();
+                    }
+                }
+                return p;
+            }
+        }
+
+        return Shared::null();
+    }
+
+    /// Removes the given node, which must be present before this call. This is
+    /// messier than typical red-black deletion code because we cannot swap the
+    /// contents of an interior node with a leaf successor that is pinned by
+    /// `next` pointers that are accessible independently of the bin lock. So
+    /// instead we swap the tree links.
+    ///
+    /// Returns `true` if the bin is now too small and should be untreeified.
+    pub(crate) fn remove_tree_node<'g>(
+        &'g self,
+        p: Shared<'g, BinEntry<K, V>>,
+        guard: &'g Guard,
+    ) -> bool {
+        let p_deref = TreeNode::get_tree_node(p);
+        let next = p_deref.node.next.load(Ordering::SeqCst, guard);
+        let prev = p_deref.prev.load(Ordering::SeqCst, guard);
+        // unlink traversal pointers
+        if prev.is_null() {
+            // the node to delete is the first node
+            self.first.store(next, Ordering::SeqCst);
+        } else {
+            TreeNode::get_tree_node(prev)
+                .node
+                .next
+                .store(next, Ordering::SeqCst);
+        }
+        if !next.is_null() {
+            TreeNode::get_tree_node(next)
+                .prev
+                .store(prev, Ordering::SeqCst);
+        }
+        if self.first.load(Ordering::SeqCst, guard).is_null() {
+            // since the bin was not empty previously (it contained p),
+            // `self.first` is `null` only if we just stored `null` via `next`.
+            // In that case, we have removed the last node from this bin and
+            // don't have a tree anymore, so we reset `self.root`.
+            self.root.store(Shared::null(), Ordering::SeqCst);
+            return true;
+        }
+
+        // if we are now too small to be a `TreeBin`, we don't need to worry
+        // about restructuring the tree since the bin will be untreeified
+        // anyway, so we check that
+        let mut root = self.root.load(Ordering::SeqCst, guard);
+        if root.is_null()
+            || TreeNode::get_tree_node(root)
+                .right
+                .load(Ordering::SeqCst, guard)
+                .is_null()
+        {
+            return true;
+        } else {
+            let root_left = TreeNode::get_tree_node(root)
+                .left
+                .load(Ordering::SeqCst, guard);
+            if root_left.is_null()
+                || TreeNode::get_tree_node(root_left)
+                    .left
+                    .load(Ordering::SeqCst, guard)
+                    .is_null()
+            {
+                return true;
+            }
+        }
+
+        // if we get here, we know that we will still be a tree and have
+        // unlinked the `next` and `prev` pointers, so it's time to restructure
+        // the tree
+        // FIXME: try finally?
+        self.lock_root();
+        let replacement;
+        let p_left = p_deref.left.load(Ordering::Relaxed, guard);
+        let p_right = p_deref.right.load(Ordering::Relaxed, guard);
+        if !p_left.is_null() && !p_right.is_null() {
+            // find the smalles successor of `p`
+            let mut successor = p_right;
+            let mut successor_deref = TreeNode::get_tree_node(successor);
+            let mut successor_left = successor_deref.left.load(Ordering::Relaxed, guard);
+            while !successor_left.is_null() {
+                successor = successor_left;
+                successor_deref = TreeNode::get_tree_node(successor);
+                successor_left = successor_deref.left.load(Ordering::Relaxed, guard);
+            }
+            // swap colors
+            let color = successor_deref.red.load(Ordering::Relaxed);
+            successor_deref
+                .red
+                .store(p_deref.red.load(Ordering::Relaxed), Ordering::Relaxed);
+            p_deref.red.store(color, Ordering::Relaxed);
+
+            let successor_right = successor_deref.right.load(Ordering::Relaxed, guard);
+            let p_parent = p_deref.parent.load(Ordering::Relaxed, guard);
+            if successor == p_right {
+                // `p` was the direct parent of the smallest successor
+                p_deref.parent.store(successor, Ordering::Relaxed);
+                successor_deref.right.store(p, Ordering::Relaxed);
+            } else {
+                let successor_parent = successor_deref.parent.load(Ordering::Relaxed, guard);
+                p_deref.parent.store(successor_parent, Ordering::Relaxed);
+                if !successor_parent.is_null() {
+                    if successor
+                        == TreeNode::get_tree_node(successor_parent)
+                            .left
+                            .load(Ordering::Relaxed, guard)
+                    {
+                        TreeNode::get_tree_node(successor_parent)
+                            .left
+                            .store(p, Ordering::Relaxed);
+                    } else {
+                        TreeNode::get_tree_node(successor_parent)
+                            .right
+                            .store(p, Ordering::Relaxed);
+                    }
+                }
+                successor_deref.right.store(p_right, Ordering::Relaxed);
+                if !p_right.is_null() {
+                    TreeNode::get_tree_node(p_right)
+                        .parent
+                        .store(successor, Ordering::Relaxed);
+                }
+            }
+            p_deref.left.store(Shared::null(), Ordering::Relaxed);
+            p_deref.right.store(successor_right, Ordering::Relaxed);
+            if !successor_right.is_null() {
+                TreeNode::get_tree_node(successor_right)
+                    .parent
+                    .store(p, Ordering::Relaxed);
+            }
+            successor_deref.left.store(p_left, Ordering::Relaxed);
+            if !p_left.is_null() {
+                TreeNode::get_tree_node(p_left)
+                    .parent
+                    .store(successor, Ordering::Relaxed);
+            }
+            successor_deref.parent.store(p_parent, Ordering::Relaxed);
+            if p_parent.is_null() {
+                // the successor was swapped to the root as `p` was previously the root
+                root = successor;
+            } else if p
+                == TreeNode::get_tree_node(p_parent)
+                    .left
+                    .load(Ordering::Relaxed, guard)
+            {
+                TreeNode::get_tree_node(p_parent)
+                    .left
+                    .store(successor, Ordering::Relaxed);
+            } else {
+                TreeNode::get_tree_node(p_parent)
+                    .right
+                    .store(successor, Ordering::Relaxed);
+            }
+
+            if !successor_right.is_null() {
+                replacement = successor_right;
+            } else {
+                replacement = p;
+            }
+        } else if !p_left.is_null() {
+            replacement = p_left;
+        } else if !p_right.is_null() {
+            replacement = p_right;
+        } else {
+            replacement = p;
+        }
+
+        if replacement != p {
+            let p_parent = p_deref.parent.load(Ordering::Relaxed, guard);
+            TreeNode::get_tree_node(replacement)
+                .parent
+                .store(p_parent, Ordering::Relaxed);
+            if p_parent.is_null() {
+                root = replacement;
+            } else if p
+                == TreeNode::get_tree_node(p_parent)
+                    .left
+                    .load(Ordering::Relaxed, guard)
+            {
+                TreeNode::get_tree_node(p_parent)
+                    .left
+                    .store(replacement, Ordering::Relaxed);
+            } else {
+                TreeNode::get_tree_node(p_parent)
+                    .right
+                    .store(replacement, Ordering::Relaxed);
+            }
+
+            p_deref.parent.store(Shared::null(), Ordering::Relaxed);
+            p_deref.right.store(Shared::null(), Ordering::Relaxed);
+            p_deref.left.store(Shared::null(), Ordering::Relaxed);
+        }
+
+        self.root.store(
+            if p_deref.red.load(Ordering::Relaxed) {
+                root
+            } else {
+                TreeNode::balance_deletion(root, replacement, guard)
+            },
+            Ordering::Relaxed,
+        );
+
+        if p == replacement {
+            let p_parent = p_deref.parent.load(Ordering::Relaxed, guard);
+            if !p_parent.is_null() {
+                if p == TreeNode::get_tree_node(p_parent)
+                    .left
+                    .load(Ordering::Relaxed, guard)
+                {
+                    TreeNode::get_tree_node(p_parent)
+                        .left
+                        .store(Shared::null(), Ordering::Relaxed);
+                } else if p
+                    == TreeNode::get_tree_node(p_parent)
+                        .right
+                        .load(Ordering::Relaxed, guard)
+                {
+                    TreeNode::get_tree_node(p_parent)
+                        .right
+                        .store(Shared::null(), Ordering::Relaxed);
+                }
+
+                p_deref.parent.store(Shared::null(), Ordering::Relaxed);
+            }
+        }
+
+        // mark the old node and its value for garbage collection
+        guard.defer_destroy(p_deref.node.value.load(Ordering::Relaxed, guard));
+        guard.defer_destroy(p);
+
+        self.unlock_root();
+        assert!(TreeNode::check_invariants(
+            self.root.load(Ordering::SeqCst, guard),
+            guard
+        ));
+        return false;
+    }
+}
+
+impl<K, V> TreeBin<K, V>
+where
+    K: Ord,
+{
+    /// Finds or adds a node to the tree.
+    /// If a node for the given key already exists, it is returned. Otherwise,
+    /// returns `Shared::null()`.
+    pub(crate) fn find_or_put_tree_val<'g>(
+        &'g self,
+        hash: u64,
+        key: K,
+        value: V,
+        guard: &'g Guard,
+    ) -> Shared<'g, BinEntry<K, V>> {
+        let mut p = self.root.load(Ordering::SeqCst, guard);
+        if p.is_null() {
+            // the current root is `null`, i.e. the tree is currently empty.
+            // This, we simply insert the new entry as the root.
+            let tree_node = Owned::new(BinEntry::TreeNode(TreeNode::new(
+                key,
+                Atomic::new(value),
+                hash,
+                Atomic::null(),
+                Atomic::null(),
+            )))
+            .into_shared(guard);
+            self.root.store(tree_node, Ordering::Release);
+            self.first.store(tree_node, Ordering::Release);
+            return Shared::null();
+        }
+        loop {
+            let p_deref = TreeNode::get_tree_node(p);
+            let p_hash = p_deref.node.hash;
+            let dir: i8;
+            if p_hash > hash {
+                dir = -1;
+            } else if p_hash < hash {
+                dir = 1;
+            } else {
+                let p_key = &p_deref.node.key;
+                if *p_key == key {
+                    // a node with the given key already exists, so we return it
+                    return p;
+                }
+                dir = match p_key.cmp(&key) {
+                    std::cmp::Ordering::Greater => -1,
+                    std::cmp::Ordering::Less => 1,
+                    std::cmp::Ordering::Equal => {
+                        unreachable!("Ord and Eq have to match and Eq is checked above")
+                    }
+                };
+                // NOTE: the Java code has some addional cases here in case the
+                // keys _are not_ equal (p_key != key and !key.equals(p_key)),
+                // but _compare_ equal (k.compareTo(p_key) == 0). In this case,
+                // both children are searched and if a matching node exists it
+                // is returned. Since `Eq` and `Ord` must match, these cases
+                // cannot occur here.
+            }
+
+            // proceed in direction `dir`
+            let xp = p;
+            p = if dir <= 0 {
+                p_deref.left.load(Ordering::SeqCst, guard)
+            } else {
+                p_deref.right.load(Ordering::SeqCst, guard)
+            };
+            if p.is_null() {
+                // we have reached a tree leaf, so the given key is not yet
+                // contained in the tree and we can add it at the correct
+                // position (which is here, since we arrived here by comparing
+                // hash and key of the new entry)
+                let first = self.first.load(Ordering::SeqCst, guard);
+                let x = Owned::new(BinEntry::TreeNode(TreeNode::new(
+                    key,
+                    Atomic::new(value),
+                    hash,
+                    Atomic::from(first),
+                    Atomic::from(xp),
+                )))
+                .into_shared(guard);
+                self.first.store(x, Ordering::SeqCst);
+                if !first.is_null() {
+                    TreeNode::get_tree_node(first)
+                        .prev
+                        .store(x, Ordering::SeqCst);
+                }
+                if dir <= 0 {
+                    TreeNode::get_tree_node(xp).left.store(x, Ordering::SeqCst);
+                } else {
+                    TreeNode::get_tree_node(xp).right.store(x, Ordering::SeqCst);
+                }
+
+                if !TreeNode::get_tree_node(xp).red.load(Ordering::SeqCst) {
+                    TreeNode::get_tree_node(x).red.store(true, Ordering::SeqCst);
+                } else {
+                    // FIXME try finally?
+                    self.lock_root();
+                    self.root.store(
+                        TreeNode::balance_insertion(
+                            self.root.load(Ordering::Relaxed, guard),
+                            x,
+                            guard,
+                        ),
+                        Ordering::Relaxed,
+                    );
+                    self.unlock_root();
+                }
+                break;
+            }
+        }
+
+        assert!(TreeNode::check_invariants(
+            self.root.load(Ordering::SeqCst, guard),
+            guard
+        ));
+        return Shared::null();
     }
 }
 
