@@ -121,6 +121,7 @@ where
 
     /// Returns the value to which `key` is mapped.
     /// See also [`HashMap::get`].
+    #[inline]
     pub fn get<'g, Q>(&'g self, key: &Q) -> Option<&'g V>
     where
         K: Borrow<Q>,
@@ -131,6 +132,7 @@ where
 
     /// Returns the key-value pair corresponding to `key`.
     /// See also [`HashMap::get_key_value`].
+    #[inline]
     pub fn get_key_value<'g, Q>(&'g self, key: &Q) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,

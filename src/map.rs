@@ -314,7 +314,6 @@ impl<K, V, S> HashMap<K, V, S> {
         }
     }
 
-    #[inline]
     /// Returns the number of entries in the map.
     ///
     /// # Examples
@@ -332,7 +331,6 @@ impl<K, V, S> HashMap<K, V, S> {
         self.count.load(Ordering::Relaxed)
     }
 
-    #[inline]
     /// Returns `true` if the map is empty. Otherwise returns `false`.
     ///
     /// # Examples
@@ -349,7 +347,6 @@ impl<K, V, S> HashMap<K, V, S> {
         self.len() == 0
     }
 
-    #[inline]
     #[cfg(test)]
     /// Returns the capacity of the map.
     fn capacity(&self, guard: &Guard) -> usize {
@@ -602,6 +599,7 @@ where
 
     // NOTE: transfer requires that K and V are Send + Sync if it will actually transfer anything.
     // If K/V aren't Send + Sync, the map must be empty, and therefore calling tansfer is fine.
+    #[inline(never)]
     fn transfer<'g>(
         &'g self,
         table: Shared<'g, Table<K, V>>,
@@ -1004,7 +1002,6 @@ where
         }
     }
 
-    #[inline]
     /// Tries to reserve capacity for at least `additional` more elements to
     /// be inserted in the `HashMap`. The collection may reserve more space to
     /// avoid frequent reallocations.
@@ -1040,6 +1037,7 @@ where
     K: Hash + Eq,
     S: BuildHasher,
 {
+    #[inline]
     fn hash<Q: ?Sized + Hash>(&self, key: &Q) -> u64 {
         let mut h = self.build_hasher.build_hasher();
         key.hash(&mut h);
@@ -1098,7 +1096,6 @@ where
         )
     }
 
-    #[inline]
     /// Returns `true` if the map contains a value for the specified key.
     ///
     /// The key may be any borrowed form of the map's key type, but
@@ -1150,7 +1147,7 @@ where
     /// assert_eq!(mref.get(&1), Some(&"a"));
     /// assert_eq!(mref.get(&2), None);
     /// ```
-    // TODO: implement a guard API of our own
+    #[inline]
     pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
     where
         K: Borrow<Q>,
@@ -1167,37 +1164,6 @@ where
         unsafe { v.as_ref() }
     }
 
-    #[inline]
-    /// Apply `then` to the mapping for `key` and get its result.
-    /// Returns `None` if this map contains no mapping for `key`.
-    ///
-    /// The key may be any borrowed form of the map's key type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
-    /// the key type.
-    ///
-    /// [`Eq`]: std::cmp::Eq
-    /// [`Hash`]: std::hash::Hash
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::{HashMap, epoch};
-    ///
-    /// let map = HashMap::new();
-    /// let guard = epoch::pin();
-    /// map.pin().insert(1, 42);
-    /// assert_eq!(map.get_and(&1, |num| num * 2, &guard), Some(84));
-    /// assert_eq!(map.get_and(&8, |num| num * 2, &guard), None);
-    /// ```
-    pub fn get_and<Q, R, F>(&self, key: &Q, then: F, guard: &Guard) -> Option<R>
-    where
-        K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
-        F: FnOnce(&V) -> R,
-    {
-        self.get(key, guard).map(then)
-    }
-
     /// Returns the key-value pair corresponding to `key`.
     ///
     /// Returns `None` if this map contains no mapping for `key`.
@@ -1205,6 +1171,7 @@ where
     /// The supplied `key` may be any borrowed form of the
     /// map's key type, but `Hash` and `Eq` on the borrowed form
     /// must match those for the key type.
+    #[inline]
     pub fn get_key_value<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
@@ -1345,7 +1312,6 @@ where
     V: 'static + Sync + Send,
     S: BuildHasher,
 {
-    #[inline]
     /// Inserts a key-value pair into the map.
     ///
     /// If the map did not have this key present, [`None`] is returned.
@@ -2128,7 +2094,6 @@ where
     V: 'static + Sync + Send,
     S: BuildHasher,
 {
-    #[inline]
     fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         // from `hashbrown::HashMap::extend`:
         // Keys may be already present or show multiple times in the iterator.
@@ -2154,7 +2119,6 @@ where
     V: 'static + Sync + Send + Copy,
     S: BuildHasher,
 {
-    #[inline]
     fn extend<T: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: T) {
         self.extend(iter.into_iter().map(|(&key, &value)| (key, value)));
     }
@@ -2192,7 +2156,6 @@ where
     V: 'static + Sync + Send + Copy,
     S: BuildHasher + Default,
 {
-    #[inline]
     fn from_iter<T: IntoIterator<Item = (&'a K, &'a V)>>(iter: T) -> Self {
         Self::from_iter(iter.into_iter().map(|(&k, &v)| (k, v)))
     }
@@ -2204,7 +2167,6 @@ where
     V: 'static + Sync + Send + Copy,
     S: BuildHasher + Default,
 {
-    #[inline]
     fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
         Self::from_iter(iter.into_iter().map(|&(k, v)| (k, v)))
     }
