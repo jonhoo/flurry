@@ -369,6 +369,7 @@ impl<K, V, S> HashMap<K, V, S> {
     }
 
     /// An iterator visiting all key-value pairs in arbitrary order.
+    ///
     /// The iterator element type is `(&'g K, &'g V)`.
     pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V> {
         self.check_guard(guard);
@@ -378,6 +379,7 @@ impl<K, V, S> HashMap<K, V, S> {
     }
 
     /// An iterator visiting all keys in arbitrary order.
+    ///
     /// The iterator element type is `&'g K`.
     pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V> {
         self.check_guard(guard);
@@ -387,6 +389,7 @@ impl<K, V, S> HashMap<K, V, S> {
     }
 
     /// An iterator visiting all values in arbitrary order.
+    ///
     /// The iterator element type is `&'g V`.
     pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V> {
         self.check_guard(guard);
