@@ -3,7 +3,9 @@
 //! See `HashSet` for details.
 
 use std::borrow::Borrow;
+use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
+use std::iter::FromIterator;
 
 use crate::epoch::Guard;
 use crate::iter::Keys;
@@ -39,7 +41,6 @@ use crate::HashMap;
 ///     println!("{}", book);
 /// }
 /// ```
-#[derive(Debug)]
 pub struct HashSet<T, S = crate::DefaultHashBuilder> {
     map: HashMap<T, (), S>,
 }
@@ -304,5 +305,88 @@ where
     {
         let removed = self.map.remove(value, guard);
         removed.is_some()
+    }
+}
+
+impl<T, S> PartialEq for HashSet<T, S>
+where
+    T: Eq + Hash,
+    S: BuildHasher,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.map == other.map
+    }
+}
+
+impl<T, S> Eq for HashSet<T, S>
+where
+    T: Eq + Hash,
+    S: BuildHasher,
+{
+}
+
+impl<T, S> fmt::Debug for HashSet<T, S>
+where
+    T: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let guard = self.guard();
+        f.debug_set().entries(self.iter(&guard)).finish()
+    }
+}
+
+impl<T, S> Extend<T> for &HashSet<T, S>
+where
+    T: 'static + Sync + Send + Clone + Hash + Eq,
+    S: BuildHasher,
+{
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        Extend::extend(&mut &self.map, iter.into_iter().map(|v| (v, ())))
+    }
+}
+
+impl<'a, T, S> Extend<&'a T> for &HashSet<T, S>
+where
+    T: 'static + Sync + Send + Copy + Hash + Eq,
+    S: BuildHasher,
+{
+    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+        Extend::extend(&mut &self.map, iter.into_iter().map(|&v| (v, ())))
+    }
+}
+
+impl<T, S> FromIterator<T> for HashSet<T, S>
+where
+    T: 'static + Sync + Send + Clone + Hash + Eq,
+    S: BuildHasher + Default,
+{
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self {
+            map: HashMap::from_iter(iter.into_iter().map(|v| (v, ()))),
+        }
+    }
+}
+
+impl<'a, T, S> FromIterator<&'a T> for HashSet<T, S>
+where
+    T: 'static + Sync + Send + Copy + Hash + Eq,
+    S: BuildHasher + Default,
+{
+    fn from_iter<I: IntoIterator<Item = &'a T>>(iter: I) -> Self {
+        Self {
+            map: HashMap::from_iter(iter.into_iter().map(|&v| (v, ()))),
+        }
+    }
+}
+
+impl<T, S> Clone for HashSet<T, S>
+where
+    T: 'static + Sync + Send + Clone + Hash + Eq,
+    S: BuildHasher + Clone,
+{
+    fn clone(&self) -> HashSet<T, S> {
+        Self {
+            map: self.map.clone(),
+        }
     }
 }
