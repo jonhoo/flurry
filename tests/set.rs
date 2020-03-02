@@ -8,7 +8,7 @@ fn new() {
 #[test]
 fn insert() {
     let set = HashSet::new();
-    let guard = flurry::epoch::pin();
+    let guard = set.guard();
     let did_set = set.insert(42, &guard);
     assert!(did_set);
 
@@ -19,7 +19,7 @@ fn insert() {
 #[test]
 fn insert_contains() {
     let set = HashSet::new();
-    let guard = flurry::epoch::pin();
+    let guard = set.guard();
     set.insert(42, &guard);
 
     assert!(set.contains(&42, &guard));
