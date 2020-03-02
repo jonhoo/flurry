@@ -40,11 +40,7 @@ use crate::HashMap;
 /// }
 /// ```
 #[derive(Debug)]
-pub struct HashSet<T: 'static, S = crate::DefaultHashBuilder>
-where
-    T: Sync + Send + Clone + Hash + Eq,
-    S: std::hash::BuildHasher,
-{
+pub struct HashSet<T: 'static, S> {
     map: HashMap<T, (), S>,
 }
 
@@ -125,7 +121,7 @@ where
     /// ```
     /// use flurry::HashSet;
     ///
-    /// let set: HashSet<i32> = HashSet::new();
+    /// let set: HashSet<i32, _> = HashSet::new();
     /// ```
     pub fn new() -> Self {
         Self::default()
@@ -141,7 +137,7 @@ where
     /// ```
     /// use flurry::HashSet;
     ///
-    /// let map: HashSet<&str> = HashSet::with_capacity(10);
+    /// let map: HashSet<&str, _> = HashSet::with_capacity(10);
     /// ```
     ///
     /// # Notes
