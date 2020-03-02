@@ -40,21 +40,21 @@ use crate::HashMap;
 /// }
 /// ```
 #[derive(Debug)]
-pub struct HashSet<T: 'static, S> {
+pub struct HashSet<T, S = crate::DefaultHashBuilder> {
     map: HashMap<T, (), S>,
 }
 
-impl<T> HashSet<T, crate::DefaultHashBuilder>
-where
-    T: Sync + Send + Clone + Hash + Eq,
-{
-    /// Creates a new, empty set with the default initial table size (16).
+impl<T> HashSet<T, crate::DefaultHashBuilder> {
+    /// Creates an empty `HashSet`.
+    ///
+    /// The hash set is initially created with a capacity of 0, so it will not allocate until it
+    /// is first inserted into.
     ///
     /// # Examples
     ///
     /// ```
     /// use flurry::HashSet;
-    /// let set: HashSet<i32, _> = HashSet::new();
+    /// let set: HashSet<i32> = HashSet::new();
     /// ```
     pub fn new() -> Self {
         Self::default()
@@ -87,19 +87,14 @@ where
 
 impl<T, S> Default for HashSet<T, S>
 where
-    T: Sync + Send + Clone + Hash + Eq,
-    S: BuildHasher + Default,
+    S: Default,
 {
     fn default() -> Self {
         Self::with_hasher(S::default())
     }
 }
 
-impl<T, S> HashSet<T, S>
-where
-    T: Sync + Send + Clone + Hash + Eq,
-    S: BuildHasher,
-{
+impl<T, S> HashSet<T, S> {
     /// Creates an empty set which will use `hash_builder` to hash values.
     ///
     /// The created set has the default initial capacity.
@@ -152,7 +147,9 @@ where
         }
     }
 
-    /// An iterator over the set's values.
+    /// An iterator visiting all values in arbitrary order.
+    ///
+    /// The iterator element type is `(&'g K, &'g V)`.
     ///
     /// See [`HashMap::keys`] for details.
     ///
@@ -177,10 +174,10 @@ where
 
 impl<T, S> HashSet<T, S>
 where
-    T: Sync + Send + Clone + Hash + Eq,
+    T: Hash + Eq,
     S: BuildHasher,
 {
-    /// Returns true if the set contains a value.
+    /// Returns `true` if the set contains the specified value.
     ///
     /// The value may be any borrowed form of the set's value type, but
     /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
@@ -212,7 +209,7 @@ where
 
 impl<T, S> HashSet<T, S>
 where
-    T: Sync + Send + Clone + Hash + Eq,
+    T: 'static + Sync + Send + Clone + Hash + Eq,
     S: BuildHasher,
 {
     /// Adds a value to the set.
@@ -240,12 +237,16 @@ where
 
     /// Removes a value from the set.
     ///
-    /// The value may be any borrowed form of the set's type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the type.
-    ///
     /// If the set did not have this value present, `false` is returned.
     ///
     /// If the set did have this value present, `true` is returned.
+    ///
+    /// The value may be any borrowed form of the set's value type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the value type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
     ///
