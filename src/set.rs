@@ -206,6 +206,7 @@ where
     /// assert!(set.contains(&2, &guard));
     /// assert!(!set.contains(&1, &guard));
     /// ```
+    #[inline]
     pub fn contains<'g, Q>(&self, value: &Q, guard: &'g Guard) -> bool
     where
         T: Borrow<Q>,
