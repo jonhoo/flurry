@@ -9,6 +9,49 @@ use crate::epoch::{self, Guard};
 use crate::iter::Keys;
 use crate::HashMap;
 
+impl<T> HashSet<T, crate::DefaultHashBuilder>
+where
+    T: Sync + Send + Clone + Hash + Eq,
+{
+    /// Creates a new, empty set with the default initial table size (16).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set: HashSet<i32, _> = HashSet::new();
+    /// ```
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates an empty `HashSet` with the specified capacity.
+    ///
+    /// The hash map will be able to hold at least `capacity` elements without
+    /// reallocating. If `capacity` is 0, the hash map will not allocate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let map: HashSet<&str, _> = HashSet::with_capacity(10);
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// There is no guarantee that the HashSet will not resize if `capacity`
+    /// elements are inserted. The set will resize based on key collision, so
+    /// bad key distribution may cause a resize before `capacity` is reached.
+    /// For more information see the [`resizing behavior`] of HashMap.
+    ///
+    /// [`resizing behavior`]: index.html#resizing-behavior
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
+    }
+}
+
 /// A concurrent hash set implemented as a `HashMap` where the value is `()`.
 ///
 /// # Examples
@@ -107,49 +150,6 @@ where
         Self {
             map: HashMap::with_capacity_and_hasher(capacity, hash_builder),
         }
-    }
-}
-
-impl<T> HashSet<T, crate::DefaultHashBuilder>
-where
-    T: Sync + Send + Clone + Hash + Eq,
-{
-    /// Creates a new, empty set with the default initial table size (16).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashSet;
-    ///
-    /// let set: HashSet<i32, _> = HashSet::new();
-    /// ```
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates an empty `HashSet` with the specified capacity.
-    ///
-    /// The hash map will be able to hold at least `capacity` elements without
-    /// reallocating. If `capacity` is 0, the hash map will not allocate.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashSet;
-    ///
-    /// let map: HashSet<&str, _> = HashSet::with_capacity(10);
-    /// ```
-    ///
-    /// # Notes
-    ///
-    /// There is no guarantee that the HashSet will not resize if `capacity`
-    /// elements are inserted. The set will resize based on key collision, so
-    /// bad key distribution may cause a resize before `capacity` is reached.
-    /// For more information see the [`resizing behavior`] of HashMap.
-    ///
-    /// [`resizing behavior`]: index.html#resizing-behavior
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
     }
 }
 
