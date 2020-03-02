@@ -3,54 +3,13 @@
 //! See `HashSet` for details.
 
 use std::borrow::Borrow;
+use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
+use std::iter::FromIterator;
 
 use crate::epoch::Guard;
 use crate::iter::Keys;
 use crate::HashMap;
-
-impl<T> HashSet<T, crate::DefaultHashBuilder>
-where
-    T: Sync + Send + Clone + Hash + Eq,
-{
-    /// Creates a new, empty set with the default initial table size (16).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashSet;
-    ///
-    /// let set: HashSet<i32, _> = HashSet::new();
-    /// ```
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates an empty `HashSet` with the specified capacity.
-    ///
-    /// The hash map will be able to hold at least `capacity` elements without
-    /// reallocating. If `capacity` is 0, the hash map will not allocate.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashSet;
-    ///
-    /// let map: HashSet<&str, _> = HashSet::with_capacity(10);
-    /// ```
-    ///
-    /// # Notes
-    ///
-    /// There is no guarantee that the HashSet will not resize if `capacity`
-    /// elements are inserted. The set will resize based on key collision, so
-    /// bad key distribution may cause a resize before `capacity` is reached.
-    /// For more information see the [`resizing behavior`] of HashMap.
-    ///
-    /// [`resizing behavior`]: index.html#resizing-behavior
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
-    }
-}
 
 /// A concurrent hash set implemented as a `HashMap` where the value is `()`.
 ///
@@ -61,7 +20,7 @@ where
 ///
 /// // Initialize a new hash set.
 /// let books = HashSet::new();
-/// let guard = flurry::epoch::pin();
+/// let guard = books.guard();
 ///
 /// // Add some books
 /// books.insert("Fight Club", &guard);
@@ -82,26 +41,61 @@ where
 ///     println!("{}", book);
 /// }
 /// ```
-#[derive(Debug)]
-pub struct HashSet<T: 'static, S> {
+pub struct HashSet<T, S = crate::DefaultHashBuilder> {
     map: HashMap<T, (), S>,
+}
+
+impl<T> HashSet<T, crate::DefaultHashBuilder> {
+    /// Creates an empty `HashSet`.
+    ///
+    /// The hash set is initially created with a capacity of 0, so it will not allocate until it
+    /// is first inserted into.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    /// let set: HashSet<i32> = HashSet::new();
+    /// ```
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates an empty `HashSet` with the specified capacity.
+    ///
+    /// The hash map will be able to hold at least `capacity` elements without
+    /// reallocating. If `capacity` is 0, the hash map will not allocate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    /// let map: HashSet<&str, _> = HashSet::with_capacity(10);
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// There is no guarantee that the HashSet will not resize if `capacity`
+    /// elements are inserted. The set will resize based on key collision, so
+    /// bad key distribution may cause a resize before `capacity` is reached.
+    /// For more information see the [`resizing behavior`] of HashMap.
+    ///
+    /// [`resizing behavior`]: index.html#resizing-behavior
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_capacity_and_hasher(capacity, crate::DefaultHashBuilder::default())
+    }
 }
 
 impl<T, S> Default for HashSet<T, S>
 where
-    T: Sync + Send + Clone + Hash + Eq,
-    S: BuildHasher + Default,
+    S: Default,
 {
     fn default() -> Self {
         Self::with_hasher(S::default())
     }
 }
 
-impl<T, S> HashSet<T, S>
-where
-    T: Sync + Send + Clone + Hash + Eq,
-    S: BuildHasher,
-{
+impl<T, S> HashSet<T, S> {
     /// Creates an empty set which will use `hash_builder` to hash values.
     ///
     /// The created set has the default initial capacity.
@@ -117,7 +111,7 @@ where
     /// use flurry::{HashSet, DefaultHashBuilder};
     ///
     /// let set = HashSet::with_hasher(DefaultHashBuilder::default());
-    /// let guard = flurry::epoch::pin();
+    /// let guard = set.guard();
     /// set.insert(1, &guard);
     /// ```
     pub fn with_hasher(hash_builder: S) -> Self {
@@ -145,7 +139,7 @@ where
     ///
     /// let s = RandomState::new();
     /// let set = HashSet::with_capacity_and_hasher(10, s);
-    /// let guard = flurry::epoch::pin();
+    /// let guard = set.guard();
     /// set.insert(1, &guard);
     /// ```
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
@@ -153,11 +147,140 @@ where
             map: HashMap::with_capacity_and_hasher(capacity, hash_builder),
         }
     }
+
+    /// Pin a `Guard` for use with this set.
+    ///
+    /// Keep in mind that for as long as you hold onto this `Guard`, you are preventing the
+    /// collection of garbage generated by the set.
+    pub fn guard(&self) -> crate::epoch::Guard {
+        self.map.guard()
+    }
+
+    /// Returns the number of entries in the set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    ///
+    /// let guard = set.guard();
+    /// set.insert(1, &guard);
+    /// set.insert(2, &guard);
+    /// assert_eq!(set.len(), 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Returns `true` if the set is empty. Otherwise returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    /// assert!(set.is_empty());
+    /// set.insert("a", &set.guard());
+    /// assert!(!set.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// An iterator visiting all values in arbitrary order.
+    ///
+    /// The iterator element type is `(&'g K, &'g V)`.
+    ///
+    /// See [`HashMap::keys`] for details.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    /// let guard = set.guard();
+    /// set.insert(1, &guard);
+    /// set.insert(2, &guard);
+    ///
+    /// for x in set.iter(&guard) {
+    ///     println!("{}", x);
+    /// }
+    /// ```
+    pub fn iter<'g>(&'g self, guard: &'g Guard) -> Keys<'g, T, ()> {
+        self.map.keys(guard)
+    }
 }
 
 impl<T, S> HashSet<T, S>
 where
-    T: Sync + Send + Clone + Hash + Eq,
+    T: Hash + Eq,
+    S: BuildHasher,
+{
+    /// Returns `true` if the set contains the specified value.
+    ///
+    /// The value may be any borrowed form of the set's value type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the value type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    /// let guard = set.guard();
+    /// set.insert(2, &guard);
+    ///
+    /// assert!(set.contains(&2, &guard));
+    /// assert!(!set.contains(&1, &guard));
+    /// ```
+    #[inline]
+    pub fn contains<'g, Q>(&self, value: &Q, guard: &'g Guard) -> bool
+    where
+        T: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        self.map.contains_key(value, guard)
+    }
+
+    /// Returns a reference to the value in the set, if any, that is equal to the given value.
+    ///
+    /// The value may be any borrowed form of the set's value type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the value type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set: HashSet<_> = [1, 2, 3].iter().cloned().collect();
+    /// let guard = set.guard();
+    /// assert_eq!(set.get(&2, &guard), Some(&2));
+    /// assert_eq!(set.get(&4, &guard), None);
+    /// ```
+    ///
+    /// [`Eq`]: ../../std/cmp/trait.Eq.html
+    /// [`Hash`]: ../../std/hash/trait.Hash.html
+    pub fn get<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> Option<&'g T>
+    where
+        T: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        self.map.get_key_value(value, guard).map(|(k, _)| k)
+    }
+}
+
+impl<T, S> HashSet<T, S>
+where
+    T: 'static + Sync + Send + Clone + Hash + Eq,
     S: BuildHasher,
 {
     /// Adds a value to the set.
@@ -172,7 +295,7 @@ where
     /// use flurry::HashSet;
     ///
     /// let set = HashSet::new();
-    /// let guard = flurry::epoch::pin();
+    /// let guard = set.guard();
     ///
     /// assert_eq!(set.insert(2, &guard), true);
     /// assert_eq!(set.insert(2, &guard), false);
@@ -183,47 +306,26 @@ where
         old.is_none()
     }
 
-    /// Returns true if the set contains a value.
-    ///
-    /// The value may be any borrowed form of the set's type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the type.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use flurry::HashSet;
-    ///
-    /// let set = HashSet::new();
-    /// let guard = flurry::epoch::pin();
-    /// set.insert(2, &guard);
-    ///
-    /// assert!(set.contains(&2, &guard));
-    /// assert!(!set.contains(&1, &guard));
-    /// ```
-    pub fn contains<'g, Q>(&self, value: &Q, guard: &'g Guard) -> bool
-    where
-        T: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
-    {
-        self.map.contains_key(value, guard)
-    }
-
     /// Removes a value from the set.
-    ///
-    /// The value may be any borrowed form of the set's type, but `Hash` and `Eq` on the borrowed
-    /// form must match those for the type.
     ///
     /// If the set did not have this value present, `false` is returned.
     ///
     /// If the set did have this value present, `true` is returned.
     ///
+    /// The value may be any borrowed form of the set's value type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the value type.
+    ///
+    /// [`Eq`]: std::cmp::Eq
+    /// [`Hash`]: std::hash::Hash
+    ///
     /// # Examples
     ///
     /// ```
     /// use flurry::HashSet;
     ///
     /// let set = HashSet::new();
-    /// let guard = flurry::epoch::pin();
+    /// let guard = set.guard();
     /// set.insert(2, &guard);
     ///
     /// assert_eq!(set.remove(&2, &guard), true);
@@ -239,25 +341,113 @@ where
         removed.is_some()
     }
 
-    /// An iterator over the set's values.
+    /// Removes and returns the value in the set, if any, that is equal to the given one.
     ///
-    /// See [`HashMap::keys`] for details.
+    /// The value may be any borrowed form of the set's value type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the value type.
     ///
     /// # Examples
     ///
     /// ```
     /// use flurry::HashSet;
     ///
-    /// let set = HashSet::new();
-    /// let guard = flurry::epoch::pin();
-    /// set.insert(1, &guard);
-    /// set.insert(2, &guard);
-    ///
-    /// for x in set.iter(&guard) {
-    ///     println!("{}", x);
-    /// }
+    /// let mut set: HashSet<_> = [1, 2, 3].iter().cloned().collect();
+    /// let guard = set.guard();
+    /// assert_eq!(set.take(&2, &guard), Some(&2));
+    /// assert_eq!(set.take(&2, &guard), None);
     /// ```
-    pub fn iter<'g>(&'g self, guard: &'g Guard) -> Keys<'g, T, ()> {
-        self.map.keys(guard)
+    ///
+    /// [`Eq`]: ../../std/cmp/trait.Eq.html
+    /// [`Hash`]: ../../std/hash/trait.Hash.html
+    pub fn take<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> Option<&'g T>
+    where
+        T: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        self.map.remove_entry(value, guard).map(|(k, _)| k)
+    }
+}
+
+impl<T, S> PartialEq for HashSet<T, S>
+where
+    T: Eq + Hash,
+    S: BuildHasher,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.map == other.map
+    }
+}
+
+impl<T, S> Eq for HashSet<T, S>
+where
+    T: Eq + Hash,
+    S: BuildHasher,
+{
+}
+
+impl<T, S> fmt::Debug for HashSet<T, S>
+where
+    T: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let guard = self.guard();
+        f.debug_set().entries(self.iter(&guard)).finish()
+    }
+}
+
+impl<T, S> Extend<T> for &HashSet<T, S>
+where
+    T: 'static + Sync + Send + Clone + Hash + Eq,
+    S: BuildHasher,
+{
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        Extend::extend(&mut &self.map, iter.into_iter().map(|v| (v, ())))
+    }
+}
+
+impl<'a, T, S> Extend<&'a T> for &HashSet<T, S>
+where
+    T: 'static + Sync + Send + Copy + Hash + Eq,
+    S: BuildHasher,
+{
+    fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
+        Extend::extend(&mut &self.map, iter.into_iter().map(|&v| (v, ())))
+    }
+}
+
+impl<T, S> FromIterator<T> for HashSet<T, S>
+where
+    T: 'static + Sync + Send + Clone + Hash + Eq,
+    S: BuildHasher + Default,
+{
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Self {
+            map: HashMap::from_iter(iter.into_iter().map(|v| (v, ()))),
+        }
+    }
+}
+
+impl<'a, T, S> FromIterator<&'a T> for HashSet<T, S>
+where
+    T: 'static + Sync + Send + Copy + Hash + Eq,
+    S: BuildHasher + Default,
+{
+    fn from_iter<I: IntoIterator<Item = &'a T>>(iter: I) -> Self {
+        Self {
+            map: HashMap::from_iter(iter.into_iter().map(|&v| (v, ()))),
+        }
+    }
+}
+
+impl<T, S> Clone for HashSet<T, S>
+where
+    T: 'static + Sync + Send + Clone + Hash + Eq,
+    S: BuildHasher + Clone,
+{
+    fn clone(&self) -> HashSet<T, S> {
+        Self {
+            map: self.map.clone(),
+        }
     }
 }

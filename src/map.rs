@@ -369,6 +369,7 @@ impl<K, V, S> HashMap<K, V, S> {
     }
 
     /// An iterator visiting all key-value pairs in arbitrary order.
+    ///
     /// The iterator element type is `(&'g K, &'g V)`.
     pub fn iter<'g>(&'g self, guard: &'g Guard) -> Iter<'g, K, V> {
         self.check_guard(guard);
@@ -378,6 +379,7 @@ impl<K, V, S> HashMap<K, V, S> {
     }
 
     /// An iterator visiting all keys in arbitrary order.
+    ///
     /// The iterator element type is `&'g K`.
     pub fn keys<'g>(&'g self, guard: &'g Guard) -> Keys<'g, K, V> {
         self.check_guard(guard);
@@ -387,6 +389,7 @@ impl<K, V, S> HashMap<K, V, S> {
     }
 
     /// An iterator visiting all values in arbitrary order.
+    ///
     /// The iterator element type is `&'g V`.
     pub fn values<'g>(&'g self, guard: &'g Guard) -> Values<'g, K, V> {
         self.check_guard(guard);
@@ -1786,13 +1789,46 @@ where
         // would require special-casing replace_node for when new_value.is_none(), and b) it's sort
         // of useless to call remove on a collection that you know you can never insert into.
         self.check_guard(guard);
+        self.replace_node(key, None, None, guard).map(|(_, v)| v)
+    }
+
+    /// Removes a key from the map, returning the stored key and value if the
+    /// key was previously in the map.
+    ///
+    /// The key may be any borrowed form of the map's key type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the key type.
+    ///
+    /// [`Eq`]: ../../std/cmp/trait.Eq.html
+    /// [`Hash`]: ../../std/hash/trait.Hash.html
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashMap;
+    ///
+    /// let map = HashMap::new();
+    /// let guard = map.guard();
+    /// map.insert(1, "a", &guard);
+    /// assert_eq!(map.remove_entry(&1, &guard), Some((&1, &"a")));
+    /// assert_eq!(map.remove(&1, &guard), None);
+    /// ```
+    pub fn remove_entry<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<(&'g K, &'g V)>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        self.check_guard(guard);
         self.replace_node(key, None, None, guard)
     }
 
-    /// Replaces node value with v, conditional upon match of cv.
-    /// If resulting value does not exist it removes the key (and its corresponding value) from this map.
+    /// Replaces the node value for the given key with `v`, if is equal to `cv`.
+    ///
+    /// If `new_value` is `None`, it removes the key (and its corresponding value) from this map.
+    ///
     /// This method does nothing if the key is not in the map.
-    /// Returns the previous value associated with the given key.
+    ///
+    /// Returns the previous key and value associated with the given key.
     ///
     /// The key may be any borrowed form of the map's key type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the key type.
@@ -1802,7 +1838,7 @@ where
         new_value: Option<V>,
         observed_value: Option<Shared<'g, V>>,
         guard: &'g Guard,
-    ) -> Option<&'g V>
+    ) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -1858,7 +1894,7 @@ where
                 }
                 BinEntry::Node(ref head) => {
                     let head_lock = head.lock.lock();
-                    let mut old_val: Option<Shared<'g, V>> = None;
+                    let mut old_val: Option<(&'g K, Shared<'g, V>)> = None;
 
                     // need to check that this is _still_ the head
                     if t.bin(bini, guard) != bin {
@@ -1885,7 +1921,7 @@ where
                             // just remove the node if the value is the one we expected at method call
                             if observed_value.map(|ov| ov == ev).unwrap_or(true) {
                                 // we remember the old value so that we can return it and mark it for deletion below
-                                old_val = Some(ev);
+                                old_val = Some((&n.key, ev));
 
                                 // found the node but we have a new value to replace the old one
                                 if let Some(nv) = new_value {
@@ -1924,7 +1960,7 @@ where
                     }
                     drop(head_lock);
 
-                    if let Some(val) = old_val {
+                    if let Some((key, val)) = old_val {
                         self.add_count(-1, None, guard);
                         // safety: need to guarantee that the old value is no longer
                         // reachable. more specifically, no thread that executes _after_
@@ -1949,7 +1985,7 @@ where
                         // safety: the lifetime of the reference is bound to the guard
                         // supplied which means that the memory will not be freed
                         // until at least after the guard goes out of scope
-                        return unsafe { val.as_ref() };
+                        return unsafe { val.as_ref() }.map(move |v| (key, v));
                     }
                     break;
                 }
@@ -2402,7 +2438,7 @@ fn replace_existing() {
         let guard = epoch::pin();
         map.insert(42, 42, &guard);
         let old = map.replace_node(&42, Some(10), None, &guard);
-        assert_eq!(old, Some(&42));
+        assert_eq!(old, Some((&42, &42)));
         assert_eq!(*map.get(&42, &guard).unwrap(), 10);
     }
 }
@@ -2415,7 +2451,7 @@ fn replace_existing_observed_value_matching() {
         map.insert(42, 42, &guard);
         let observed_value = Shared::from(map.get(&42, &guard).unwrap() as *const _);
         let old = map.replace_node(&42, Some(10), Some(observed_value), &guard);
-        assert_eq!(old, Some(&42));
+        assert_eq!(old, Some((&42, &42)));
         assert_eq!(*map.get(&42, &guard).unwrap(), 10);
     }
 }
