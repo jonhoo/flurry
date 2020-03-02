@@ -160,9 +160,9 @@ where
 {
     /// Adds a value to the set.
     ///
-    /// If the set did not have this value present, true is returned.
+    /// If the set did not have this value present, `true` is returned.
     ///
-    /// If the set did have this value present, false is returned.
+    /// If the set did have this value present, `false` is returned.
     ///
     /// # Examples
     ///
@@ -211,9 +211,9 @@ where
     /// The value may be any borrowed form of the set's type, but `Hash` and `Eq` on the borrowed
     /// form must match those for the type.
     ///
-    /// If the set did not have this value present, false is returned.
+    /// If the set did not have this value present, `false` is returned.
     ///
-    /// If the set did have this value present, true is returned.
+    /// If the set did have this value present, `true` is returned.
     ///
     /// # Examples
     ///
