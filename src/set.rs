@@ -156,6 +156,40 @@ impl<T, S> HashSet<T, S> {
         self.map.guard()
     }
 
+    /// Returns the number of entries in the set.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    ///
+    /// let guard = set.guard();
+    /// set.insert(1, &guard);
+    /// set.insert(2, &guard);
+    /// assert_eq!(set.len(), 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Returns `true` if the set is empty. Otherwise returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    /// assert!(set.is_empty());
+    /// set.insert("a", &set.guard());
+    /// assert!(!set.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// An iterator visiting all values in arbitrary order.
     ///
     /// The iterator element type is `(&'g K, &'g V)`.
