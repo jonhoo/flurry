@@ -214,6 +214,33 @@ where
     {
         self.map.contains_key(value, guard)
     }
+
+    /// Returns a reference to the value in the set, if any, that is equal to the given value.
+    ///
+    /// The value may be any borrowed form of the set's value type, but
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// the value type.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set: HashSet<_> = [1, 2, 3].iter().cloned().collect();
+    /// let guard = set.guard();
+    /// assert_eq!(set.get(&2, &guard), Some(&2));
+    /// assert_eq!(set.get(&4, &guard), None);
+    /// ```
+    ///
+    /// [`Eq`]: ../../std/cmp/trait.Eq.html
+    /// [`Hash`]: ../../std/hash/trait.Hash.html
+    pub fn get<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> Option<&'g T>
+    where
+        T: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        self.map.get_key_value(value, guard).map(|(k, _)| k)
+    }
 }
 
 impl<T, S> HashSet<T, S>
