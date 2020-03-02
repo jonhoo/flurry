@@ -5,7 +5,7 @@
 use std::borrow::Borrow;
 use std::hash::{BuildHasher, Hash};
 
-use crate::epoch::{self, Guard};
+use crate::epoch::Guard;
 use crate::iter::Keys;
 use crate::HashMap;
 
@@ -61,23 +61,23 @@ where
 ///
 /// // Initialize a new hash set.
 /// let books = HashSet::new();
+/// let guard = flurry::epoch::pin();
 ///
 /// // Add some books
-/// books.insert("Fight Club");
-/// books.insert("Three Men In A Raft");
-/// books.insert("The Book of Dust");
-/// books.insert("The Dry");
+/// books.insert("Fight Club", &guard);
+/// books.insert("Three Men In A Raft", &guard);
+/// books.insert("The Book of Dust", &guard);
+/// books.insert("The Dry", &guard);
 ///
 /// // Check for a specific one.
-/// if !books.contains(&"The Drunken Botanist") {
+/// if !books.contains(&"The Drunken Botanist", &guard) {
 ///     println!("We don't have The Drunken Botanist.");
 /// }
 ///
 /// // Remove a book.
-/// books.remove(&"Three Men In A Raft");
+/// books.remove(&"Three Men In A Raft", &guard);
 ///
 /// // Iterate over everything.
-/// let guard = flurry::epoch::pin();
 /// for book in books.iter(&guard) {
 ///     println!("{}", book);
 /// }
@@ -117,7 +117,8 @@ where
     /// use flurry::{HashSet, DefaultHashBuilder};
     ///
     /// let set = HashSet::with_hasher(DefaultHashBuilder::default());
-    /// set.insert(1);
+    /// let guard = flurry::epoch::pin();
+    /// set.insert(1, &guard);
     /// ```
     pub fn with_hasher(hash_builder: S) -> Self {
         Self {
@@ -144,7 +145,8 @@ where
     ///
     /// let s = RandomState::new();
     /// let set = HashSet::with_capacity_and_hasher(10, s);
-    /// set.insert(1);
+    /// let guard = flurry::epoch::pin();
+    /// set.insert(1, &guard);
     /// ```
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: S) -> Self {
         Self {
@@ -170,14 +172,14 @@ where
     /// use flurry::HashSet;
     ///
     /// let set = HashSet::new();
+    /// let guard = flurry::epoch::pin();
     ///
-    /// assert_eq!(set.insert(2), true);
-    /// assert_eq!(set.insert(2), false);
-    /// assert!(set.contains(&2));
+    /// assert_eq!(set.insert(2, &guard), true);
+    /// assert_eq!(set.insert(2, &guard), false);
+    /// assert!(set.contains(&2, &guard));
     /// ```
-    pub fn insert(&self, value: T) -> bool {
-        let guard = epoch::pin();
-        let old = self.map.insert(value, (), &guard);
+    pub fn insert<'g>(&'g self, value: T, guard: &'g Guard) -> bool {
+        let old = self.map.insert(value, (), guard);
         old.is_none()
     }
 
@@ -192,18 +194,18 @@ where
     /// use flurry::HashSet;
     ///
     /// let set = HashSet::new();
-    /// set.insert(2);
+    /// let guard = flurry::epoch::pin();
+    /// set.insert(2, &guard);
     ///
-    /// assert!(set.contains(&2));
-    /// assert!(!set.contains(&1));
+    /// assert!(set.contains(&2, &guard));
+    /// assert!(!set.contains(&1, &guard));
     /// ```
-    pub fn contains<Q>(&self, value: &Q) -> bool
+    pub fn contains<'g, Q>(&self, value: &Q, guard: &'g Guard) -> bool
     where
         T: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        let guard = epoch::pin();
-        self.map.contains_key(value, &guard)
+        self.map.contains_key(value, guard)
     }
 
     /// Removes a value from the set.
@@ -221,19 +223,19 @@ where
     /// use flurry::HashSet;
     ///
     /// let set = HashSet::new();
-    /// set.insert(2);
+    /// let guard = flurry::epoch::pin();
+    /// set.insert(2, &guard);
     ///
-    /// assert_eq!(set.remove(&2), true);
-    /// assert!(!set.contains(&2));
-    /// assert_eq!(set.remove(&2), false);
+    /// assert_eq!(set.remove(&2, &guard), true);
+    /// assert!(!set.contains(&2, &guard));
+    /// assert_eq!(set.remove(&2, &guard), false);
     /// ```
-    pub fn remove<Q>(&self, value: &Q) -> bool
+    pub fn remove<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> bool
     where
         T: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
     {
-        let guard = epoch::pin();
-        let removed = self.map.remove(value, &guard);
+        let removed = self.map.remove(value, guard);
         removed.is_some()
     }
 
@@ -247,10 +249,10 @@ where
     /// use flurry::HashSet;
     ///
     /// let set = HashSet::new();
-    /// set.insert(1);
-    /// set.insert(2);
-    ///
     /// let guard = flurry::epoch::pin();
+    /// set.insert(1, &guard);
+    /// set.insert(2, &guard);
+    ///
     /// for x in set.iter(&guard) {
     ///     println!("{}", x);
     /// }
