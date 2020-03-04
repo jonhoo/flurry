@@ -2,6 +2,26 @@ use crossbeam_epoch as epoch;
 use flurry::{DefaultHashBuilder, HashMap};
 use std::hash::{BuildHasher, BuildHasherDefault, Hasher};
 
+#[derive(Default)]
+pub struct ZeroHasher;
+
+pub struct ZeroHashBuilder;
+
+impl Hasher for ZeroHasher {
+    fn finish(&self) -> u64 {
+        0
+    }
+    fn write(&mut self, _: &[u8]) {}
+}
+
+impl BuildHasher for ZeroHashBuilder {
+    type Hasher = ZeroHasher;
+
+    fn build_hasher(&self) -> ZeroHasher {
+        ZeroHasher
+    }
+}
+
 fn check<S: BuildHasher + Default>() {
     let range = 0..1000;
     let guard = epoch::pin();
@@ -26,16 +46,6 @@ fn test_default_hasher() {
 
 #[test]
 fn test_zero_hasher() {
-    #[derive(Default)]
-    struct ZeroHasher;
-
-    impl Hasher for ZeroHasher {
-        fn finish(&self) -> u64 {
-            0
-        }
-        fn write(&mut self, _: &[u8]) {}
-    }
-
     check::<BuildHasherDefault<ZeroHasher>>();
 }
 
