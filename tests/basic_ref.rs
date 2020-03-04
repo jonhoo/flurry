@@ -17,11 +17,13 @@ fn with_guard() {
 fn clear() {
     let map = HashMap::<usize, usize>::new();
     let map = map.pin();
-    map.insert(0, 1);
-    map.insert(1, 1);
-    map.insert(2, 1);
-    map.insert(3, 1);
-    map.insert(4, 1);
+    {
+        map.insert(0, 1);
+        map.insert(1, 1);
+        map.insert(2, 1);
+        map.insert(3, 1);
+        map.insert(4, 1);
+    }
     map.clear();
     assert!(map.is_empty());
 }
@@ -71,18 +73,21 @@ fn insert_and_remove() {
 #[test]
 fn insert_and_get() {
     let map = HashMap::<usize, usize>::new();
-    let map = map.pin();
-    map.insert(42, 0);
-    let e = map.get(&42).unwrap();
-    assert_eq!(e, &0);
+    map.pin().insert(42, 0);
+    {
+        let map = map.pin();
+        let e = map.get(&42).unwrap();
+        assert_eq!(e, &0);
+    }
 }
 
 #[test]
 fn insert_and_get_key_value() {
     let map = HashMap::<usize, usize>::new();
-    let map = map.pin();
-    map.insert(42, 0);
+
+    map.pin().insert(42, 0);
     {
+        let map = map.pin();
         let e = map.get_key_value(&42).unwrap();
         assert_eq!(e, (&42, &0));
     }
@@ -140,91 +145,120 @@ fn one_bucket() {
 #[test]
 fn update() {
     let map = HashMap::<usize, usize>::new();
-    let map = map.pin();
-    map.insert(42, 0);
-    let old = map.insert(42, 1);
+
+    let map1 = map.pin();
+    map1.insert(42, 0);
+    let old = map1.insert(42, 1);
     assert_eq!(old, Some(&0));
-    let e = map.get(&42).unwrap();
-    assert_eq!(e, &1);
+    {
+        let map2 = map.pin();
+        let e = map2.get(&42).unwrap();
+        assert_eq!(e, &1);
+    }
 }
 
 #[test]
 fn compute_if_present() {
     let map = HashMap::<usize, usize>::new();
-    let map = map.pin();
-    map.insert(42, 0);
-    let new = map.compute_if_present(&42, |_, v| Some(v + 1));
+
+    let map1 = map.pin();
+    map1.insert(42, 0);
+    let new = map1.compute_if_present(&42, |_, v| Some(v + 1));
     assert_eq!(new, Some(&1));
-    let e = map.get(&42).unwrap();
-    assert_eq!(e, &1);
+    {
+        let map2 = map.pin();
+        let e = map2.get(&42).unwrap();
+        assert_eq!(e, &1);
+    }
 }
 
 #[test]
 fn compute_if_present_empty() {
     let map = HashMap::<usize, usize>::new();
-    let map = map.pin();
-    let new = map.compute_if_present(&42, |_, v| Some(v + 1));
+
+    let map1 = map.pin();
+    let new = map1.compute_if_present(&42, |_, v| Some(v + 1));
     assert!(new.is_none());
-    assert!(map.get(&42).is_none());
+    {
+        let map2 = map.pin();
+        assert!(map2.get(&42).is_none());
+    }
 }
 
 #[test]
 fn compute_if_present_remove() {
     let map = HashMap::<usize, usize>::new();
-    let map = map.pin();
-    map.insert(42, 0);
-    let new = map.compute_if_present(&42, |_, _| None);
+
+    let map1 = map.pin();
+    map1.insert(42, 0);
+    let new = map1.compute_if_present(&42, |_, _| None);
     assert!(new.is_none());
-    assert!(map.get(&42).is_none());
+    {
+        let map2 = map.pin();
+        assert!(map2.get(&42).is_none());
+    }
 }
 
 #[test]
 fn empty_maps_equal() {
     let map1 = HashMap::<usize, usize>::new();
-    let map1 = map1.pin();
     let map2 = HashMap::<usize, usize>::new();
-    let map2 = map2.pin();
-    assert_eq!(map1, map2);
-    assert_eq!(map2, map1);
+    assert_eq!(map1, map2.pin());
+    assert_eq!(map1.pin(), map2);
+    assert_eq!(map1.pin(), map2.pin());
+    assert_eq!(map2.pin(), map1.pin());
 }
 
 #[test]
 fn different_size_maps_not_equal() {
     let map1 = HashMap::<usize, usize>::new();
-    let map1 = map1.pin();
     let map2 = HashMap::<usize, usize>::new();
-    let map2 = map2.pin();
+    {
+        let map1 = map1.pin();
+        let map2 = map2.pin();
+        map1.insert(1, 0);
+        map1.insert(2, 0);
+        map2.insert(1, 0);
+    }
 
-    map1.insert(1, 0);
-    map1.insert(2, 0);
-    map2.insert(1, 0);
-
-    assert_ne!(map1, map2);
-    assert_ne!(map2, map1);
+    assert_ne!(map1, map2.pin());
+    assert_ne!(map1.pin(), map2);
+    assert_ne!(map1.pin(), map2.pin());
+    assert_ne!(map2.pin(), map1.pin());
 }
 
 #[test]
 fn same_values_equal() {
     let map1 = HashMap::<usize, usize>::new();
-    let map1 = map1.pin();
     let map2 = HashMap::<usize, usize>::new();
-    let map2 = map2.pin();
-    map1.insert(1, 0);
-    map2.insert(1, 0);
-    assert_eq!(map1, map2);
-    assert_eq!(map2, map1);
+    {
+        let map1 = map1.pin();
+        let map2 = map2.pin();
+        map1.insert(1, 0);
+        map2.insert(1, 0);
+    }
+
+    assert_eq!(map1, map2.pin());
+    assert_eq!(map1.pin(), map2);
+    assert_eq!(map1.pin(), map2.pin());
+    assert_eq!(map2.pin(), map1.pin());
 }
 
 #[test]
 fn different_values_not_equal() {
     let map1 = HashMap::<usize, usize>::new();
-    let map1 = map1.pin();
     let map2 = HashMap::<usize, usize>::new();
-    let map2 = map2.pin();
-    map1.insert(1, 0);
-    map2.insert(1, 1);
-    assert_ne!(map1, map2);
-    assert_ne!(map2, map1);
+    {
+        let map1 = map1.pin();
+        let map2 = map2.pin();
+        map1.insert(1, 0);
+        map2.insert(1, 1);
+    }
+
+    assert_ne!(map1, map2.pin());
+    assert_ne!(map1.pin(), map2);
+    assert_ne!(map1.pin(), map2.pin());
+    assert_ne!(map2.pin(), map1.pin());
 }
 
 #[test]
