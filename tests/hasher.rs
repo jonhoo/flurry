@@ -50,7 +50,7 @@ fn test_zero_hasher() {
 }
 
 #[test]
-fn test_max_hsaher() {
+fn test_max_hasher() {
     #[derive(Default)]
     struct MaxHasher;
 
