@@ -411,3 +411,111 @@ fn retain_force_some() {
     assert_eq!(map.len(), 5);
     assert_eq!(map, expected_map);
 }
+
+#[test]
+fn concurrent_insert() {
+    let map = Arc::new(HashMap::<usize, usize>::new());
+
+    let map1 = map.clone();
+    let t1 = std::thread::spawn(move || {
+        for i in 0..64 {
+            map1.pin().insert(i, 0);
+        }
+    });
+    let map2 = map.clone();
+    let t2 = std::thread::spawn(move || {
+        for i in 0..64 {
+            map2.pin().insert(i, 0);
+        }
+    });
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    let map = map.pin();
+    for i in 0..64 {
+        let v = map.get(&i).unwrap();
+        assert!(v == &0 || v == &1);
+
+        let kv = map.get_key_value(&i).unwrap();
+        assert!(kv == (&i, &0) || kv == (&i, &1));
+    }
+}
+
+#[test]
+fn concurrent_remove() {
+    let map = Arc::new(HashMap::<usize, usize>::new());
+
+    {
+        let map = map.pin();
+        for i in 0..64 {
+            map.insert(i, i);
+        }
+    }
+
+    let map1 = map.clone();
+    let t1 = std::thread::spawn(move || {
+        let map1 = map1.pin();
+        for i in 0..64 {
+            if let Some(v) = map1.remove(&i) {
+                assert_eq!(v, &i);
+            }
+        }
+    });
+    let map2 = map.clone();
+    let t2 = std::thread::spawn(move || {
+        let map2 = map2.pin();
+        for i in 0..64 {
+            if let Some(v) = map2.remove(&i) {
+                assert_eq!(v, &i);
+            }
+        }
+    });
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    // after joining the threads, the map should be empty
+    let map = map.pin();
+    for i in 0..64 {
+        assert!(map.get(&i).is_none());
+    }
+}
+
+#[test]
+fn concurrent_compute_if_present() {
+    let map = Arc::new(HashMap::<usize, usize>::new());
+
+    {
+        let map = map.pin();
+        for i in 0..64 {
+            map.insert(i, i);
+        }
+    }
+
+    let map1 = map.clone();
+    let t1 = std::thread::spawn(move || {
+        let map1 = map1.pin();
+        for i in 0..64 {
+            let new = map1.compute_if_present(&i, |_, _| None);
+            assert!(new.is_none());
+        }
+    });
+    let map2 = map.clone();
+    let t2 = std::thread::spawn(move || {
+        let map2 = map2.pin();
+        for i in 0..64 {
+            let new = map2.compute_if_present(&i, |_, _| None);
+            assert!(new.is_none());
+        }
+    });
+
+    t1.join().unwrap();
+    t2.join().unwrap();
+
+    // after joining the threads, the map should be empty
+    let map = map.pin();
+    for i in 0..64 {
+        assert!(map.get(&i).is_none());
+    }
+}
