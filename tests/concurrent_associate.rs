@@ -1,4 +1,3 @@
-use crossbeam_epoch::{self as epoch, Guard};
 use flurry::HashMap;
 use rand::Rng;
 use std::sync::Arc;
@@ -21,8 +20,8 @@ impl KeyVal {
     }
 }
 
-fn insert(map: Arc<HashMap<KeyVal, KeyVal>>, g: &Guard, k: KeyVal) {
-    map.insert(k, k, g);
+fn insert(map: Arc<HashMap<KeyVal, KeyVal>>, k: KeyVal) {
+    map.insert(k, k, &map.guard());
 }
 
 #[test]
@@ -32,7 +31,7 @@ fn test_concurrent_insert<'g>() {
 
 fn test<F>(associator: F)
 where
-    F: Fn(Arc<HashMap<KeyVal, KeyVal>>, &Guard, KeyVal) + Send + Copy + 'static,
+    F: Fn(Arc<HashMap<KeyVal, KeyVal>>, KeyVal) + Send + Copy + 'static,
 {
     for _ in 0..ITERATIONS {
         test_once(associator);
@@ -41,18 +40,17 @@ where
 
 fn test_once<F>(associator: F)
 where
-    F: Fn(Arc<HashMap<KeyVal, KeyVal>>, &Guard, KeyVal) + Send + Copy + 'static,
+    F: Fn(Arc<HashMap<KeyVal, KeyVal>>, KeyVal) + Send + Copy + 'static,
 {
     let map = Arc::new(HashMap::new());
     let mut threads = Vec::new();
     for _ in 0..num_cpus::get().min(8) {
         let map = map.clone();
         let handle = std::thread::spawn(move || {
-            let guard = &epoch::pin();
             for _ in 0..NUM_ENTRIES {
                 let key = KeyVal::new();
-                associator(map.clone(), guard, key);
-                assert!(map.contains_key(&key, guard));
+                associator(map.clone(), key);
+                assert!(map.contains_key(&key, &map.guard()));
             }
         });
         threads.push(handle);
