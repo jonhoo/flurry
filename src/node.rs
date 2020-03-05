@@ -112,7 +112,7 @@ impl<K, V> TreeNode<K, V> {
     /// Returns the `TreeNode` (or `Shared::null()` if not found) for the given
     /// key, starting at the given node.
     pub(crate) fn find_tree_node<'g, Q>(
-        mut p: Shared<'g, BinEntry<K, V>>,
+        from: Shared<'g, BinEntry<K, V>>,
         hash: u64,
         key: &Q,
         guard: &'g Guard,
@@ -129,6 +129,7 @@ impl<K, V> TreeNode<K, V> {
         // do-while loops, so we end up with one extra check since we also need
         // to introduce some `continue` due to the extraction of local
         // assignments from checks.
+        let mut p = from;
         while !p.is_null() {
             let p_deref = Self::get_tree_node(p);
             let p_left = p_deref.left.load(Ordering::SeqCst, guard);
@@ -198,6 +199,7 @@ pub(crate) struct TreeBin<K, V> {
     pub(crate) root: Atomic<BinEntry<K, V>>,
     pub(crate) first: Atomic<BinEntry<K, V>>,
     pub(crate) waiter: Atomic<Thread>,
+    pub(crate) lock: parking_lot::Mutex<()>,
     pub(crate) lock_state: AtomicI64,
 }
 
@@ -277,6 +279,7 @@ where
             root: Atomic::from(root),
             first: Atomic::from(bin),
             waiter: Atomic::null(),
+            lock: parking_lot::Mutex::new(()),
             lock_state: AtomicI64::new(0),
         }
     }
@@ -371,7 +374,6 @@ impl<K, V> TreeBin<K, V> {
             {
                 // the current lock state indicates no waiter or writer and we
                 // acquired a read lock
-                // FIXME: try finally?
                 let root = bin_deref.root.load(Ordering::SeqCst, guard);
                 let p = if root.is_null() {
                     Shared::null()
@@ -459,7 +461,6 @@ impl<K, V> TreeBin<K, V> {
         // if we get here, we know that we will still be a tree and have
         // unlinked the `next` and `prev` pointers, so it's time to restructure
         // the tree
-        // FIXME: try finally?
         self.lock_root();
         let replacement;
         let p_left = p_deref.left.load(Ordering::Relaxed, guard);
@@ -639,7 +640,7 @@ where
         &'g self,
         hash: u64,
         key: K,
-        value: V,
+        value: Shared<'g, V>,
         guard: &'g Guard,
     ) -> Shared<'g, BinEntry<K, V>> {
         let mut p = self.root.load(Ordering::SeqCst, guard);
@@ -648,7 +649,7 @@ where
             // This, we simply insert the new entry as the root.
             let tree_node = Owned::new(BinEntry::TreeNode(TreeNode::new(
                 key,
-                Atomic::new(value),
+                Atomic::from(value),
                 hash,
                 Atomic::null(),
                 Atomic::null(),
@@ -702,7 +703,7 @@ where
                 let first = self.first.load(Ordering::SeqCst, guard);
                 let x = Owned::new(BinEntry::TreeNode(TreeNode::new(
                     key,
-                    Atomic::new(value),
+                    Atomic::from(value),
                     hash,
                     Atomic::from(first),
                     Atomic::from(xp),
@@ -723,7 +724,6 @@ where
                 if !TreeNode::get_tree_node(xp).red.load(Ordering::SeqCst) {
                     TreeNode::get_tree_node(x).red.store(true, Ordering::SeqCst);
                 } else {
-                    // FIXME try finally?
                     self.lock_root();
                     self.root.store(
                         TreeNode::balance_insertion(
@@ -747,12 +747,46 @@ where
     }
 }
 
+impl<K, V> Drop for TreeBin<K, V> {
+    fn drop(&mut self) {
+        // safety: we have &mut self _and_ all references we have returned are bound to the
+        // lifetime of their borrow of self, so there cannot be any outstanding references to
+        // anything in the map.
+        let guard = unsafe { crossbeam_epoch::unprotected() };
+
+        // assume ownership of atomically shared references. note that it is
+        // sufficient to follow the `next` pointers of the `first` element in
+        // the bin, since the tree pointers point to the same nodes.
+        let _waiter = unsafe { self.waiter.load(Ordering::SeqCst, guard).into_owned() };
+        let p = self.first.load(Ordering::SeqCst, guard);
+        if p.is_null() {
+            // this TreeBin is empty
+            return;
+        }
+        let mut p = unsafe { p.into_owned() };
+        loop {
+            let tree_node = if let BinEntry::TreeNode(tree_node) = *p.into_box() {
+                tree_node
+            } else {
+                unreachable!("Trees can only ever contain TreeNodes");
+            };
+            // first, drop the value in this node
+            let _ = unsafe { tree_node.node.value.into_owned() };
+            // then we move to the next node
+            if tree_node.node.next.load(Ordering::SeqCst, guard).is_null() {
+                break;
+            }
+            p = unsafe { tree_node.node.next.into_owned() };
+        }
+    }
+}
+
 /* ----------------------------------------------------------------- */
 // Red-black tree methods, all adapted from CLR
 
 impl<K, V> TreeNode<K, V> {
     #[inline]
-    fn get_tree_node<'g>(bin: Shared<'g, BinEntry<K, V>>) -> &'g TreeNode<K, V> {
+    pub(crate) fn get_tree_node<'g>(bin: Shared<'g, BinEntry<K, V>>) -> &'g TreeNode<K, V> {
         bin.deref().as_tree_node().unwrap()
     }
 

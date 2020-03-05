@@ -498,15 +498,16 @@ impl<K, V, S> HashMap<K, V, S> {
 }
 
 // ===
-// the following methods require Clone, since they ultimately call `transfer`, which needs to be
-// able to clone keys. however, they do _not_ need to require thread-safety bounds (Send + Sync +
-// 'static) since if the bounds do not hold, the map is empty, so no keys or values will be
-// transfered anyway.
+// the following methods require Clone and Ord, since they ultimately call
+// `transfer`, which needs to be able to clone keys and work with tree bins.
+// however, they do _not_ need to require thread-safety bounds (Send + Sync +
+// 'static) since if the bounds do not hold, the map is empty, so no keys or
+// values will be transfered anyway.
 // ===
 
 impl<K, V, S> HashMap<K, V, S>
 where
-    K: Clone,
+    K: Clone + Ord,
 {
     /// Tries to presize table to accommodate the given number of elements.
     fn try_presize(&self, size: usize, guard: &Guard) {
@@ -794,7 +795,7 @@ where
                     // yes, it is still the head, so we can now "own" the bin
                     // note that there can still be readers in the bin!
 
-                    // TODO: TreeBin & ReservationNode
+                    // TODO: ReservationNode
 
                     let mut run_bit = head.hash & n as u64;
                     let mut last_run = bin;
@@ -900,6 +901,156 @@ where
 
                     drop(head_lock);
                 }
+                BinEntry::Tree(ref tree_bin) => {
+                    let bin_lock = tree_bin.lock.lock();
+
+                    // need to check that this is _still_ the correct bin
+                    let current_head = table.bin(i, guard);
+                    if current_head != bin {
+                        // nope -- try again from the start
+                        continue;
+                    }
+
+                    let mut low = Shared::null();
+                    let mut low_tail = Shared::null();
+                    let mut high = Shared::null();
+                    let mut high_tail = Shared::null();
+                    let mut low_count = 0;
+                    let mut high_count = 0;
+                    let mut e = tree_bin.first.load(Ordering::Relaxed, guard);
+                    while !e.is_null() {
+                        let tree_node = TreeNode::get_tree_node(e);
+                        let hash = tree_node.node.hash;
+                        let new_node = TreeNode::new(
+                            tree_node.node.key.clone(),
+                            tree_node.node.value.clone(),
+                            hash,
+                            Atomic::null(),
+                            Atomic::null(),
+                        );
+                        let run_bit = hash & n as u64;
+                        if run_bit == 0 {
+                            new_node.prev.store(low_tail, Ordering::Relaxed);
+                            let new_node =
+                                Owned::new(BinEntry::TreeNode(new_node)).into_shared(guard);
+                            if low_tail.is_null() {
+                                // this is the first element inserted into the low bin
+                                low = new_node;
+                            } else {
+                                TreeNode::get_tree_node(low_tail)
+                                    .node
+                                    .next
+                                    .store(new_node, Ordering::Relaxed);
+                            }
+                            low_tail = new_node;
+                            low_count += 1;
+                        } else {
+                            new_node.prev.store(high_tail, Ordering::Relaxed);
+                            let new_node =
+                                Owned::new(BinEntry::TreeNode(new_node)).into_shared(guard);
+                            if high_tail.is_null() {
+                                // this is the first element inserted into the high bin
+                                high = new_node;
+                            } else {
+                                TreeNode::get_tree_node(high_tail)
+                                    .node
+                                    .next
+                                    .store(new_node, Ordering::Relaxed);
+                            }
+                            high_tail = new_node;
+                            high_count += 1;
+                        }
+                        e = tree_node.node.next.load(Ordering::Relaxed, guard);
+                    }
+
+                    let mut reused_bin = false;
+                    let low_bin = if low_count <= UNTREEIFY_THRESHOLD {
+                        // use a regular bin instead of a tree bin since the
+                        // bin is too small. since the tree nodes are
+                        // already behind shared references, we have to
+                        // clean them up manually.
+                        let l = Self::untreeify(low, guard);
+                        // safety: we have just created `low` and its `next`
+                        // nodes and have never shared them
+                        let mut p = unsafe { low.into_owned() };
+                        loop {
+                            let tree_node = if let BinEntry::TreeNode(tree_node) = *p.into_box() {
+                                tree_node
+                            } else {
+                                unreachable!("Trees can only ever contain TreeNodes");
+                            };
+                            if tree_node.node.next.load(Ordering::SeqCst, guard).is_null() {
+                                break;
+                            }
+                            p = unsafe { tree_node.node.next.into_owned() };
+                        }
+                        l
+                    } else {
+                        // the new bin will also be a tree bin. if both the high
+                        // bin and the low bin are non-empty, we have to
+                        // allocate a new TreeBin. if not, we can re-use the old
+                        // bin here, since it will be swapped for a Moved entry
+                        // while we are still behind the bin lock.
+                        if high_count != 0 {
+                            Owned::new(BinEntry::Tree(TreeBin::new(low, guard))).into_shared(guard)
+                        } else {
+                            reused_bin = true;
+                            bin
+                        }
+                    };
+                    let high_bin = if high_count <= UNTREEIFY_THRESHOLD {
+                        let h = Self::untreeify(high, guard);
+                        // safety: we have just created `high` and its `next`
+                        // nodes and have never shared them
+                        let mut p = unsafe { high.into_owned() };
+                        loop {
+                            let tree_node = if let BinEntry::TreeNode(tree_node) = *p.into_box() {
+                                tree_node
+                            } else {
+                                unreachable!("Trees can only ever contain TreeNodes");
+                            };
+                            if tree_node.node.next.load(Ordering::SeqCst, guard).is_null() {
+                                break;
+                            }
+                            p = unsafe { tree_node.node.next.into_owned() };
+                        }
+                        h
+                    } else {
+                        if low_count != 0 {
+                            Owned::new(BinEntry::Tree(TreeBin::new(high, guard))).into_shared(guard)
+                        } else {
+                            reused_bin = true;
+                            bin
+                        }
+                    };
+
+                    next_table.store_bin(i, low_bin);
+                    next_table.store_bin(i + n, high_bin);
+                    table.store_bin(
+                        i,
+                        table.get_moved(Shared::from(next_table as *const _), guard),
+                    );
+
+                    // if we did not re-use the old bin, it is now garbage,
+                    // since all of its nodes have been reallocated
+                    if !reused_bin {
+                        // safety: the entry for this bin in the old table was
+                        // swapped for a Moved entry, so no thread can obtain a
+                        // new reference to `bin` from there. we only
+                        // `defer_destroy` the old bin if it was not used in
+                        // `next_table` so there is no other reference to it
+                        // anyone could obtain.
+                        unsafe {
+                            guard.defer_destroy(bin);
+                        }
+                    }
+
+                    advance = true;
+                    drop(bin_lock);
+                }
+                BinEntry::TreeNode(_) => unreachable!(
+                    "The head of a bin cannot be a TreeNode directly without BinEntry::Tree"
+                ),
             }
         }
     }
@@ -1235,7 +1386,7 @@ where
 
 impl<K, V, S> HashMap<K, V, S>
 where
-    K: Clone,
+    K: Clone + Ord,
 {
     /// Clears the map, removing all key-value pairs.
     ///
@@ -1319,6 +1470,41 @@ where
                     delta -= 1;
                     idx += 1;
                 }
+                BinEntry::Tree(tree_bin) => {
+                    let bin_lock = tree_bin.lock.lock();
+                    // need to check that this is _still_ the correct bin
+                    let current_head = tab.bin(idx, guard);
+                    if current_head != raw_node {
+                        // nope -- try the bin again
+                        continue;
+                    }
+                    // we now own the bin
+                    // unlink it from the map to prevent others from entering it
+                    tab.store_bin(idx, Shared::null());
+                    // next, walk the nodes of the bin and free the nodes and their values as we go
+                    // note that we do not free the head node yet, since we're holding the lock it contains
+                    let mut p = tree_bin.first.load(Ordering::SeqCst, guard);
+                    while !p.is_null() {
+                        delta -= 1;
+                        p = {
+                            // safety: we loaded p under guard, and guard is still pinned, so p has not been dropped.
+                            let tree_node = TreeNode::get_tree_node(p);
+                            let next = tree_node.node.next.load(Ordering::SeqCst, guard);
+                            // NOTE: we do not drop the TreeNodes or their
+                            // values here, since they will be dropped together
+                            // with the containing TreeBin (`tree_bin`) in its
+                            // `drop`
+                            next
+                        };
+                    }
+                    drop(bin_lock);
+                    // safety: same as in the BinEntry::Node case above
+                    unsafe { guard.defer_destroy(raw_node) };
+                    idx += 1;
+                }
+                BinEntry::TreeNode(_) => unreachable!(
+                    "The head of a bin cannot be a TreeNode directly without BinEntry::Tree"
+                ),
             };
         }
 
@@ -1335,7 +1521,7 @@ where
 
 impl<K, V, S> HashMap<K, V, S>
 where
-    K: 'static + Sync + Send + Clone + Hash + Eq,
+    K: 'static + Sync + Send + Clone + Hash + Ord,
     V: 'static + Sync + Send,
     S: BuildHasher,
 {
@@ -1379,18 +1565,10 @@ where
         no_replacement: bool,
         guard: &'g Guard,
     ) -> Option<&'g V> {
-        let h = self.hash(&key);
-
+        let hash = self.hash(&key);
         let mut table = self.table.load(Ordering::SeqCst, guard);
-
-        let mut node = Owned::new(BinEntry::Node(Node {
-            key,
-            value: Atomic::new(value),
-            hash: h,
-            next: Atomic::null(),
-            lock: parking_lot::Mutex::new(()),
-        }));
-
+        let mut bin_count;
+        let value = Owned::new(value).into_shared(guard);
         loop {
             // safety: see argument below for !is_null case
             if table.is_null() || unsafe { table.deref() }.is_empty() {
@@ -1417,10 +1595,17 @@ where
             //     still be valid, see the safety comment on Table.next_table.
             let t = unsafe { table.deref() };
 
-            let bini = t.bini(h);
+            let bini = t.bini(hash);
             let mut bin = t.bin(bini, guard);
             if bin.is_null() {
                 // fast path -- bin is empty so stick us at the front
+                let node = Owned::new(BinEntry::Node(Node {
+                    key: key.clone(),
+                    value: Atomic::from(value),
+                    hash: hash,
+                    next: Atomic::null(),
+                    lock: parking_lot::Mutex::new(()),
+                }));
                 match t.cas_bin(bini, bin, node, guard) {
                     Ok(_old_null_ptr) => {
                         self.add_count(1, Some(0), guard);
@@ -1429,7 +1614,6 @@ where
                     }
                     Err(changed) => {
                         assert!(!changed.current.is_null());
-                        node = changed.new;
                         bin = changed.current;
                     }
                 }
@@ -1450,16 +1634,20 @@ where
             // swap happened, it must have happened _after_ we read. since we did the read while
             // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
             // are holding up by holding on to our guard).
-            let key = &node.as_node().unwrap().key;
+            let mut old_val = None;
             match *unsafe { bin.deref() } {
                 BinEntry::Moved => {
                     table = self.help_transfer(table, guard);
+                    continue;
                 }
                 BinEntry::Node(ref head)
-                    if no_replacement && head.hash == h && &head.key == key =>
+                    if no_replacement && head.hash == hash && head.key == key =>
                 {
                     // fast path if replacement is disallowed and first bin matches
                     let v = head.value.load(Ordering::SeqCst, guard);
+                    // because of `no_replacement`, we don't use the new value, so we need to clean it up
+                    // safety: we own value and did not share it
+                    let _ = unsafe { value.into_owned() };
                     // safety: since the value is present now, and we've held a guard from the
                     // beginning of the search, the value cannot be dropped until the next epoch,
                     // which won't arrive until after we drop our guard.
@@ -1479,18 +1667,18 @@ where
                     // yes, it is still the head, so we can now "own" the bin
                     // note that there can still be readers in the bin!
 
-                    // TODO: TreeBin & ReservationNode
+                    // TODO: ReservationNode
 
-                    let mut bin_count = 1;
+                    bin_count = 1;
                     let mut p = bin;
 
-                    let old_val = loop {
+                    old_val = loop {
                         // safety: we read the bin while pinning the epoch. a bin will never be
                         // dropped until the next epoch after it is removed. since it wasn't
                         // removed, and the epoch was pinned, that cannot be until after we drop
                         // our guard.
                         let n = unsafe { p.deref() }.as_node().unwrap();
-                        if n.hash == h && &n.key == key {
+                        if n.hash == hash && n.key == key {
                             // the key already exists in the map!
                             let current_value = n.value.load(Ordering::SeqCst, guard);
 
@@ -1501,13 +1689,12 @@ where
 
                             if no_replacement {
                                 // the key is not absent, so don't update
-                            } else if let BinEntry::Node(Node { value, .. }) = *node.into_box() {
-                                // safety: we own value and have never shared it
-                                let now_garbage = n.value.swap(
-                                    unsafe { value.into_owned() },
-                                    Ordering::SeqCst,
-                                    guard,
-                                );
+                                // because of `no_replacement`, we don't use the
+                                // new value, so we need to clean it up
+                                // safety: we own value and did not share it
+                                let _ = unsafe { value.into_owned() };
+                            } else {
+                                let now_garbage = n.value.swap(value, Ordering::SeqCst, guard);
                                 // NOTE: now_garbage == current_value
 
                                 // safety: need to guarantee that now_garbage is no longer
@@ -1530,8 +1717,6 @@ where
                                 //    `value` field (which is what we swapped), so freeing
                                 //    now_garbage is fine.
                                 unsafe { guard.defer_destroy(now_garbage) };
-                            } else {
-                                unreachable!();
                             }
                             break Some(current_value);
                         }
@@ -1540,6 +1725,13 @@ where
                         let next = n.next.load(Ordering::SeqCst, guard);
                         if next.is_null() {
                             // we're at the end of the bin -- stick the node here!
+                            let node = Owned::new(BinEntry::Node(Node {
+                                key,
+                                value: Atomic::from(value),
+                                hash: hash,
+                                next: Atomic::null(),
+                                lock: parking_lot::Mutex::new(()),
+                            }));
                             n.next.store(node, Ordering::SeqCst);
                             break None;
                         }
@@ -1548,18 +1740,92 @@ where
                         bin_count += 1;
                     };
                     drop(head_lock);
-
-                    // TODO: TREEIFY_THRESHOLD
-
-                    if old_val.is_none() {
-                        // increment count
-                        self.add_count(1, Some(bin_count), guard);
-                    }
-                    guard.flush();
-                    return old_val;
                 }
+                // NOTE: BinEntry::Tree(ref tree_bin) if no_replacement && head.hash == h && &head.key == key
+                // cannot occur as in the Java code, TreeBins have a special, indicator hash value
+                BinEntry::Tree(ref tree_bin) => {
+                    // bin is non-empty, need to link into it, so we must take the lock
+                    let head_lock = tree_bin.lock.lock();
+
+                    // need to check that this is _still_ the correct bin
+                    let current_head = t.bin(bini, guard);
+                    if current_head != bin {
+                        // nope -- try again from the start
+                        continue;
+                    }
+
+                    // yes, it is still the head, so we can now "own" the bin
+                    // note that there can still be readers in the bin!
+
+                    // we don't actually count bins, just set this low enough
+                    // that we don't try to treeify the bin later
+                    bin_count = 2;
+                    let p = tree_bin.find_or_put_tree_val(hash, key, value, guard);
+                    if !p.is_null() {
+                        let tree_node = TreeNode::get_tree_node(p);
+                        old_val = {
+                            let current_value = tree_node.node.value.load(Ordering::SeqCst, guard);
+                            // safety: since the value is present now, and we've held a guard from
+                            // the beginning of the search, the value cannot be dropped until the
+                            // next epoch, which won't arrive until after we drop our guard.
+                            let current_value = unsafe { current_value.deref() };
+                            if no_replacement {
+                                // the key is not absent, so don't update
+                                // because of `no_replacement`, we don't use the
+                                // new value, so we need to clean it up
+                                // safety: we own value and did not share it
+                                let _ = unsafe { value.into_owned() };
+                            } else {
+                                let now_garbage =
+                                    tree_node.node.value.swap(value, Ordering::SeqCst, guard);
+                                // NOTE: now_garbage == current_value
+
+                                // safety: need to guarantee that now_garbage is no longer
+                                // reachable. more specifically, no thread that executes _after_
+                                // this line can ever get a reference to now_garbage.
+                                //
+                                // here are the possible cases:
+                                //
+                                //  - another thread already has a reference to now_garbage.
+                                //    they must have read it before the call to swap.
+                                //    because of this, that thread must be pinned to an epoch <=
+                                //    the epoch of our guard. since the garbage is placed in our
+                                //    epoch, it won't be freed until the _next_ epoch, at which
+                                //    point, that thread must have dropped its guard, and with it,
+                                //    any reference to the value.
+                                //  - another thread is about to get a reference to this value.
+                                //    they execute _after_ the swap, and therefore do _not_ get a
+                                //    reference to now_garbage (they get `value` instead). there are
+                                //    no other ways to get to a value except through its Node's
+                                //    `value` field (which is what we swapped), so freeing
+                                //    now_garbage is fine.
+                                unsafe { guard.defer_destroy(now_garbage) };
+                            }
+                            Some(current_value)
+                        }
+                    }
+                    drop(head_lock);
+                }
+                BinEntry::TreeNode(_) => unreachable!(
+                    "The head of a bin cannot be a TreeNode directly without BinEntry::Tree"
+                ),
             }
+            // NOTE: the Java code checks `bin_count` here because they also
+            // reach this point if the bin changed while obtaining the lock.
+            // However, our code doesn't (it uses continue) and `bin_count`
+            // _cannot_ be 0 at this point.
+            if bin_count >= TREEIFY_THRESHOLD {
+                self.treeify_bin(table, bini, guard);
+            }
+            guard.flush();
+            if old_val.is_some() {
+                return old_val;
+            }
+            break;
         }
+        // increment count, since we only get here if we did not return an old (updated) value
+        self.add_count(1, Some(bin_count), guard);
+        return None;
     }
 
     fn put_all<I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &Guard) {
@@ -1590,14 +1856,16 @@ where
     ) -> Option<&'g V>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
         F: FnOnce(&K, &V) -> Option<V>,
     {
         self.check_guard(guard);
-        let h = self.hash(&key);
+        let hash = self.hash(&key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
-
+        let mut new_val = None;
+        let mut removed_node = false;
+        let mut bin_count;
         loop {
             // safety: see argument below for !is_null case
             if table.is_null() || unsafe { table.deref() }.is_empty() {
@@ -1624,7 +1892,7 @@ where
             //     still be valid, see the safety comment on Table.next_table.
             let t = unsafe { table.deref() };
 
-            let bini = t.bini(h);
+            let bini = t.bini(hash);
             let bin = t.bin(bini, guard);
             if bin.is_null() {
                 // fast path -- bin is empty so key is not present
@@ -1649,6 +1917,7 @@ where
             match *unsafe { bin.deref() } {
                 BinEntry::Moved => {
                     table = self.help_transfer(table, guard);
+                    continue;
                 }
                 BinEntry::Node(ref head) => {
                     // bin is non-empty, need to link into it, so we must take the lock
@@ -1664,14 +1933,12 @@ where
                     // yes, it is still the head, so we can now "own" the bin
                     // note that there can still be readers in the bin!
 
-                    // TODO: TreeBin & ReservationNode
-
-                    let mut removed_node = false;
-                    let mut bin_count = 1;
+                    // TODO: ReservationNode
+                    bin_count = 1;
                     let mut p = bin;
                     let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
 
-                    let new_val = loop {
+                    new_val = loop {
                         // safety: we read the bin while pinning the epoch. a bin will never be
                         // dropped until the next epoch after it is removed. since it wasn't
                         // removed, and the epoch was pinned, that cannot be until after we drop
@@ -1679,7 +1946,7 @@ where
                         let n = unsafe { p.deref() }.as_node().unwrap();
                         // TODO: This Ordering can probably be relaxed due to the Mutex
                         let next = n.next.load(Ordering::SeqCst, guard);
-                        if n.hash == h && n.key.borrow() == key {
+                        if n.hash == hash && n.key.borrow() == key {
                             // the key already exists in the map!
                             let current_value = n.value.load(Ordering::SeqCst, guard);
 
@@ -1772,16 +2039,112 @@ where
                         bin_count += 1;
                     };
                     drop(head_lock);
-
-                    if removed_node {
-                        // decrement count
-                        self.add_count(-1, Some(bin_count), guard);
-                    }
-                    guard.flush();
-                    return new_val;
                 }
+                BinEntry::Tree(ref tree_bin) => {
+                    // bin is non-empty, need to link into it, so we must take the lock
+                    let bin_lock = tree_bin.lock.lock();
+
+                    // need to check that this is _still_ the head
+                    let current_head = t.bin(bini, guard);
+                    if current_head != bin {
+                        // nope -- try again from the start
+                        continue;
+                    }
+
+                    // yes, it is still the head, so we can now "own" the bin
+                    // note that there can still be readers in the bin!
+                    bin_count = 2;
+                    let root = tree_bin.root.load(Ordering::SeqCst, guard);
+                    if !root.is_null() {
+                        new_val = {
+                            let p = TreeNode::find_tree_node(root, hash, key, guard);
+                            if p.is_null() {
+                                // the given key is not present in the map
+                                None
+                            } else {
+                                // a node for the given key exists, so we try to update it
+                                let n = &TreeNode::get_tree_node(p).node;
+                                let current_value = n.value.load(Ordering::SeqCst, guard);
+
+                                // safety: since the value is present now, and we've held a guard from
+                                // the beginning of the search, the value cannot be dropped until the
+                                // next epoch, which won't arrive until after we drop our guard.
+                                let new_value =
+                                    remapping_function(&n.key, unsafe { current_value.deref() });
+
+                                if let Some(value) = new_value {
+                                    let now_garbage =
+                                        n.value.swap(Owned::new(value), Ordering::SeqCst, guard);
+                                    // NOTE: now_garbage == current_value
+
+                                    // safety: need to guarantee that now_garbage is no longer
+                                    // reachable. more specifically, no thread that executes _after_
+                                    // this line can ever get a reference to now_garbage.
+                                    //
+                                    // here are the possible cases:
+                                    //
+                                    //  - another thread already has a reference to now_garbage.
+                                    //    they must have read it before the call to swap.
+                                    //    because of this, that thread must be pinned to an epoch <=
+                                    //    the epoch of our guard. since the garbage is placed in our
+                                    //    epoch, it won't be freed until the _next_ epoch, at which
+                                    //    point, that thread must have dropped its guard, and with it,
+                                    //    any reference to the value.
+                                    //  - another thread is about to get a reference to this value.
+                                    //    they execute _after_ the swap, and therefore do _not_ get a
+                                    //    reference to now_garbage (they get value instead). there are
+                                    //    no other ways to get to a value except through its Node's
+                                    //    `value` field (which is what we swapped), so freeing
+                                    //    now_garbage is fine.
+                                    unsafe { guard.defer_destroy(now_garbage) };
+
+                                    // safety: since the value is present now, and we've held a guard from
+                                    // the beginning of the search, the value cannot be dropped until the
+                                    // next epoch, which won't arrive until after we drop our guard.
+                                    Some(unsafe { n.value.load(Ordering::SeqCst, guard).deref() })
+                                } else {
+                                    removed_node = true;
+                                    // remove the BinEntry::TreeNode containing the removed key value pair from the bucket
+                                    let need_to_untreeify = tree_bin.remove_tree_node(p, guard);
+                                    if need_to_untreeify {
+                                        let linear_bin = Self::untreeify(
+                                            tree_bin.first.load(Ordering::SeqCst, guard),
+                                            guard,
+                                        );
+                                        t.store_bin(bini, linear_bin);
+                                        // the old bin is now garbage
+                                        // safety: in the same way as for `now_garbage` above, any existing
+                                        // references to `bin` must have been obtained before storing the
+                                        // linear bin. These references were obtained while pinning an epoch
+                                        // <= our epoch and have to be dropped before the epoch can advance
+                                        // past the destruction of the old bin. After the store, threads will
+                                        // always see the linear bin, so the cannot obtain new references either.
+                                        unsafe { guard.defer_destroy(bin) };
+                                    }
+                                    None
+                                }
+                            }
+                        }
+                    }
+                    drop(bin_lock);
+                }
+                BinEntry::TreeNode(_) => unreachable!(
+                    "The head of a bin cannot be a TreeNode directly without BinEntry::Tree"
+                ),
             }
+            // NOTE: the Java code checks `bin_count` here because they also
+            // reach this point if the bin changed while obtaining the lock.
+            // However, our code doesn't (it uses continue) and making this
+            // break conditional confuses the compiler about how many times we
+            // use the `remapping_function`.
+            break;
         }
+        if removed_node {
+            // decrement count
+            self.add_count(-1, Some(bin_count), guard);
+        }
+        guard.flush();
+        return new_val;
     }
 
     /// Removes a key from the map, returning a reference to the value at the
@@ -1807,7 +2170,7 @@ where
     pub fn remove<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         // NOTE: _technically_, this method shouldn't require the thread-safety bounds, but a) that
         // would require special-casing replace_node for when new_value.is_none(), and b) it's sort
@@ -1840,13 +2203,13 @@ where
     pub fn remove_entry<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.check_guard(guard);
         self.replace_node(key, None, None, guard)
     }
 
-    /// Replaces the node value for the given key with `v`, if is equal to `cv`.
+    /// Replaces node value with `new_value`, conditional upon match of `observed_value`.
     ///
     /// If `new_value` is `None`, it removes the key (and its corresponding value) from this map.
     ///
@@ -1865,7 +2228,7 @@ where
     ) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         let hash = self.hash(key);
 
@@ -1898,6 +2261,8 @@ where
                 break;
             }
 
+            let is_remove = new_value.is_none();
+            let mut old_val: Option<(&'g K, Shared<'g, V>)> = None;
             // safety: bin is a valid pointer.
             //
             // there are two cases when a bin pointer is invalidated:
@@ -1915,19 +2280,17 @@ where
             match *unsafe { bin.deref() } {
                 BinEntry::Moved => {
                     table = self.help_transfer(table, guard);
+                    continue;
                 }
                 BinEntry::Node(ref head) => {
                     let head_lock = head.lock.lock();
-                    let mut old_val: Option<(&'g K, Shared<'g, V>)> = None;
 
                     // need to check that this is _still_ the head
                     if t.bin(bini, guard) != bin {
                         continue;
                     }
 
-                    // TODO: tree nodes
                     let mut e = bin;
-                    let is_remove = new_value.is_none();
                     let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
                     loop {
                         // safety: either e is bin, in which case it is valid due to the above,
@@ -1984,40 +2347,84 @@ where
                         }
                     }
                     drop(head_lock);
-
-                    if let Some((key, val)) = old_val {
-                        if is_remove {
-                            self.add_count(-1, None, guard);
-                        }
-
-                        // safety: need to guarantee that the old value is no longer
-                        // reachable. more specifically, no thread that executes _after_
-                        // this line can ever get a reference to val.
-                        //
-                        // here are the possible cases:
-                        //
-                        //  - another thread already has a reference to the old value.
-                        //    they must have read it before the call to store_bin.
-                        //    because of this, that thread must be pinned to an epoch <=
-                        //    the epoch of our guard. since the garbage is placed in our
-                        //    epoch, it won't be freed until the _next_ epoch, at which
-                        //    point, that thread must have dropped its guard, and with it,
-                        //    any reference to the value.
-                        //  - another thread is about to get a reference to this value.
-                        //    they execute _after_ the store_bin, and therefore do _not_ get a
-                        //    reference to the old value. there are no other ways to get to a
-                        //    value except through its Node's `value` field (which is now gone
-                        //    together with the node), so freeing the old value is fine.
-                        unsafe { guard.defer_destroy(val) };
-
-                        // safety: the lifetime of the reference is bound to the guard
-                        // supplied which means that the memory will not be freed
-                        // until at least after the guard goes out of scope
-                        return unsafe { val.as_ref() }.map(move |v| (key, v));
-                    }
-                    break;
                 }
+                BinEntry::Tree(ref tree_bin) => {
+                    let bin_lock = tree_bin.lock.lock();
+
+                    // need to check that this is _still_ the head
+                    if t.bin(bini, guard) != bin {
+                        continue;
+                    }
+
+                    let root = tree_bin.root.load(Ordering::SeqCst, guard);
+                    if !root.is_null() {
+                        let p = TreeNode::find_tree_node(root, hash, key, guard);
+                        if !p.is_null() {
+                            let n = &TreeNode::get_tree_node(p).node;
+                            let pv = n.value.load(Ordering::SeqCst, guard);
+
+                            // just remove the node if the value is the one we expected at method call
+                            if observed_value.map(|ov| ov == pv).unwrap_or(true) {
+                                // we remember the old value so that we can return it and mark it for deletion below
+                                old_val = Some((&n.key, pv));
+
+                                if let Some(nv) = new_value {
+                                    // found the node but we have a new value to replace the old one
+                                    n.value.store(Owned::new(nv), Ordering::SeqCst);
+                                } else {
+                                    let need_to_untreeify = tree_bin.remove_tree_node(p, guard);
+                                    if need_to_untreeify {
+                                        let linear_bin = Self::untreeify(
+                                            tree_bin.first.load(Ordering::SeqCst, guard),
+                                            guard,
+                                        );
+                                        t.store_bin(bini, linear_bin);
+                                        // the old bin is now garbage
+                                        // safety: same as in put
+                                        unsafe { guard.defer_destroy(bin) };
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    drop(bin_lock);
+                }
+                BinEntry::TreeNode(_) => unreachable!(
+                    "The head of a bin cannot be a TreeNode directly without BinEntry::Tree"
+                ),
             }
+            if let Some((key, val)) = old_val {
+                if is_remove {
+                    self.add_count(-1, None, guard);
+                }
+
+                // safety: need to guarantee that the old value is no longer
+                // reachable. more specifically, no thread that executes _after_
+                // this line can ever get a reference to val.
+                //
+                // here are the possible cases:
+                //
+                //  - another thread already has a reference to the old value.
+                //    they must have read it before the call to store_bin.
+                //    because of this, that thread must be pinned to an epoch <=
+                //    the epoch of our guard. since the garbage is placed in our
+                //    epoch, it won't be freed until the _next_ epoch, at which
+                //    point, that thread must have dropped its guard, and with it,
+                //    any reference to the value.
+                //  - another thread is about to get a reference to this value.
+                //    they execute _after_ the store_bin, and therefore do _not_ get a
+                //    reference to the old value. there are no other ways to get to a
+                //    value except through its Node's `value` field (which is now gone
+                //    together with the node), so freeing the old value is fine.
+                unsafe { guard.defer_destroy(val) };
+
+                // safety: the lifetime of the reference is bound to the guard
+                // supplied which means that the memory will not be freed
+                // until at least after the guard goes out of scope
+                return unsafe { val.as_ref() }.map(move |v| (key, v));
+            }
+            break;
         }
         None
     }
@@ -2283,7 +2690,7 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
 
 impl<K, V, S> Extend<(K, V)> for &HashMap<K, V, S>
 where
-    K: 'static + Sync + Send + Clone + Hash + Eq,
+    K: 'static + Sync + Send + Clone + Hash + Ord,
     V: 'static + Sync + Send,
     S: BuildHasher,
 {
@@ -2308,7 +2715,7 @@ where
 
 impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &HashMap<K, V, S>
 where
-    K: 'static + Sync + Send + Copy + Hash + Eq,
+    K: 'static + Sync + Send + Copy + Hash + Ord,
     V: 'static + Sync + Send + Copy,
     S: BuildHasher,
 {
@@ -2319,7 +2726,7 @@ where
 
 impl<K, V, S> FromIterator<(K, V)> for HashMap<K, V, S>
 where
-    K: 'static + Sync + Send + Clone + Hash + Eq,
+    K: 'static + Sync + Send + Clone + Hash + Ord,
     V: 'static + Sync + Send,
     S: BuildHasher + Default,
 {
@@ -2345,7 +2752,7 @@ where
 
 impl<'a, K, V, S> FromIterator<(&'a K, &'a V)> for HashMap<K, V, S>
 where
-    K: 'static + Sync + Send + Copy + Hash + Eq,
+    K: 'static + Sync + Send + Copy + Hash + Ord,
     V: 'static + Sync + Send + Copy,
     S: BuildHasher + Default,
 {
@@ -2356,7 +2763,7 @@ where
 
 impl<'a, K, V, S> FromIterator<&'a (K, V)> for HashMap<K, V, S>
 where
-    K: 'static + Sync + Send + Copy + Hash + Eq,
+    K: 'static + Sync + Send + Copy + Hash + Ord,
     V: 'static + Sync + Send + Copy,
     S: BuildHasher + Default,
 {
@@ -2367,7 +2774,7 @@ where
 
 impl<K, V, S> Clone for HashMap<K, V, S>
 where
-    K: 'static + Sync + Send + Clone + Hash + Eq,
+    K: 'static + Sync + Send + Clone + Hash + Ord,
     V: 'static + Sync + Send + Clone,
     S: BuildHasher + Clone,
 {
