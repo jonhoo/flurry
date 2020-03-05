@@ -89,7 +89,7 @@ impl<K, V, S> HashMapRef<'_, K, V, S> {
 
 impl<K, V, S> HashMapRef<'_, K, V, S>
 where
-    K: Clone,
+    K: Clone + Ord,
 {
     /// Tries to reserve capacity for at least additional more elements.
     /// See also [`HashMap::reserve`].
@@ -144,7 +144,7 @@ where
 
 impl<K, V, S> HashMapRef<'_, K, V, S>
 where
-    K: 'static + Sync + Send + Clone + Hash + Eq,
+    K: 'static + Sync + Send + Clone + Hash + Ord,
     V: 'static + Sync + Send,
     S: BuildHasher,
 {
@@ -160,7 +160,7 @@ where
     pub fn compute_if_present<'g, Q, F>(&'g self, key: &Q, remapping_function: F) -> Option<&'g V>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
         F: FnOnce(&K, &V) -> Option<V>,
     {
         self.map
@@ -172,7 +172,7 @@ where
     pub fn remove<'g, Q>(&'g self, key: &Q) -> Option<&'g V>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.remove(key, &self.guard)
     }

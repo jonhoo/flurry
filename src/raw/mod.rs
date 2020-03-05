@@ -224,24 +224,7 @@ impl<K, V> Table<K, V> {
                     } else {
                         unreachable!();
                     };
-
-                    let p = bin.first.load(Ordering::SeqCst, guard);
-                    if p.is_null() {
-                        // TreeBin is empty
-                        continue;
-                    }
-                    let mut p = unsafe { p.into_owned() };
-                    loop {
-                        let node = if let BinEntry::TreeNode(node) = *p.into_box() {
-                            node
-                        } else {
-                            unreachable!("Trees can only ever contain TreeNodes");
-                        };
-                        if node.node.next.load(Ordering::SeqCst, guard).is_null() {
-                            break;
-                        }
-                        p = unsafe { node.node.next.into_owned() };
-                    }
+                    drop(bin);
                 }
                 BinEntry::TreeNode(_) => unreachable!(
                     "The head of a bin cannot be a TreeNode directly without BinEntry::Tree"

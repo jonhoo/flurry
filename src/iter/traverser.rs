@@ -1,4 +1,4 @@
-use crate::node::{BinEntry, Node};
+use crate::node::{BinEntry, Node, TreeNode};
 use crate::raw::Table;
 use crossbeam_epoch::{Guard, Shared};
 use std::sync::atomic::Ordering;
@@ -116,19 +116,28 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
         if let Some(prev) = self.prev {
             let next = prev.next.load(Ordering::SeqCst, self.guard);
             if !next.is_null() {
+                // we have to check if we are iterating over a regular bin or a
+                // TreeBin. the Java code gets away without this due to
+                // inheritance (everything is a node), but we have to explicitly
+                // check
                 // safety: flurry does not drop or move until after guard drop
-                e = Some(
-                    unsafe { next.deref() }
-                        .as_node()
-                        .expect("only Nodes follow a Node"),
-                )
+                match unsafe { next.deref() } {
+                    BinEntry::Node(node) => {
+                        e = Some(node);
+                    }
+                    BinEntry::TreeNode(tree_node) => {
+                        e = Some(&tree_node.node);
+                    }
+                    BinEntry::Moved => unreachable!("Nodes can only point to Nodes or TreeNodes"),
+                    BinEntry::Tree(_) => unreachable!("Nodes can only point to Nodes or TreeNodes"),
+                }
             }
         }
 
         loop {
-            if let Some(e) = e {
-                self.prev = Some(e);
-                return Some(e);
+            if e.is_some() {
+                self.prev = e;
+                return e;
             }
 
             // safety: flurry does not drop or move until after guard drop
@@ -160,6 +169,20 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
                     BinEntry::Node(node) => {
                         e = Some(node);
                     }
+                    BinEntry::Tree(tree_bin) => {
+                        // since we want to iterate over all entries, TreeBins
+                        // are also traversed via the `next` pointers of their
+                        // contained node
+                        e = Some(
+                            &TreeNode::get_tree_node(
+                                tree_bin.first.load(Ordering::SeqCst, self.guard),
+                            )
+                            .node,
+                        );
+                    }
+                    BinEntry::TreeNode(_) => unreachable!(
+                        "The head of a bin cannot be a TreeNode directly without BinEntry::Tree"
+                    ),
                 }
             }
 
