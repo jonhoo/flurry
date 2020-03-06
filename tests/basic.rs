@@ -99,27 +99,12 @@ fn insert_and_get_key_value() {
     }
 }
 
-use std::hash::{BuildHasher, Hasher};
-
-struct OneBucketState;
-struct OneBucketHasher;
-impl BuildHasher for OneBucketState {
-    type Hasher = OneBucketHasher;
-
-    fn build_hasher(&self) -> Self::Hasher {
-        OneBucketHasher
-    }
-}
-impl Hasher for OneBucketHasher {
-    fn write(&mut self, _bytes: &[u8]) {}
-    fn finish(&self) -> u64 {
-        0
-    }
-}
+mod hasher;
+use hasher::ZeroHashBuilder;
 
 #[test]
 fn one_bucket() {
-    let map = HashMap::<&'static str, usize, _>::with_hasher(OneBucketState);
+    let map = HashMap::<&'static str, usize, _>::with_hasher(ZeroHashBuilder);
     let guard = map.guard();
 
     // we want to check that all operations work regardless on whether
