@@ -1903,6 +1903,7 @@ where
 
                     // TODO: tree nodes
                     let mut e = bin;
+                    let is_remove = new_value.is_none();
                     let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
                     loop {
                         // safety: either e is bin, in which case it is valid due to the above,
@@ -1961,7 +1962,10 @@ where
                     drop(head_lock);
 
                     if let Some((key, val)) = old_val {
-                        self.add_count(-1, None, guard);
+                        if is_remove {
+                            self.add_count(-1, None, guard);
+                        }
+
                         // safety: need to guarantee that the old value is no longer
                         // reachable. more specifically, no thread that executes _after_
                         // this line can ever get a reference to val.
@@ -2426,7 +2430,9 @@ fn replace_empty() {
 
     {
         let guard = epoch::pin();
+        assert_eq!(map.len(), 0);
         let old = map.replace_node(&42, None, None, &guard);
+        assert_eq!(map.len(), 0);
         assert!(old.is_none());
     }
 }
@@ -2437,9 +2443,11 @@ fn replace_existing() {
     {
         let guard = epoch::pin();
         map.insert(42, 42, &guard);
+        assert_eq!(map.len(), 1);
         let old = map.replace_node(&42, Some(10), None, &guard);
         assert_eq!(old, Some((&42, &42)));
         assert_eq!(*map.get(&42, &guard).unwrap(), 10);
+        assert_eq!(map.len(), 1);
     }
 }
 
@@ -2449,8 +2457,10 @@ fn replace_existing_observed_value_matching() {
     {
         let guard = epoch::pin();
         map.insert(42, 42, &guard);
+        assert_eq!(map.len(), 1);
         let observed_value = Shared::from(map.get(&42, &guard).unwrap() as *const _);
         let old = map.replace_node(&42, Some(10), Some(observed_value), &guard);
+        assert_eq!(map.len(), 1);
         assert_eq!(old, Some((&42, &42)));
         assert_eq!(*map.get(&42, &guard).unwrap(), 10);
     }
@@ -2462,8 +2472,28 @@ fn replace_existing_observed_value_non_matching() {
     {
         let guard = epoch::pin();
         map.insert(42, 42, &guard);
+        assert_eq!(map.len(), 1);
         let old = map.replace_node(&42, Some(10), Some(Shared::null()), &guard);
+        assert_eq!(map.len(), 1);
         assert!(old.is_none());
         assert_eq!(*map.get(&42, &guard).unwrap(), 42);
+    }
+}
+
+#[test]
+fn replace_twice() {
+    let map = HashMap::<usize, usize>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, 42, &guard);
+        assert_eq!(map.len(), 1);
+        let old = map.replace_node(&42, Some(43), None, &guard);
+        assert_eq!(map.len(), 1);
+        assert_eq!(old, Some((&42, &42)));
+        assert_eq!(*map.get(&42, &guard).unwrap(), 43);
+        let old = map.replace_node(&42, Some(44), None, &guard);
+        assert_eq!(map.len(), 1);
+        assert_eq!(old, Some((&42, &43)));
+        assert_eq!(*map.get(&42, &guard).unwrap(), 44);
     }
 }
