@@ -174,9 +174,16 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
                         // are also traversed via the `next` pointers of their
                         // contained node
                         e = Some(
-                            &TreeNode::get_tree_node(
-                                tree_bin.first.load(Ordering::SeqCst, self.guard),
-                            )
+                            // safety: `bin` was read under our guard, at which
+                            // point the tree was valid. Since our guard pins
+                            // the current epoch, the TreeNodes remain valid for
+                            // at least as long as we hold onto the guard.
+                            // Structurally, TreeNodes always point to TreeNodes, so this is sound.
+                            &unsafe {
+                                TreeNode::get_tree_node(
+                                    tree_bin.first.load(Ordering::SeqCst, self.guard),
+                                )
+                            }
                             .node,
                         );
                     }
