@@ -9,7 +9,7 @@ const ABSENT_MASK: usize = ABSENT_SIZE - 1;
 
 fn t1<K, V>(map: &HashMap<K, V>, keys: &[K], expect: usize)
 where
-    K: Sync + Send + Clone + Hash + Eq,
+    K: Sync + Send + Clone + Hash + Ord,
     V: Sync + Send,
 {
     let mut sum = 0;
@@ -27,7 +27,7 @@ where
 
 fn t2<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: 'static + Sync + Send + Copy + Hash + Eq + std::fmt::Display,
+    K: 'static + Sync + Send + Copy + Hash + Ord + std::fmt::Display,
 {
     let mut sum = 0;
     let guard = epoch::pin();
@@ -41,7 +41,7 @@ where
 
 fn t3<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: 'static + Sync + Send + Copy + Hash + Eq,
+    K: 'static + Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
     let guard = epoch::pin();
@@ -55,7 +55,7 @@ where
 
 fn t4<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: Sync + Send + Copy + Hash + Eq,
+    K: Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
     let guard = epoch::pin();
@@ -69,7 +69,7 @@ where
 
 fn t5<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: 'static + Sync + Send + Copy + Hash + Eq,
+    K: 'static + Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
     let guard = epoch::pin();
@@ -85,7 +85,7 @@ where
 
 fn t6<K, V>(map: &HashMap<K, V>, keys1: &[K], keys2: &[K], expect: usize)
 where
-    K: Sync + Send + Clone + Hash + Eq,
+    K: Sync + Send + Clone + Hash + Ord,
     V: Sync + Send,
 {
     let mut sum = 0;
@@ -103,7 +103,7 @@ where
 
 fn t7<K>(map: &HashMap<K, usize>, k1: &[K], k2: &[K])
 where
-    K: Sync + Send + Copy + Hash + Eq,
+    K: Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
     let guard = epoch::pin();

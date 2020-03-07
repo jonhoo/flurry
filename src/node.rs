@@ -86,7 +86,7 @@ pub(crate) struct TreeNode<K, V> {
 }
 
 impl<K, V> TreeNode<K, V> {
-    pub fn new(
+    pub(crate) fn new(
         key: K,
         value: Atomic<V>,
         hash: u64,
@@ -95,13 +95,13 @@ impl<K, V> TreeNode<K, V> {
     ) -> Self {
         TreeNode {
             node: Node {
-                key: key,
-                value: value,
-                hash: hash,
-                next: next,
+                key,
+                value,
+                hash,
+                next,
                 lock: parking_lot::Mutex::new(()),
             },
-            parent: parent,
+            parent,
             left: Atomic::null(),
             right: Atomic::null(),
             prev: Atomic::null(),
@@ -131,7 +131,12 @@ impl<K, V> TreeNode<K, V> {
         // assignments from checks.
         let mut p = from;
         while !p.is_null() {
-            let p_deref = Self::get_tree_node(p);
+            // safety: the containing TreeBin of all TreeNodes was read under our
+            // guard, at which point the tree structure was valid. Since our guard
+            // pins the current epoch, the TreeNodes remain valid for at least as
+            // long as we hold onto the guard.
+            // Structurally, TreeNodes always point to TreeNodes, so this is sound.
+            let p_deref = unsafe { Self::get_tree_node(p) };
             let p_left = p_deref.left.load(Ordering::SeqCst, guard);
             let p_right = p_deref.right.load(Ordering::SeqCst, guard);
             let p_hash = p_deref.node.hash;
@@ -181,7 +186,7 @@ impl<K, V> TreeNode<K, V> {
             // cases cannot occur here.
         }
 
-        return Shared::null();
+        Shared::null()
     }
 }
 
@@ -207,13 +212,17 @@ impl<K, V> TreeBin<K, V>
 where
     K: Ord,
 {
-    pub fn new<'g>(bin: Shared<'g, BinEntry<K, V>>, guard: &'g Guard) -> Self {
+    pub(crate) fn new<'g>(bin: Shared<'g, BinEntry<K, V>>, guard: &'g Guard) -> Self {
         let mut root: Shared<'_, BinEntry<K, V>> = Shared::null();
         let mut x = bin;
         let mut next: Shared<'_, BinEntry<K, V>>;
 
+        // safety: when creating a new TreeBin, the nodes used are created just
+        // for this bin and not shared with another thread, so they cannot get
+        // invalidated.
+        // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         while !x.is_null() {
-            let x_deref = TreeNode::get_tree_node(x);
+            let x_deref = unsafe { TreeNode::get_tree_node(x) };
             next = x_deref.node.next.load(Ordering::SeqCst, guard);
             x_deref.left.store(Shared::null(), Ordering::Relaxed);
             x_deref.right.store(Shared::null(), Ordering::Relaxed);
@@ -234,37 +243,38 @@ where
             // find out where to insert x
             let mut p = root;
             loop {
-                let dir: i8;
-                let pd = TreeNode::get_tree_node(p);
-                let p_key = &pd.node.key;
-                let p_hash = pd.node.hash;
-                if p_hash > hash {
-                    dir = -1;
-                } else if p_hash < hash {
-                    dir = 1;
-                } else {
-                    dir = match p_key.cmp(&key) {
+                let p_deref = unsafe { TreeNode::get_tree_node(p) };
+                let p_key = &p_deref.node.key;
+                let p_hash = p_deref.node.hash;
+                let dir = match p_hash.cmp(&hash) {
+                    std::cmp::Ordering::Greater => -1,
+                    std::cmp::Ordering::Less => 1,
+                    std::cmp::Ordering::Equal => match p_key.cmp(&key) {
                         std::cmp::Ordering::Greater => -1,
                         std::cmp::Ordering::Less => 1,
                         std::cmp::Ordering::Equal => unreachable!("one key references two nodes"),
-                    }
-                }
+                    },
+                };
 
                 // Select successor of p in the direction dir. We will continue
                 // to descend the tree through this successor.
                 let xp = p;
                 p = if dir <= 0 {
-                    pd.left.load(Ordering::SeqCst, guard)
+                    p_deref.left.load(Ordering::SeqCst, guard)
                 } else {
-                    pd.right.load(Ordering::SeqCst, guard)
+                    p_deref.right.load(Ordering::SeqCst, guard)
                 };
 
                 if p.is_null() {
                     x_deref.parent.store(xp, Ordering::SeqCst);
                     if dir <= 0 {
-                        TreeNode::get_tree_node(xp).left.store(x, Ordering::SeqCst);
+                        unsafe { TreeNode::get_tree_node(xp) }
+                            .left
+                            .store(x, Ordering::SeqCst);
                     } else {
-                        TreeNode::get_tree_node(xp).right.store(x, Ordering::SeqCst);
+                        unsafe { TreeNode::get_tree_node(xp) }
+                            .right
+                            .store(x, Ordering::SeqCst);
                     }
                     root = TreeNode::balance_insertion(root, x, guard);
                     break;
@@ -274,7 +284,9 @@ where
             x = next;
         }
 
-        assert!(TreeNode::check_invariants(root, guard));
+        if cfg!(debug) {
+            assert!(TreeNode::check_invariants(root, guard));
+        }
         TreeBin {
             root: Atomic::from(root),
             first: Atomic::from(bin),
@@ -352,7 +364,24 @@ impl<K, V> TreeBin<K, V> {
         K: Borrow<Q>,
         Q: ?Sized + Ord,
     {
-        let bin_deref = bin.deref().as_tree_bin().unwrap();
+        // safety: bin is a valid pointer.
+        //
+        // there are three cases when a bin pointer is invalidated:
+        //
+        //  1. if the table was resized, bin is a move entry, and the resize has completed. in
+        //     that case, the table (and all its heads) will be dropped in the next epoch
+        //     following that.
+        //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
+        //     will then be dropped in the following epoch after that happens.
+        //  3. when elements are inserted into or removed from the map, bin may be changed into
+        //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
+        //     dropped in the following epoch if that happens.
+        //
+        // in all cases, we held the guard when we got the reference to the bin. if any such
+        // swap happened, it must have happened _after_ we read. since we did the read while
+        // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
+        // are holding up by holding on to our guard).
+        let bin_deref = unsafe { bin.deref() }.as_tree_bin().unwrap();
         let mut element = bin_deref.first.load(Ordering::SeqCst, guard);
         while !element.is_null() {
             let s = bin_deref.lock_state.load(Ordering::SeqCst);
@@ -361,7 +390,13 @@ impl<K, V> TreeBin<K, V> {
                 // (write). As long as that's the case, we follow the `next`
                 // pointers of the `TreeNode` linearly, as we cannot trust the
                 // tree's structure.
-                let element_deref = TreeNode::get_tree_node(element);
+                //
+                // safety: we were read under our guard, at which point the tree
+                // structure was valid. Since our guard pins the current epoch,
+                // the TreeNodes remain valid for at least as long as we hold
+                // onto the guard.
+                // Structurally, TreeNodes always point to TreeNodes, so this is sound.
+                let element_deref = unsafe { TreeNode::get_tree_node(element) };
                 let element_key = &element_deref.node.key;
                 if element_deref.node.hash == hash && element_key.borrow() == key {
                     return element;
@@ -384,28 +419,45 @@ impl<K, V> TreeBin<K, V> {
                     // check if another thread is waiting and, if so, unpark it
                     let waiter = &bin_deref.waiter.load(Ordering::SeqCst, guard);
                     if !waiter.is_null() {
-                        waiter.deref().unpark();
+                        // safety: we do not destroy waiting threads
+                        unsafe { waiter.deref() }.unpark();
                     }
                 }
                 return p;
             }
         }
 
-        return Shared::null();
+        Shared::null()
     }
 
-    /// Removes the given node, which must be present before this call. This is
+    /// Unlinks the given node, which must be present before this call. This is
     /// messier than typical red-black deletion code because we cannot swap the
     /// contents of an interior node with a leaf successor that is pinned by
     /// `next` pointers that are accessible independently of the bin lock. So
     /// instead we swap the tree links.
     ///
     /// Returns `true` if the bin is now too small and should be untreeified.
-    pub(crate) fn remove_tree_node<'g>(
+    ///
+    /// # Safety
+    /// The given node is only marked for garbage collection if the bin remains
+    /// large enough to be a `TreeBin`. If this method returns `true`, indicating
+    /// that the bin should be untreeified, the given node is only unlinked from
+    /// linear traversal, but not from the tree. This makes the node unreachable
+    /// through linear reads and excludes it from being dropped when the bin is
+    /// dropped. However, reading threads may still obtain a reference to until
+    /// the bin is swapped out for a linear bin. The caller of this method _must_
+    /// ensure that the given node is properly marked for garbage collection
+    /// _after_ this bin has bin swapped out.
+    pub(crate) unsafe fn remove_tree_node<'g>(
         &'g self,
         p: Shared<'g, BinEntry<K, V>>,
         guard: &'g Guard,
     ) -> bool {
+        // safety: we were read under our guard, at which point the tree
+        // structure was valid. Since our guard pins the current epoch, the
+        // TreeNodes remain valid for at least as long as we hold onto the
+        // guard. Additionally, this method assumes `p` to be non-null.
+        // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         let p_deref = TreeNode::get_tree_node(p);
         let next = p_deref.node.next.load(Ordering::SeqCst, guard);
         let prev = p_deref.prev.load(Ordering::SeqCst, guard);
@@ -424,6 +476,7 @@ impl<K, V> TreeBin<K, V> {
                 .prev
                 .store(prev, Ordering::SeqCst);
         }
+
         if self.first.load(Ordering::SeqCst, guard).is_null() {
             // since the bin was not empty previously (it contained p),
             // `self.first` is `null` only if we just stored `null` via `next`.
@@ -617,15 +670,25 @@ impl<K, V> TreeBin<K, V> {
         }
 
         // mark the old node and its value for garbage collection
-        guard.defer_destroy(p_deref.node.value.load(Ordering::Relaxed, guard));
-        guard.defer_destroy(p);
+        // safety: we just completely unlinked `p` from both linear and tree
+        // traversal, making it and its value unreachable for any future thread.
+        // Any existing references to one of them were obtained under a guard
+        // that pins an epoch <= our epoch, and thus have to be released before
+        // `p` is actually dropped.
+        #[allow(unused_unsafe)]
+        unsafe {
+            guard.defer_destroy(p_deref.node.value.load(Ordering::Relaxed, guard));
+            guard.defer_destroy(p);
+        }
 
         self.unlock_root();
-        assert!(TreeNode::check_invariants(
-            self.root.load(Ordering::SeqCst, guard),
-            guard
-        ));
-        return false;
+        if cfg!(debug) {
+            assert!(TreeNode::check_invariants(
+                self.root.load(Ordering::SeqCst, guard),
+                guard
+            ));
+        }
+        false
     }
 }
 
@@ -659,34 +722,38 @@ where
             self.first.store(tree_node, Ordering::Release);
             return Shared::null();
         }
+        // safety: we were read under our guard, at which point the tree
+        // structure was valid. Since our guard pins the current epoch, the
+        // TreeNodes remain valid for at least as long as we hold onto the
+        // guard.
+        // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         loop {
-            let p_deref = TreeNode::get_tree_node(p);
+            let p_deref = unsafe { TreeNode::get_tree_node(p) };
             let p_hash = p_deref.node.hash;
-            let dir: i8;
-            if p_hash > hash {
-                dir = -1;
-            } else if p_hash < hash {
-                dir = 1;
-            } else {
-                let p_key = &p_deref.node.key;
-                if *p_key == key {
-                    // a node with the given key already exists, so we return it
-                    return p;
-                }
-                dir = match p_key.cmp(&key) {
-                    std::cmp::Ordering::Greater => -1,
-                    std::cmp::Ordering::Less => 1,
-                    std::cmp::Ordering::Equal => {
-                        unreachable!("Ord and Eq have to match and Eq is checked above")
+            let dir = match p_hash.cmp(&hash) {
+                std::cmp::Ordering::Greater => -1,
+                std::cmp::Ordering::Less => 1,
+                std::cmp::Ordering::Equal => {
+                    let p_key = &p_deref.node.key;
+                    if *p_key == key {
+                        // a node with the given key already exists, so we return it
+                        return p;
                     }
-                };
-                // NOTE: the Java code has some addional cases here in case the
-                // keys _are not_ equal (p_key != key and !key.equals(p_key)),
-                // but _compare_ equal (k.compareTo(p_key) == 0). In this case,
-                // both children are searched and if a matching node exists it
-                // is returned. Since `Eq` and `Ord` must match, these cases
-                // cannot occur here.
-            }
+                    match p_key.cmp(&key) {
+                        std::cmp::Ordering::Greater => -1,
+                        std::cmp::Ordering::Less => 1,
+                        std::cmp::Ordering::Equal => {
+                            unreachable!("Ord and Eq have to match and Eq is checked above")
+                        }
+                    }
+                    // NOTE: the Java code has some addional cases here in case the
+                    // keys _are not_ equal (p_key != key and !key.equals(p_key)),
+                    // but _compare_ equal (k.compareTo(p_key) == 0). In this case,
+                    // both children are searched and if a matching node exists it
+                    // is returned. Since `Eq` and `Ord` must match, these cases
+                    // cannot occur here.
+                }
+            };
 
             // proceed in direction `dir`
             let xp = p;
@@ -711,18 +778,27 @@ where
                 .into_shared(guard);
                 self.first.store(x, Ordering::SeqCst);
                 if !first.is_null() {
-                    TreeNode::get_tree_node(first)
+                    unsafe { TreeNode::get_tree_node(first) }
                         .prev
                         .store(x, Ordering::SeqCst);
                 }
                 if dir <= 0 {
-                    TreeNode::get_tree_node(xp).left.store(x, Ordering::SeqCst);
+                    unsafe { TreeNode::get_tree_node(xp) }
+                        .left
+                        .store(x, Ordering::SeqCst);
                 } else {
-                    TreeNode::get_tree_node(xp).right.store(x, Ordering::SeqCst);
+                    unsafe { TreeNode::get_tree_node(xp) }
+                        .right
+                        .store(x, Ordering::SeqCst);
                 }
 
-                if !TreeNode::get_tree_node(xp).red.load(Ordering::SeqCst) {
-                    TreeNode::get_tree_node(x).red.store(true, Ordering::SeqCst);
+                if !unsafe { TreeNode::get_tree_node(xp) }
+                    .red
+                    .load(Ordering::SeqCst)
+                {
+                    unsafe { TreeNode::get_tree_node(x) }
+                        .red
+                        .store(true, Ordering::SeqCst);
                 } else {
                     self.lock_root();
                     self.root.store(
@@ -739,11 +815,13 @@ where
             }
         }
 
-        assert!(TreeNode::check_invariants(
-            self.root.load(Ordering::SeqCst, guard),
-            guard
-        ));
-        return Shared::null();
+        if cfg!(debug) {
+            assert!(TreeNode::check_invariants(
+                self.root.load(Ordering::SeqCst, guard),
+                guard
+            ));
+        }
+        Shared::null()
     }
 }
 
@@ -752,31 +830,55 @@ impl<K, V> Drop for TreeBin<K, V> {
         // safety: we have &mut self _and_ all references we have returned are bound to the
         // lifetime of their borrow of self, so there cannot be any outstanding references to
         // anything in the map.
-        let guard = unsafe { crossbeam_epoch::unprotected() };
+        unsafe { self.drop_fields(true) };
+    }
+}
 
+impl<K, V> TreeBin<K, V> {
+    /// Drops the given tree bin, but only drops its nodes' values when specified.
+    ///
+    /// # Safety
+    /// The pointer to the tree bin must be valid and the caller must be the single owner
+    /// of the tree bin. If the nodes' values are to be dropped, there must be no outstanding
+    /// references to these values in other threads and it must be impossible to obtain them.
+    pub(crate) unsafe fn drop_fields(&mut self, drop_values: bool) {
+        let guard = crossbeam_epoch::unprotected();
         // assume ownership of atomically shared references. note that it is
         // sufficient to follow the `next` pointers of the `first` element in
         // the bin, since the tree pointers point to the same nodes.
-        let _waiter = unsafe { self.waiter.load(Ordering::SeqCst, guard).into_owned() };
-        let p = self.first.load(Ordering::SeqCst, guard);
-        if p.is_null() {
-            // this TreeBin is empty
-            return;
+        let waiter = self.waiter.load(Ordering::SeqCst, guard);
+        if !waiter.is_null() {
+            let _ = waiter.into_owned();
         }
-        let mut p = unsafe { p.into_owned() };
-        loop {
-            let tree_node = if let BinEntry::TreeNode(tree_node) = *p.into_box() {
-                tree_node
+        // swap out first pointer so nodes will not get dropped again when
+        // `tree_bin` is dropped
+        let p = self.first.swap(Shared::null(), Ordering::Relaxed, guard);
+        Self::drop_tree_nodes(p, drop_values, guard);
+    }
+
+    /// Drops the given list of tree nodes, but only drops their values when specified.
+    ///
+    /// # Safety
+    /// The pointers to the tree nodes must be valid and the caller must be the single owner
+    /// of the tree nodes. If the nodes' values are to be dropped, there must be no outstanding
+    /// references to these values in other threads and it must be impossible to obtain them.
+    pub(crate) unsafe fn drop_tree_nodes<'g>(
+        from: Shared<'g, BinEntry<K, V>>,
+        drop_values: bool,
+        guard: &'g Guard,
+    ) {
+        let mut p = from;
+        while !p.is_null() {
+            if let BinEntry::TreeNode(tree_node) = *p.into_owned().into_box() {
+                // if specified, drop the value in this node
+                if drop_values {
+                    let _ = tree_node.node.value.into_owned();
+                }
+                // then we move to the next node
+                p = tree_node.node.next.load(Ordering::SeqCst, guard);
             } else {
                 unreachable!("Trees can only ever contain TreeNodes");
             };
-            // first, drop the value in this node
-            let _ = unsafe { tree_node.node.value.into_owned() };
-            // then we move to the next node
-            if tree_node.node.next.load(Ordering::SeqCst, guard).is_null() {
-                break;
-            }
-            p = unsafe { tree_node.node.next.into_owned() };
         }
     }
 }
@@ -785,8 +887,16 @@ impl<K, V> Drop for TreeBin<K, V> {
 // Red-black tree methods, all adapted from CLR
 
 impl<K, V> TreeNode<K, V> {
+    /// Gets the `BinEntry::TreeNode(tree_node)` behind the given pointer and
+    /// returns its `tree_node`.
+    ///
+    /// # Safety
+    /// All safety concers of [`deref`](Shared::deref) apply. In particular, the
+    /// supplied pointer must be non-null and must point to valid memory.
+    /// Additionally, it must point to an instance of BinEntry that is actually a
+    /// TreeNode.
     #[inline]
-    pub(crate) fn get_tree_node<'g>(bin: Shared<'g, BinEntry<K, V>>) -> &'g TreeNode<K, V> {
+    pub(crate) unsafe fn get_tree_node<'g>(bin: Shared<'g, BinEntry<K, V>>) -> &'g TreeNode<K, V> {
         bin.deref().as_tree_node().unwrap()
     }
 
@@ -798,14 +908,19 @@ impl<K, V> TreeNode<K, V> {
         if p.is_null() {
             return root;
         }
-        let p_deref = Self::get_tree_node(p);
+        // safety: the containing TreeBin of all TreeNodes was read under our
+        // guard, at which point the tree structure was valid. Since our guard
+        // pins the current epoch, the TreeNodes remain valid for at least as
+        // long as we hold onto the guard.
+        // Structurally, TreeNodes always point to TreeNodes, so this is sound.
+        let p_deref = unsafe { Self::get_tree_node(p) };
         let right = p_deref.right.load(Ordering::SeqCst, guard);
         if !right.is_null() {
-            let right_deref = Self::get_tree_node(right);
+            let right_deref = unsafe { Self::get_tree_node(right) };
             let right_left = right_deref.left.load(Ordering::SeqCst, guard);
             p_deref.right.store(right_left, Ordering::SeqCst);
             if !right_left.is_null() {
-                Self::get_tree_node(right_left)
+                unsafe { Self::get_tree_node(right_left) }
                     .parent
                     .store(p, Ordering::SeqCst);
             }
@@ -816,7 +931,7 @@ impl<K, V> TreeNode<K, V> {
                 root = right;
                 right_deref.red.store(false, Ordering::Relaxed);
             } else {
-                let p_parent_deref = Self::get_tree_node(p_parent);
+                let p_parent_deref = unsafe { Self::get_tree_node(p_parent) };
                 if p_parent_deref.left.load(Ordering::SeqCst, guard) == p {
                     p_parent_deref.left.store(right, Ordering::SeqCst);
                 } else {
@@ -839,14 +954,19 @@ impl<K, V> TreeNode<K, V> {
         if p.is_null() {
             return root;
         }
-        let p_deref = Self::get_tree_node(p);
+        // safety: the containing TreeBin of all TreeNodes was read under our
+        // guard, at which point the tree structure was valid. Since our guard
+        // pins the current epoch, the TreeNodes remain valid for at least as
+        // long as we hold onto the guard.
+        // Structurally, TreeNodes always point to TreeNodes, so this is sound.
+        let p_deref = unsafe { Self::get_tree_node(p) };
         let left = p_deref.left.load(Ordering::SeqCst, guard);
         if !left.is_null() {
-            let left_deref = Self::get_tree_node(left);
+            let left_deref = unsafe { Self::get_tree_node(left) };
             let left_right = left_deref.right.load(Ordering::SeqCst, guard);
             p_deref.left.store(left_right, Ordering::SeqCst);
             if !left_right.is_null() {
-                Self::get_tree_node(left_right)
+                unsafe { Self::get_tree_node(left_right) }
                     .parent
                     .store(p, Ordering::SeqCst);
             }
@@ -857,7 +977,7 @@ impl<K, V> TreeNode<K, V> {
                 root = left;
                 left_deref.red.store(false, Ordering::Relaxed);
             } else {
-                let p_parent_deref = Self::get_tree_node(p_parent);
+                let p_parent_deref = unsafe { Self::get_tree_node(p_parent) };
                 if p_parent_deref.right.load(Ordering::SeqCst, guard) == p {
                     p_parent_deref.right.store(left, Ordering::SeqCst);
                 } else {
@@ -877,70 +997,84 @@ impl<K, V> TreeNode<K, V> {
         mut x: Shared<'g, BinEntry<K, V>>,
         guard: &'g Guard,
     ) -> Shared<'g, BinEntry<K, V>> {
-        Self::get_tree_node(x).red.store(true, Ordering::Relaxed);
+        // safety: the containing TreeBin of all TreeNodes was read under our
+        // guard, at which point the tree structure was valid. Since our guard
+        // pins the current epoch, the TreeNodes remain valid for at least as
+        // long as we hold onto the guard.
+        // Structurally, TreeNodes always point to TreeNodes, so this is sound.
+        unsafe { Self::get_tree_node(x) }
+            .red
+            .store(true, Ordering::Relaxed);
 
         let mut x_parent: Shared<'_, BinEntry<K, V>>;
         let mut x_parent_parent: Shared<'_, BinEntry<K, V>>;
         let mut x_parent_parent_left: Shared<'_, BinEntry<K, V>>;
         let mut x_parent_parent_right: Shared<'_, BinEntry<K, V>>;
         loop {
-            x_parent = Self::get_tree_node(x).parent.load(Ordering::SeqCst, guard);
-            if x_parent.is_null() {
-                Self::get_tree_node(x).red.store(false, Ordering::Relaxed);
-                return x;
-            }
-            x_parent_parent = Self::get_tree_node(x_parent)
+            x_parent = unsafe { Self::get_tree_node(x) }
                 .parent
                 .load(Ordering::SeqCst, guard);
-            if !Self::get_tree_node(x_parent).red.load(Ordering::Relaxed)
+            if x_parent.is_null() {
+                unsafe { Self::get_tree_node(x) }
+                    .red
+                    .store(false, Ordering::Relaxed);
+                return x;
+            }
+            x_parent_parent = unsafe { Self::get_tree_node(x_parent) }
+                .parent
+                .load(Ordering::SeqCst, guard);
+            if !unsafe { Self::get_tree_node(x_parent) }
+                .red
+                .load(Ordering::Relaxed)
                 || x_parent_parent.is_null()
             {
                 return root;
             }
-            x_parent_parent_left = Self::get_tree_node(x_parent_parent)
+            x_parent_parent_left = unsafe { Self::get_tree_node(x_parent_parent) }
                 .left
                 .load(Ordering::SeqCst, guard);
             if x_parent == x_parent_parent_left {
-                x_parent_parent_right = Self::get_tree_node(x_parent_parent)
+                x_parent_parent_right = unsafe { Self::get_tree_node(x_parent_parent) }
                     .right
                     .load(Ordering::SeqCst, guard);
                 if !x_parent_parent_right.is_null()
-                    && Self::get_tree_node(x_parent_parent_right)
+                    && unsafe { Self::get_tree_node(x_parent_parent_right) }
                         .red
                         .load(Ordering::Relaxed)
                 {
-                    Self::get_tree_node(x_parent_parent_right)
+                    unsafe { Self::get_tree_node(x_parent_parent_right) }
                         .red
                         .store(false, Ordering::Relaxed);
-                    Self::get_tree_node(x_parent)
+                    unsafe { Self::get_tree_node(x_parent) }
                         .red
                         .store(false, Ordering::Relaxed);
-                    Self::get_tree_node(x_parent_parent)
+                    unsafe { Self::get_tree_node(x_parent_parent) }
                         .red
                         .store(true, Ordering::Relaxed);
                     x = x_parent_parent;
                 } else {
-                    if x == Self::get_tree_node(x_parent)
+                    if x == unsafe { Self::get_tree_node(x_parent) }
                         .right
                         .load(Ordering::SeqCst, guard)
                     {
                         x = x_parent;
                         root = Self::rotate_left(root, x, guard);
-                        x_parent = Self::get_tree_node(x).parent.load(Ordering::SeqCst, guard);
+                        x_parent =
+                            unsafe { Self::get_tree_node(x).parent.load(Ordering::SeqCst, guard) };
                         x_parent_parent = if x_parent.is_null() {
                             Shared::null()
                         } else {
-                            Self::get_tree_node(x_parent)
+                            unsafe { Self::get_tree_node(x_parent) }
                                 .parent
                                 .load(Ordering::SeqCst, guard)
                         };
                     }
                     if !x_parent.is_null() {
-                        Self::get_tree_node(x_parent)
+                        unsafe { Self::get_tree_node(x_parent) }
                             .red
                             .store(false, Ordering::Relaxed);
                         if !x_parent_parent.is_null() {
-                            Self::get_tree_node(x_parent_parent)
+                            unsafe { Self::get_tree_node(x_parent_parent) }
                                 .red
                                 .store(true, Ordering::Relaxed);
                             root = Self::rotate_right(root, x_parent_parent, guard);
@@ -948,42 +1082,44 @@ impl<K, V> TreeNode<K, V> {
                     }
                 }
             } else if !x_parent_parent_left.is_null()
-                && Self::get_tree_node(x_parent_parent_left)
+                && unsafe { Self::get_tree_node(x_parent_parent_left) }
                     .red
                     .load(Ordering::Relaxed)
             {
-                Self::get_tree_node(x_parent_parent_left)
+                unsafe { Self::get_tree_node(x_parent_parent_left) }
                     .red
                     .store(false, Ordering::Relaxed);
-                Self::get_tree_node(x_parent)
+                unsafe { Self::get_tree_node(x_parent) }
                     .red
                     .store(false, Ordering::Relaxed);
-                Self::get_tree_node(x_parent_parent)
+                unsafe { Self::get_tree_node(x_parent_parent) }
                     .red
                     .store(true, Ordering::Relaxed);
                 x = x_parent_parent;
             } else {
-                if x == Self::get_tree_node(x_parent)
+                if x == unsafe { Self::get_tree_node(x_parent) }
                     .left
                     .load(Ordering::SeqCst, guard)
                 {
                     x = x_parent;
                     root = Self::rotate_right(root, x, guard);
-                    x_parent = Self::get_tree_node(x).parent.load(Ordering::SeqCst, guard);
+                    x_parent = unsafe { Self::get_tree_node(x) }
+                        .parent
+                        .load(Ordering::SeqCst, guard);
                     x_parent_parent = if x_parent.is_null() {
                         Shared::null()
                     } else {
-                        Self::get_tree_node(x_parent)
+                        unsafe { Self::get_tree_node(x_parent) }
                             .parent
                             .load(Ordering::SeqCst, guard)
                     };
                 }
                 if !x_parent.is_null() {
-                    Self::get_tree_node(x_parent)
+                    unsafe { Self::get_tree_node(x_parent) }
                         .red
                         .store(false, Ordering::Relaxed);
                     if !x_parent_parent.is_null() {
-                        Self::get_tree_node(x_parent_parent)
+                        unsafe { Self::get_tree_node(x_parent_parent) }
                             .red
                             .store(true, Ordering::Relaxed);
                         root = Self::rotate_left(root, x_parent_parent, guard);
@@ -1001,39 +1137,50 @@ impl<K, V> TreeNode<K, V> {
         let mut x_parent: Shared<'_, BinEntry<K, V>>;
         let mut x_parent_left: Shared<'_, BinEntry<K, V>>;
         let mut x_parent_right: Shared<'_, BinEntry<K, V>>;
+        // safety: the containing TreeBin of all TreeNodes was read under our
+        // guard, at which point the tree structure was valid. Since our guard
+        // pins the current epoch, the TreeNodes remain valid for at least as
+        // long as we hold onto the guard.
+        // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         loop {
             if x.is_null() || x == root {
                 return root;
             }
-            x_parent = Self::get_tree_node(x).parent.load(Ordering::SeqCst, guard);
+            x_parent = unsafe { Self::get_tree_node(x) }
+                .parent
+                .load(Ordering::SeqCst, guard);
             if x_parent.is_null() {
-                Self::get_tree_node(x).red.store(false, Ordering::Relaxed);
+                unsafe { Self::get_tree_node(x) }
+                    .red
+                    .store(false, Ordering::Relaxed);
                 return x;
             }
-            x_parent_left = Self::get_tree_node(x_parent)
+            x_parent_left = unsafe { Self::get_tree_node(x_parent) }
                 .left
                 .load(Ordering::SeqCst, guard);
             if x_parent_left == x {
-                x_parent_right = Self::get_tree_node(x_parent)
+                x_parent_right = unsafe { Self::get_tree_node(x_parent) }
                     .right
                     .load(Ordering::SeqCst, guard);
                 if !x_parent_right.is_null()
-                    && Self::get_tree_node(x_parent_right)
+                    && unsafe { Self::get_tree_node(x_parent_right) }
                         .red
                         .load(Ordering::Relaxed)
                 {
-                    Self::get_tree_node(x_parent_right)
+                    unsafe { Self::get_tree_node(x_parent_right) }
                         .red
                         .store(false, Ordering::Relaxed);
-                    Self::get_tree_node(x_parent)
+                    unsafe { Self::get_tree_node(x_parent) }
                         .red
                         .store(true, Ordering::Relaxed);
                     root = Self::rotate_left(root, x_parent, guard);
-                    x_parent = Self::get_tree_node(x).parent.load(Ordering::SeqCst, guard);
+                    x_parent = unsafe { Self::get_tree_node(x) }
+                        .parent
+                        .load(Ordering::SeqCst, guard);
                     x_parent_right = if x_parent.is_null() {
                         Shared::null()
                     } else {
-                        Self::get_tree_node(x_parent)
+                        unsafe { Self::get_tree_node(x_parent) }
                             .right
                             .load(Ordering::SeqCst, guard)
                     };
@@ -1041,64 +1188,74 @@ impl<K, V> TreeNode<K, V> {
                 if x_parent_right.is_null() {
                     x = x_parent;
                 } else {
-                    let s_left = Self::get_tree_node(x_parent_right)
+                    let s_left = unsafe { Self::get_tree_node(x_parent_right) }
                         .left
                         .load(Ordering::SeqCst, guard);
-                    let mut s_right = Self::get_tree_node(x_parent_right)
+                    let mut s_right = unsafe { Self::get_tree_node(x_parent_right) }
                         .right
                         .load(Ordering::SeqCst, guard);
 
                     if (s_right.is_null()
-                        || !Self::get_tree_node(s_right).red.load(Ordering::Relaxed))
+                        || !unsafe { Self::get_tree_node(s_right) }
+                            .red
+                            .load(Ordering::Relaxed))
                         && (s_left.is_null()
-                            || !Self::get_tree_node(s_left).red.load(Ordering::Relaxed))
+                            || !unsafe { Self::get_tree_node(s_left) }
+                                .red
+                                .load(Ordering::Relaxed))
                     {
-                        Self::get_tree_node(x_parent_right)
+                        unsafe { Self::get_tree_node(x_parent_right) }
                             .red
                             .store(true, Ordering::Relaxed);
                         x = x_parent;
                     } else {
                         if s_right.is_null()
-                            || !Self::get_tree_node(s_right).red.load(Ordering::Relaxed)
+                            || !unsafe { Self::get_tree_node(s_right) }
+                                .red
+                                .load(Ordering::Relaxed)
                         {
                             if !s_left.is_null() {
-                                Self::get_tree_node(s_left)
+                                unsafe { Self::get_tree_node(s_left) }
                                     .red
                                     .store(false, Ordering::Relaxed);
                             }
-                            Self::get_tree_node(x_parent_right)
+                            unsafe { Self::get_tree_node(x_parent_right) }
                                 .red
                                 .store(true, Ordering::Relaxed);
                             root = Self::rotate_right(root, x_parent_right, guard);
-                            x_parent = Self::get_tree_node(x).parent.load(Ordering::SeqCst, guard);
+                            x_parent = unsafe { Self::get_tree_node(x) }
+                                .parent
+                                .load(Ordering::SeqCst, guard);
                             x_parent_right = if x_parent.is_null() {
                                 Shared::null()
                             } else {
-                                Self::get_tree_node(x_parent)
+                                unsafe { Self::get_tree_node(x_parent) }
                                     .right
                                     .load(Ordering::SeqCst, guard)
                             };
                         }
                         if !x_parent_right.is_null() {
-                            Self::get_tree_node(x_parent_right).red.store(
+                            unsafe { Self::get_tree_node(x_parent_right) }.red.store(
                                 if x_parent.is_null() {
                                     false
                                 } else {
-                                    Self::get_tree_node(x_parent).red.load(Ordering::Relaxed)
+                                    unsafe { Self::get_tree_node(x_parent) }
+                                        .red
+                                        .load(Ordering::Relaxed)
                                 },
                                 Ordering::Relaxed,
                             );
-                            s_right = Self::get_tree_node(x_parent_right)
+                            s_right = unsafe { Self::get_tree_node(x_parent_right) }
                                 .right
                                 .load(Ordering::SeqCst, guard);
                             if !s_right.is_null() {
-                                Self::get_tree_node(s_right)
+                                unsafe { Self::get_tree_node(s_right) }
                                     .red
                                     .store(false, Ordering::Relaxed);
                             }
                         }
                         if !x_parent.is_null() {
-                            Self::get_tree_node(x_parent)
+                            unsafe { Self::get_tree_node(x_parent) }
                                 .red
                                 .store(false, Ordering::Relaxed);
                             root = Self::rotate_left(root, x_parent, guard);
@@ -1109,22 +1266,24 @@ impl<K, V> TreeNode<K, V> {
             } else {
                 // symmetric
                 if !x_parent_left.is_null()
-                    && Self::get_tree_node(x_parent_left)
+                    && unsafe { Self::get_tree_node(x_parent_left) }
                         .red
                         .load(Ordering::Relaxed)
                 {
-                    Self::get_tree_node(x_parent_left)
+                    unsafe { Self::get_tree_node(x_parent_left) }
                         .red
                         .store(false, Ordering::Relaxed);
-                    Self::get_tree_node(x_parent)
+                    unsafe { Self::get_tree_node(x_parent) }
                         .red
                         .store(true, Ordering::Relaxed);
                     root = Self::rotate_right(root, x_parent, guard);
-                    x_parent = Self::get_tree_node(x).parent.load(Ordering::SeqCst, guard);
+                    x_parent = unsafe { Self::get_tree_node(x) }
+                        .parent
+                        .load(Ordering::SeqCst, guard);
                     x_parent_left = if x_parent.is_null() {
                         Shared::null()
                     } else {
-                        Self::get_tree_node(x_parent)
+                        unsafe { Self::get_tree_node(x_parent) }
                             .left
                             .load(Ordering::SeqCst, guard)
                     };
@@ -1132,64 +1291,74 @@ impl<K, V> TreeNode<K, V> {
                 if x_parent_left.is_null() {
                     x = x_parent;
                 } else {
-                    let mut s_left = Self::get_tree_node(x_parent_left)
+                    let mut s_left = unsafe { Self::get_tree_node(x_parent_left) }
                         .left
                         .load(Ordering::SeqCst, guard);
-                    let s_right = Self::get_tree_node(x_parent_left)
+                    let s_right = unsafe { Self::get_tree_node(x_parent_left) }
                         .right
                         .load(Ordering::SeqCst, guard);
 
                     if (s_right.is_null()
-                        || !Self::get_tree_node(s_right).red.load(Ordering::Relaxed))
+                        || !unsafe { Self::get_tree_node(s_right) }
+                            .red
+                            .load(Ordering::Relaxed))
                         && (s_left.is_null()
-                            || !Self::get_tree_node(s_left).red.load(Ordering::Relaxed))
+                            || !unsafe { Self::get_tree_node(s_left) }
+                                .red
+                                .load(Ordering::Relaxed))
                     {
-                        Self::get_tree_node(x_parent_left)
+                        unsafe { Self::get_tree_node(x_parent_left) }
                             .red
                             .store(true, Ordering::Relaxed);
                         x = x_parent;
                     } else {
                         if s_left.is_null()
-                            || !Self::get_tree_node(s_left).red.load(Ordering::Relaxed)
+                            || !unsafe { Self::get_tree_node(s_left) }
+                                .red
+                                .load(Ordering::Relaxed)
                         {
                             if !s_right.is_null() {
-                                Self::get_tree_node(s_right)
+                                unsafe { Self::get_tree_node(s_right) }
                                     .red
                                     .store(false, Ordering::Relaxed);
                             }
-                            Self::get_tree_node(x_parent_left)
+                            unsafe { Self::get_tree_node(x_parent_left) }
                                 .red
                                 .store(true, Ordering::Relaxed);
                             root = Self::rotate_left(root, x_parent_left, guard);
-                            x_parent = Self::get_tree_node(x).parent.load(Ordering::SeqCst, guard);
+                            x_parent = unsafe { Self::get_tree_node(x) }
+                                .parent
+                                .load(Ordering::SeqCst, guard);
                             x_parent_left = if x_parent.is_null() {
                                 Shared::null()
                             } else {
-                                Self::get_tree_node(x_parent)
+                                unsafe { Self::get_tree_node(x_parent) }
                                     .left
                                     .load(Ordering::SeqCst, guard)
                             };
                         }
                         if !x_parent_left.is_null() {
-                            Self::get_tree_node(x_parent_left).red.store(
+                            unsafe { Self::get_tree_node(x_parent_left) }.red.store(
                                 if x_parent.is_null() {
                                     false
                                 } else {
-                                    Self::get_tree_node(x_parent).red.load(Ordering::Relaxed)
+                                    unsafe { Self::get_tree_node(x_parent) }
+                                        .red
+                                        .load(Ordering::Relaxed)
                                 },
                                 Ordering::Relaxed,
                             );
-                            s_left = Self::get_tree_node(x_parent_left)
+                            s_left = unsafe { Self::get_tree_node(x_parent_left) }
                                 .left
                                 .load(Ordering::SeqCst, guard);
                             if !s_left.is_null() {
-                                Self::get_tree_node(s_left)
+                                unsafe { Self::get_tree_node(s_left) }
                                     .red
                                     .store(false, Ordering::Relaxed);
                             }
                         }
                         if !x_parent.is_null() {
-                            Self::get_tree_node(x_parent)
+                            unsafe { Self::get_tree_node(x_parent) }
                                 .red
                                 .store(false, Ordering::Relaxed);
                             root = Self::rotate_right(root, x_parent, guard);
@@ -1202,7 +1371,12 @@ impl<K, V> TreeNode<K, V> {
     }
     /// Checks invariants recursively for the tree of Nodes rootet at t.
     fn check_invariants<'g>(t: Shared<'g, BinEntry<K, V>>, guard: &'g Guard) -> bool {
-        let t_deref = Self::get_tree_node(t);
+        // safety: the containing TreeBin of all TreeNodes was read under our
+        // guard, at which point the tree structure was valid. Since our guard
+        // pins the current epoch, the TreeNodes remain valid for at least as
+        // long as we hold onto the guard.
+        // Structurally, TreeNodes always point to TreeNodes, so this is sound.
+        let t_deref = unsafe { Self::get_tree_node(t) };
         let t_parent = t_deref.parent.load(Ordering::SeqCst, guard);
         let t_left = t_deref.left.load(Ordering::SeqCst, guard);
         let t_right = t_deref.right.load(Ordering::SeqCst, guard);
@@ -1210,19 +1384,19 @@ impl<K, V> TreeNode<K, V> {
         let t_next = t_deref.node.next.load(Ordering::SeqCst, guard);
 
         if !t_back.is_null() {
-            let t_back_deref = Self::get_tree_node(t_back);
+            let t_back_deref = unsafe { Self::get_tree_node(t_back) };
             if t_back_deref.node.next.load(Ordering::SeqCst, guard) != t {
                 return false;
             }
         }
         if !t_next.is_null() {
-            let t_next_deref = Self::get_tree_node(t_next);
+            let t_next_deref = unsafe { Self::get_tree_node(t_next) };
             if t_next_deref.prev.load(Ordering::SeqCst, guard) != t {
                 return false;
             }
         }
         if !t_parent.is_null() {
-            let t_parent_deref = Self::get_tree_node(t_parent);
+            let t_parent_deref = unsafe { Self::get_tree_node(t_parent) };
             if t_parent_deref.left.load(Ordering::SeqCst, guard) != t
                 && t_parent_deref.right.load(Ordering::SeqCst, guard) != t
             {
@@ -1230,7 +1404,7 @@ impl<K, V> TreeNode<K, V> {
             }
         }
         if !t_left.is_null() {
-            let t_left_deref = Self::get_tree_node(t_left);
+            let t_left_deref = unsafe { Self::get_tree_node(t_left) };
             if t_left_deref.parent.load(Ordering::SeqCst, guard) != t
                 || t_left_deref.node.hash > t_deref.node.hash
             {
@@ -1238,7 +1412,7 @@ impl<K, V> TreeNode<K, V> {
             }
         }
         if !t_right.is_null() {
-            let t_right_deref = Self::get_tree_node(t_right);
+            let t_right_deref = unsafe { Self::get_tree_node(t_right) };
             if t_right_deref.parent.load(Ordering::SeqCst, guard) != t
                 || t_right_deref.node.hash < t_deref.node.hash
             {
@@ -1246,20 +1420,15 @@ impl<K, V> TreeNode<K, V> {
             }
         }
         if t_deref.red.load(Ordering::Relaxed) && !t_left.is_null() && !t_right.is_null() {
-            let t_left_deref = Self::get_tree_node(t_left);
-            let t_right_deref = Self::get_tree_node(t_right);
+            let t_left_deref = unsafe { Self::get_tree_node(t_left) };
+            let t_right_deref = unsafe { Self::get_tree_node(t_right) };
             if t_left_deref.red.load(Ordering::Relaxed) && t_right_deref.red.load(Ordering::Relaxed)
             {
                 return false;
             }
         }
-        if !t_left.is_null() && !Self::check_invariants(t_left, guard) {
-            false
-        } else if !t_right.is_null() && !Self::check_invariants(t_right, guard) {
-            false
-        } else {
-            true
-        }
+        !(!t_left.is_null() && !Self::check_invariants(t_left, guard)
+            || !t_right.is_null() && !Self::check_invariants(t_right, guard))
     }
 }
 
