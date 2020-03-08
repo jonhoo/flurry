@@ -200,8 +200,8 @@
 //! The Java implementation can rely on Java's runtime garbage collection to safely deallocate
 //! deleted or removed nodes, keys, and values. Since Rust does not have such a runtime, we must
 //! ensure through some other mechanism that we do not drop values before all references to them
-//! have goen away. We do this using [`crossbeam::epoch`], which provides an implementation of an
-//! epoch-based garbae collection scheme. This forces us to make certain API changes such as
+//! have gone away. We do this using [`crossbeam::epoch`], which provides an implementation of an
+//! epoch-based garbage collection scheme. This forces us to make certain API changes such as
 //! requiring `Guard` arguments to many methods or wrapping the return values, but provides much
 //! more efficient operation than if everything had to be atomically reference-counted.
 //!
