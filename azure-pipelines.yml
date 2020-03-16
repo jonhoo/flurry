@@ -5,7 +5,7 @@ jobs:
  - job: deny
    displayName: "Disallowed attributes"
    pool:
-     vmImage: ubuntu-16.04
+     vmImage: ubuntu-latest
    steps:
      # Work around https://github.com/microsoft/azure-pipelines-tasks/issues/12179
      - bash: |
@@ -32,7 +32,7 @@ jobs:
    displayName: "Warning screening"
    dependsOn: deny
    pool:
-     vmImage: ubuntu-16.04
+     vmImage: ubuntu-latest
    steps:
      - template: install-rust.yml@templates
        parameters:
@@ -45,7 +45,7 @@ jobs:
    displayName: "Run miri on test suite"
    dependsOn: deny
    pool:
-     vmImage: ubuntu-16.04
+     vmImage: ubuntu-latest
    steps:
      - template: install-rust.yml@templates
        parameters:
@@ -59,7 +59,7 @@ jobs:
    dependsOn: deny
    displayName: "Run address sanitizer on test suite"
    pool:
-     vmImage: ubuntu-16.04
+     vmImage: ubuntu-latest
    steps:
      - template: install-rust.yml@templates
        parameters:
@@ -75,7 +75,7 @@ jobs:
    dependsOn: deny
    displayName: "Run leak sanitizer on test suite"
    pool:
-     vmImage: ubuntu-16.04
+     vmImage: ubuntu-latest
    steps:
      - template: install-rust.yml@templates
        parameters:
@@ -100,5 +100,5 @@ resources:
     - repository: templates
       type: github
       name: crate-ci/azure-pipelines
-      ref: refs/heads/v0.3
+      ref: refs/heads/v0.4
       endpoint: jonhoo
