@@ -47,11 +47,13 @@ jobs:
    pool:
      vmImage: ubuntu-latest
    steps:
+     - bash: |
+         echo '##vso[task.setvariable variable=Nightly]nightly-'$(curl -s https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/miri)
+       displayName: "Determine latest miri nightly"
+       name: LatestMiri
      - template: install-rust.yml@templates
        parameters:
-         # fix nightly since miri breaks there frequently
-         # should probably be bumped occasionally
-         rust: nightly-2020-03-16
+         rust: $(LatestMiri.Nightly)
          components:
            - miri
      - script: cargo miri setup
