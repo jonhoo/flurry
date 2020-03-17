@@ -47,13 +47,21 @@ jobs:
    pool:
      vmImage: ubuntu-latest
    steps:
+     - bash: |
+         echo '##vso[task.setvariable variable=nightly]nightly-'$(curl -s https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/miri)
+       displayName: "Determine latest miri nightly"
      - template: install-rust.yml@templates
        parameters:
-         rust: nightly
+         rust: $(nightly)
          components:
            - miri
-     # ignore leaks due to https://github.com/crossbeam-rs/crossbeam/issues/464
-     - bash: yes | cargo miri -Zmiri-ignore-leaks test
+     - script: cargo miri setup
+       displayName: cargo miri setup
+     # ignore leaks due to
+     # https://github.com/crossbeam-rs/crossbeam/issues/464
+     # which is
+     # https://github.com/rust-lang/miri/issues/940
+     - script: cargo miri -Zmiri-ignore-leaks test
        displayName: cargo miri test
  - job: asan
    dependsOn: deny
