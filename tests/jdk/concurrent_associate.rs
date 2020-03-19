@@ -8,7 +8,7 @@ const NUM_ENTRIES: usize = 128;
 /// Number of iterations for each test
 const ITERATIONS: usize = 64;
 
-#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 struct KeyVal {
     _data: usize,
 }
