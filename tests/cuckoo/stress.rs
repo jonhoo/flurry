@@ -1,3 +1,5 @@
+// https://github.com/efficient/libcuckoo/tree/master/tests/stress-tests
+
 use flurry::*;
 use parking_lot::Mutex;
 use rand::distributions::{Distribution, Uniform};
