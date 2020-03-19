@@ -106,7 +106,7 @@ where
 
 impl<K, V, S> HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     S: BuildHasher,
 {
     /// Tests if `key` is a key in this table.
@@ -264,7 +264,7 @@ where
 
 impl<K, Q, V, S> Index<&'_ Q> for HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq + Borrow<Q>,
+    K: Hash + Ord + Borrow<Q>,
     Q: ?Sized + Hash + Ord,
     S: BuildHasher,
 {

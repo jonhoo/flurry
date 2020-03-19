@@ -217,16 +217,16 @@ impl<T, S> HashSet<T, S> {
 
 impl<T, S> HashSet<T, S>
 where
-    T: Hash + Eq,
+    T: Hash + Ord,
     S: BuildHasher,
 {
     /// Returns `true` if the set contains the specified value.
     ///
     /// The value may be any borrowed form of the set's value type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
     /// the value type.
     ///
-    /// [`Eq`]: std::cmp::Eq
+    /// [`Ord`]: std::cmp::Ord
     /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
@@ -253,8 +253,11 @@ where
     /// Returns a reference to the value in the set, if any, that is equal to the given value.
     ///
     /// The value may be any borrowed form of the set's value type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
     /// the value type.
+    ///
+    /// [`Ord`]: std::cmp::Ord
+    /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
     ///
@@ -266,9 +269,6 @@ where
     /// assert_eq!(set.get(&2, &guard), Some(&2));
     /// assert_eq!(set.get(&4, &guard), None);
     /// ```
-    ///
-    /// [`Eq`]: ../../std/cmp/trait.Eq.html
-    /// [`Hash`]: ../../std/hash/trait.Hash.html
     pub fn get<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> Option<&'g T>
     where
         T: Borrow<Q>,
@@ -313,10 +313,10 @@ where
     /// If the set did have this value present, `true` is returned.
     ///
     /// The value may be any borrowed form of the set's value type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
     /// the value type.
     ///
-    /// [`Eq`]: std::cmp::Eq
+    /// [`Ord`]: std::cmp::Ord
     /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
@@ -344,8 +344,11 @@ where
     /// Removes and returns the value in the set, if any, that is equal to the given one.
     ///
     /// The value may be any borrowed form of the set's value type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
     /// the value type.
+    ///
+    /// [`Ord`]: std::cmp::Ord
+    /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
     ///
@@ -357,9 +360,6 @@ where
     /// assert_eq!(set.take(&2, &guard), Some(&2));
     /// assert_eq!(set.take(&2, &guard), None);
     /// ```
-    ///
-    /// [`Eq`]: ../../std/cmp/trait.Eq.html
-    /// [`Hash`]: ../../std/hash/trait.Hash.html
     pub fn take<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> Option<&'g T>
     where
         T: Borrow<Q>,

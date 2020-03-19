@@ -55,17 +55,18 @@
 //! operation. When possible, it is a good idea to provide a size estimate by using the
 //! [`with_capacity`](HashMap::with_capacity) constructor. Note that using many keys with
 //! exactly the same [`Hash`](std::hash::Hash) value is a sure way to slow down performance of any
-//! hash table. To ameliorate impact, keys are required to be [`Ord`](std::cmp::Ord), which may
-//! be used by the map to help break ties.
+//! hash table. To ameliorate impact, keys are required to be [`Ord`](std::cmp::Ord). This is used
+//! by the map to more efficiently store bins that contain a large number of elements with
+//! colliding hashes using the comparison order on their keys.
 //!
 /*
 //! TODO: dynamic load factor
 //! */
-//! # Set projections
+//! # Hash Sets
 //!
-//! A set projection of a concurrent hash table may be created through [`HashSet`], which provides
-//! the same instantiation options as [`HashMap`], such as [`new`](HashSet::new) and [`with_capacity`](HashSet::with_capacity).
-//! A hash table may be viewed as a collection of its keys using [`keys`](HashMap::keys).
+//! Flurry also supports concurrent hash sets, which may be created through [`HashSet`]. Hash sets
+//! offer the same instantiation options as [`HashMap`], such as [`new`](HashSet::new) and
+//! [`with_capacity`](HashSet::with_capacity).
 //!
 /*
 //! TODO: frequency map through computeIfAbsent
@@ -142,15 +143,14 @@
 //! Actual hash code distributions encountered in practice sometimes deviate significantly from
 //! uniform randomness. This includes the case when `N > (1<<30)`, so some keys MUST collide.
 //! Similarly for dumb or hostile usages in which multiple keys are designed to have identical hash
-//! codes or ones that differs only in masked-out high bits. So a secondary strategy is used that
+//! codes or ones that differs only in masked-out high bits. So we use secondary strategy that
 //! applies when the number of nodes in a bin exceeds a threshold. These `BinEntry::Tree` bins use
 //! a balanced tree to hold nodes (a specialized form of red-black trees), bounding search time to
 //! `O(log N)`. Each search step in such a bin is at least twice as slow as in a regular list, but
 //! given that N cannot exceed `(1<<64)` (before running out of adresses) this bounds search steps,
 //! lock hold times, etc, to reasonable constants (roughly 100 nodes inspected per operation worst
-//! case) as keys are required to be comparable ([`Ord`](std::cmp::Ord)). `BinEntry::Tree` nodes
-//! (`BinEntry::TreeNode`s) also maintain the same `next` traversal pointers as regular nodes, so
-//! can be traversed in iterators in a similar way.
+//! case). `BinEntry::Tree` nodes (`BinEntry::TreeNode`s) also maintain the same `next` traversal
+//! pointers as regular nodes, so can be traversed in iterators in a similar way.
 //!
 //! The table is resized when occupancy exceeds a percentage threshold (nominally, 0.75, but see
 //! below). Any thread noticing an overfull bin may assist in resizing after the initiating thread
@@ -207,7 +207,7 @@
  * since we require total ordering among the keys via `Ord` as opposed to a runtime check against
  * Java's `Comparable` interface. */
 //! `BinEntry::Tree` bins use a special form of comparison for search and related operations (which
-//! is the main reason they do not use existing collections such as tree maps). The contained tree
+//! is the main reason we cannot use existing collections such as tree maps). The contained tree
 //! is primarily ordered by hash value, then by [`cmp`](std::cmp::Ord::cmp) order on keys. The
 //! red-black balancing code is updated from pre-jdk colelctions (http://gee.cs.oswego.edu/dl/classes/collections/RBCell.java)
 //! based in turn on Cormen, Leiserson, and Rivest "Introduction to Algorithms" (CLR).
@@ -215,7 +215,7 @@
 //! `BinEntry::Tree` bins also require an additional locking mechanism. While list traversal is
 //! always possible by readers even during updates, tree traversal is not, mainly because of
 //! tree-rotations that may change the root node and/or its linkages. Tree bins include a simple
-//! reaad-write lock mechanism parasitic on the main bin-synchronization strategy: Structural
+//! read-write lock mechanism parasitic on the main bin-synchronization strategy: Structural
 //! adjustments associated with an insertion or removal are already bin-locked (and so cannot
 //! conflict with other writers) but must wait for ongoing readers to finish. Since there can be
 //! only one such waiter, we use a simple scheme using a single `waiter` field to block writers.

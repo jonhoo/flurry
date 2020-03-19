@@ -69,6 +69,33 @@ pub(crate) struct Node<K, V> {
     pub(crate) lock: Mutex<()>,
 }
 
+impl<K, V> Node<K, V> {
+    pub(crate) fn new<AV>(hash: u64, key: K, value: AV) -> Self
+    where
+        AV: Into<Atomic<V>>,
+    {
+        Node {
+            hash,
+            key,
+            value: value.into(),
+            next: Atomic::null(),
+            lock: Mutex::new(()),
+        }
+    }
+    pub(crate) fn with_next<AV>(hash: u64, key: K, value: AV, next: Atomic<BinEntry<K, V>>) -> Self
+    where
+        AV: Into<Atomic<V>>,
+    {
+        Node {
+            hash,
+            key,
+            value: value.into(),
+            next,
+            lock: Mutex::new(()),
+        }
+    }
+}
+
 /* ------------------------ TreeNodes ------------------------ */
 
 /// Nodes for use in TreeBins.
@@ -87,20 +114,14 @@ pub(crate) struct TreeNode<K, V> {
 
 impl<K, V> TreeNode<K, V> {
     pub(crate) fn new(
+        hash: u64,
         key: K,
         value: Atomic<V>,
-        hash: u64,
         next: Atomic<BinEntry<K, V>>,
         parent: Atomic<BinEntry<K, V>>,
     ) -> Self {
         TreeNode {
-            node: Node {
-                key,
-                value,
-                hash,
-                next,
-                lock: parking_lot::Mutex::new(()),
-            },
+            node: Node::with_next(hash, key, value, next),
             parent,
             left: Atomic::null(),
             right: Atomic::null(),
@@ -445,12 +466,16 @@ impl<K, V> TreeBin<K, V> {
     /// linear traversal, but not from the tree. This makes the node unreachable
     /// through linear reads and excludes it from being dropped when the bin is
     /// dropped. However, reading threads may still obtain a reference to until
-    /// the bin is swapped out for a linear bin. The caller of this method _must_
-    /// ensure that the given node is properly marked for garbage collection
-    /// _after_ this bin has bin swapped out.
+    /// the bin is swapped out for a linear bin.
+    ///
+    /// The caller of this method _must_ ensure that the given node is properly
+    /// marked for garbage collection _after_ this bin has been swapped out. If
+    /// the value of the given node was supposed to get dropped as well
+    /// (`drop_value` was true), the caller must do the same for the value.
     pub(crate) unsafe fn remove_tree_node<'g>(
         &'g self,
         p: Shared<'g, BinEntry<K, V>>,
+        drop_value: bool,
         guard: &'g Guard,
     ) -> bool {
         // safety: we were read under our guard, at which point the tree
@@ -677,7 +702,9 @@ impl<K, V> TreeBin<K, V> {
         // `p` is actually dropped.
         #[allow(unused_unsafe)]
         unsafe {
-            guard.defer_destroy(p_deref.node.value.load(Ordering::Relaxed, guard));
+            if drop_value {
+                guard.defer_destroy(p_deref.node.value.load(Ordering::Relaxed, guard));
+            }
             guard.defer_destroy(p);
         }
 
@@ -711,9 +738,9 @@ where
             // the current root is `null`, i.e. the tree is currently empty.
             // This, we simply insert the new entry as the root.
             let tree_node = Owned::new(BinEntry::TreeNode(TreeNode::new(
+                hash,
                 key,
                 Atomic::from(value),
-                hash,
                 Atomic::null(),
                 Atomic::null(),
             )))
@@ -769,9 +796,9 @@ where
                 // hash and key of the new entry)
                 let first = self.first.load(Ordering::SeqCst, guard);
                 let x = Owned::new(BinEntry::TreeNode(TreeNode::new(
+                    hash,
                     key,
                     Atomic::from(value),
-                    hash,
                     Atomic::from(first),
                     Atomic::from(xp),
                 )))
@@ -835,6 +862,25 @@ impl<K, V> Drop for TreeBin<K, V> {
 }
 
 impl<K, V> TreeBin<K, V> {
+    /// Defers dropping the given tree bin without its nodes' values.
+    ///
+    /// # Safety
+    /// The given bin must be a valid, non-null BinEntry::TreeBin and the caller must ensure
+    /// that no references to the bin can be obtained by other threads after the call to this
+    /// method.
+    pub(crate) unsafe fn defer_drop_without_values<'g>(
+        bin: Shared<'g, BinEntry<K, V>>,
+        guard: &'g Guard,
+    ) {
+        guard.defer_unchecked(move || {
+            if let BinEntry::Tree(mut tree_bin) = *bin.into_owned().into_box() {
+                tree_bin.drop_fields(false);
+            } else {
+                unreachable!("bin is a tree bin");
+            }
+        });
+    }
+
     /// Drops the given tree bin, but only drops its nodes' values when specified.
     ///
     /// # Safety
@@ -846,7 +892,7 @@ impl<K, V> TreeBin<K, V> {
         // assume ownership of atomically shared references. note that it is
         // sufficient to follow the `next` pointers of the `first` element in
         // the bin, since the tree pointers point to the same nodes.
-        let waiter = self.waiter.load(Ordering::SeqCst, guard);
+        let waiter = self.waiter.swap(Shared::null(), Ordering::Relaxed, guard);
         if !waiter.is_null() {
             let _ = waiter.into_owned();
         }
