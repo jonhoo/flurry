@@ -57,10 +57,10 @@ macro_rules! load_factor {
 ///
 /// Flurry uses an [`Guards`] to control the lifetime of the resources that get stored and
 /// extracted from the map. [`Guards`] are acquired through the [`epoch::pin`], [`HashMap::pin`]
-/// and [`HashMap::guard`] functions. For more information, see the [`notes in the crate-level
-/// documentation`].
+/// and [`HashMap::guard`] functions. For more information, see the [notes in the crate-level
+/// documentation].
 ///
-/// [`notes in the crate-level documentation`]: index.html#a-note-on-guard-and-memory-use
+/// [notes in the crate-level documentation]: index.html#a-note-on-guard-and-memory-use
 /// [`Guards`]: index.html#a-note-on-guard-and-memory-use
 pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// The array of bins. Lazily initialized upon first insertion.
