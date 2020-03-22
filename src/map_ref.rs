@@ -154,6 +154,14 @@ where
         self.map.insert(key, value, &self.guard)
     }
 
+    #[inline]
+    /// Maps `key` to `value` in this table if, and only if, `key` is not
+    /// already mapped to a value.
+    /// See also [`HashMap::try_insert`].
+    pub fn try_insert(&self, key: K, value: V) -> Option<&'_ V> {
+        self.map.try_insert(key, value, &self.guard)
+    }
+
     /// If the value for the specified `key` is present, attempts to
     /// compute a new mapping given the key and its current mapped value.
     /// See also [`HashMap::compute_if_present`].
