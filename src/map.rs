@@ -133,27 +133,6 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     build_hasher: S,
 }
 
-#[cfg(test)]
-#[test]
-#[should_panic]
-fn disallow_evil() {
-    let map: HashMap<_, _> = HashMap::default();
-    map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
-
-    let evil = crossbeam_epoch::Collector::new();
-    let evil = evil.register();
-    let guard = evil.pin();
-    let oops = map.get(&42, &guard);
-
-    map.remove(&42, &crossbeam_epoch::pin());
-    // at this point, the default collector is allowed to free `"hello"`
-    // since no-one has the global epoch pinned as far as it is aware.
-    // `oops` is tied to the lifetime of a Guard that is not a part of
-    // the same epoch group, and so can now be dangling.
-    // but we can still access it!
-    assert_eq!(oops.unwrap(), "hello");
-}
-
 // ===
 // the following methods only see Ks and Vs if there have been inserts.
 // modifications to the map are all guarded by thread-safety bounds (Send + Sync + 'static).
@@ -2496,4 +2475,25 @@ fn replace_twice() {
         assert_eq!(old, Some((&42, &43)));
         assert_eq!(*map.get(&42, &guard).unwrap(), 44);
     }
+}
+
+#[cfg(test)]
+#[test]
+#[should_panic]
+fn disallow_evil() {
+    let map: HashMap<_, _> = HashMap::default();
+    map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
+
+    let evil = crossbeam_epoch::Collector::new();
+    let evil = evil.register();
+    let guard = evil.pin();
+    let oops = map.get(&42, &guard);
+
+    map.remove(&42, &crossbeam_epoch::pin());
+    // at this point, the default collector is allowed to free `"hello"`
+    // since no-one has the global epoch pinned as far as it is aware.
+    // `oops` is tied to the lifetime of a Guard that is not a part of
+    // the same epoch group, and so can now be dangling.
+    // but we can still access it!
+    assert_eq!(oops.unwrap(), "hello");
 }
