@@ -160,7 +160,7 @@ impl<'a, T> PutResult<'a, T> {
 }
 
 /// The error type for the [`HashMap::try_insert`] method.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct TryInsertError<'a, V> {
     /// A reference to the old value mapped to the key.
     pub old: &'a V,
