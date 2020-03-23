@@ -133,25 +133,29 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     build_hasher: S,
 }
 
-#[cfg(test)]
-#[test]
-#[should_panic]
-fn disallow_evil() {
-    let map: HashMap<_, _> = HashMap::default();
-    map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
+enum PutResult<'a, T> {
+    Inserted { new: &'a T },
+    Replaced { old: &'a T, new: &'a T },
+    Exists { old: &'a T },
+}
 
-    let evil = crossbeam_epoch::Collector::new();
-    let evil = evil.register();
-    let guard = evil.pin();
-    let oops = map.get(&42, &guard);
+impl<'a, T> PutResult<'a, T> {
+    fn before(&self) -> Option<&'a T> {
+        match *self {
+            PutResult::Inserted { .. } => None,
+            PutResult::Replaced { old, .. } => Some(old),
+            PutResult::Exists { old, .. } => Some(old),
+        }
+    }
 
-    map.remove(&42, &crossbeam_epoch::pin());
-    // at this point, the default collector is allowed to free `"hello"`
-    // since no-one has the global epoch pinned as far as it is aware.
-    // `oops` is tied to the lifetime of a Guard that is not a part of
-    // the same epoch group, and so can now be dangling.
-    // but we can still access it!
-    assert_eq!(oops.unwrap(), "hello");
+    #[allow(dead_code)]
+    fn after(&self) -> Option<&'a T> {
+        match *self {
+            PutResult::Inserted { new } => Some(new),
+            PutResult::Replaced { new, .. } => Some(new),
+            PutResult::Exists { .. } => None,
+        }
+    }
 }
 
 // ===
@@ -1346,7 +1350,7 @@ where
     /// ```
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.check_guard(guard);
-        self.put(key, value, false, guard)
+        self.put(key, value, false, guard).before()
     }
 
     /// Inserts a key-value pair into the map unless the key already exists.
@@ -1387,14 +1391,15 @@ where
         value: V,
         no_replacement: bool,
         guard: &'g Guard,
-    ) -> Option<&'g V> {
+    ) -> PutResult<'g, V> {
         let h = self.hash(&key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
 
+        let value = Owned::new(value).into_shared(guard);
         let mut node = Owned::new(BinEntry::Node(Node {
             key,
-            value: Atomic::new(value),
+            value: Atomic::from(value),
             hash: h,
             next: Atomic::null(),
             lock: parking_lot::Mutex::new(()),
@@ -1434,7 +1439,15 @@ where
                     Ok(_old_null_ptr) => {
                         self.add_count(1, Some(0), guard);
                         guard.flush();
-                        return None;
+                        // safety: we have not moved the node's value since we placed it into
+                        // its `Atomic` in the very beginning of the method, so the ref is still
+                        // valid. since the value is not currently marked as garbage, we know it
+                        // will not collected until at least one epoch passes, and since `value`
+                        // was produced under a guard the pins the current epoch, the returned
+                        // reference will remain valid for the guard's lifetime.
+                        return PutResult::Inserted {
+                            new: unsafe { value.deref() },
+                        };
                     }
                     Err(changed) => {
                         assert!(!changed.current.is_null());
@@ -1472,7 +1485,9 @@ where
                     // safety: since the value is present now, and we've held a guard from the
                     // beginning of the search, the value cannot be dropped until the next epoch,
                     // which won't arrive until after we drop our guard.
-                    return Some(unsafe { v.deref() });
+                    return PutResult::Exists {
+                        old: unsafe { v.deref() },
+                    };
                 }
                 BinEntry::Node(ref head) => {
                     // bin is non-empty, need to link into it, so we must take the lock
@@ -1510,13 +1525,15 @@ where
 
                             if no_replacement {
                                 // the key is not absent, so don't update
-                            } else if let BinEntry::Node(Node { value, .. }) = *node.into_box() {
-                                // safety: we own value and have never shared it
-                                let now_garbage = n.value.swap(
-                                    unsafe { value.into_owned() },
-                                    Ordering::SeqCst,
-                                    guard,
-                                );
+                            } else {
+                                // drop the node we made -- we won't need it
+                                // TODO: we should avoid allocating the node if we won't need it.
+                                let _ = node.into_box();
+                                // then update the value in the existing node
+                                // NOTE: using `value` after dropping the `BinEntry` for `node` is
+                                // fine here -- the value is behind an `Atomic`, which doesn't
+                                // automatically drop its target when dropped.
+                                let now_garbage = n.value.swap(value, Ordering::SeqCst, guard);
                                 // NOTE: now_garbage == current_value
 
                                 // safety: need to guarantee that now_garbage is no longer
@@ -1539,8 +1556,6 @@ where
                                 //    `value` field (which is what we swapped), so freeing
                                 //    now_garbage is fine.
                                 unsafe { guard.defer_destroy(now_garbage) };
-                            } else {
-                                unreachable!();
                             }
                             break Some(current_value);
                         }
@@ -1565,7 +1580,22 @@ where
                         self.add_count(1, Some(bin_count), guard);
                     }
                     guard.flush();
-                    return old_val;
+
+                    // safety: we have not moved the node's value since we placed it into its
+                    // `Atomic` in the very beginning of the method, so the ref is still valid.
+                    // since the value is not currently marked as garbage, we know it will not
+                    // collected until at least one epoch passes, and since `value` was produced
+                    // under a guard the pins the current epoch, the returned reference will remain
+                    // valid for the guard's lifetime.
+                    return match old_val {
+                        Some(old_val) => PutResult::Replaced {
+                            old: old_val,
+                            new: unsafe { value.deref() },
+                        },
+                        None => PutResult::Inserted {
+                            new: unsafe { value.deref() },
+                        },
+                    };
                 }
             }
         }
@@ -2529,4 +2559,25 @@ fn replace_twice() {
         assert_eq!(old, Some((&42, &43)));
         assert_eq!(*map.get(&42, &guard).unwrap(), 44);
     }
+}
+
+#[cfg(test)]
+#[test]
+#[should_panic]
+fn disallow_evil() {
+    let map: HashMap<_, _> = HashMap::default();
+    map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
+
+    let evil = crossbeam_epoch::Collector::new();
+    let evil = evil.register();
+    let guard = evil.pin();
+    let oops = map.get(&42, &guard);
+
+    map.remove(&42, &crossbeam_epoch::pin());
+    // at this point, the default collector is allowed to free `"hello"`
+    // since no-one has the global epoch pinned as far as it is aware.
+    // `oops` is tied to the lifetime of a Guard that is not a part of
+    // the same epoch group, and so can now be dangling.
+    // but we can still access it!
+    assert_eq!(oops.unwrap(), "hello");
 }
