@@ -3,7 +3,8 @@ use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
 use std::borrow::Borrow;
-use std::fmt::{self, Debug, Formatter};
+use std::error::Error;
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
 use std::sync::{
@@ -166,7 +167,31 @@ pub struct TryInsertError<'a, V> {
     pub old: &'a V,
     /// A reference to the new value, the one passed as an argument to
     /// [`HashMap::try_insert`].
-    pub not_inserted: &'a V,
+    pub not_inserted: V,
+}
+
+impl<'a, V> Display for TryInsertError<'a, V>
+where
+    V: Display,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "The value \"{}\" was inserted into the map, but the value \"{}\" was already associated with that key", 
+            self.not_inserted,
+            self.old
+        )
+    }
+}
+
+impl<'a, V> Error for TryInsertError<'a, V>
+where
+    V: Debug + Display,
+{
+    #[inline]
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
+    }
 }
 
 // ===
@@ -1396,7 +1421,7 @@ where
         match self.put(key, value, true, guard) {
             PutResult::Exists { old, not_inserted } => Err(TryInsertError {
                 old,
-                not_inserted: Box::leak(not_inserted),
+                not_inserted: *not_inserted,
             }),
             PutResult::Inserted { new } => Ok(new),
             PutResult::Replaced { .. } => {
