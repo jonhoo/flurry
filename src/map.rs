@@ -133,6 +133,31 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     build_hasher: S,
 }
 
+enum PutResult<'a, T> {
+    Inserted { new: &'a T },
+    Replaced { old: &'a T, new: &'a T },
+    Exists { old: &'a T },
+}
+
+impl<'a, T> PutResult<'a, T> {
+    fn before(&self) -> Option<&'a T> {
+        match *self {
+            PutResult::Inserted { .. } => None,
+            PutResult::Replaced { old, .. } => Some(old),
+            PutResult::Exists { old, .. } => Some(old),
+        }
+    }
+
+    #[allow(dead_code)]
+    fn after(&self) -> Option<&'a T> {
+        match *self {
+            PutResult::Inserted { new } => Some(new),
+            PutResult::Replaced { new, .. } => Some(new),
+            PutResult::Exists { .. } => None,
+        }
+    }
+}
+
 // ===
 // the following methods only see Ks and Vs if there have been inserts.
 // modifications to the map are all guarded by thread-safety bounds (Send + Sync + 'static).
@@ -1324,7 +1349,7 @@ where
     /// ```
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.check_guard(guard);
-        self.put(key, value, false, guard)
+        self.put(key, value, false, guard).before()
     }
 
     fn put<'g>(
@@ -1333,14 +1358,16 @@ where
         value: V,
         no_replacement: bool,
         guard: &'g Guard,
-    ) -> Option<&'g V> {
+    ) -> PutResult<'g, V> {
         let h = self.hash(&key);
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
 
+        let value = Atomic::new(value);
+        let new_value_ref = value.load(Ordering::Relaxed, guard);
         let mut node = Owned::new(BinEntry::Node(Node {
             key,
-            value: Atomic::new(value),
+            value,
             hash: h,
             next: Atomic::null(),
             lock: parking_lot::Mutex::new(()),
@@ -1380,7 +1407,15 @@ where
                     Ok(_old_null_ptr) => {
                         self.add_count(1, Some(0), guard);
                         guard.flush();
-                        return None;
+                        // safety: we have not moved the node's value since we placed it into
+                        // its `Atomic` in the very beginning of the method, so the ref is still
+                        // valid. since the value is not currently marked as garbage, we know it
+                        // will not collected until at least one epoch passes, and since
+                        // `new_value_ref` was loaded under a guard the pins the current epoch, the
+                        // returned reference will remain valid for the guard's lifetime.
+                        return PutResult::Inserted {
+                            new: unsafe { new_value_ref.deref() },
+                        };
                     }
                     Err(changed) => {
                         assert!(!changed.current.is_null());
@@ -1418,7 +1453,9 @@ where
                     // safety: since the value is present now, and we've held a guard from the
                     // beginning of the search, the value cannot be dropped until the next epoch,
                     // which won't arrive until after we drop our guard.
-                    return Some(unsafe { v.deref() });
+                    return PutResult::Exists {
+                        old: unsafe { v.deref() },
+                    };
                 }
                 BinEntry::Node(ref head) => {
                     // bin is non-empty, need to link into it, so we must take the lock
@@ -1456,13 +1493,16 @@ where
 
                             if no_replacement {
                                 // the key is not absent, so don't update
-                            } else if let BinEntry::Node(Node { value, .. }) = *node.into_box() {
-                                // safety: we own value and have never shared it
-                                let now_garbage = n.value.swap(
-                                    unsafe { value.into_owned() },
-                                    Ordering::SeqCst,
-                                    guard,
-                                );
+                            } else {
+                                // drop the node we made -- we won't need it
+                                // TODO: we should avoid allocating the node if we won't need it.
+                                let _ = node.into_box();
+                                // then update the value in the existing node
+                                // NOTE: using `new_value_ref` after dropping the `BinEntry` for
+                                // `node` is fine here -- the value is behind an `Atomic`, which
+                                // doesn't automatically drop its target when dropped.
+                                let now_garbage =
+                                    n.value.swap(new_value_ref, Ordering::SeqCst, guard);
                                 // NOTE: now_garbage == current_value
 
                                 // safety: need to guarantee that now_garbage is no longer
@@ -1485,8 +1525,6 @@ where
                                 //    `value` field (which is what we swapped), so freeing
                                 //    now_garbage is fine.
                                 unsafe { guard.defer_destroy(now_garbage) };
-                            } else {
-                                unreachable!();
                             }
                             break Some(current_value);
                         }
@@ -1511,7 +1549,22 @@ where
                         self.add_count(1, Some(bin_count), guard);
                     }
                     guard.flush();
-                    return old_val;
+
+                    // safety: we have not moved the node's value since we placed it into
+                    // its `Atomic` in the very beginning of the method, so the ref is still
+                    // valid. since the value is not currently marked as garbage, we know it
+                    // will not collected until at least one epoch passes, and since
+                    // `new_value_ref` was loaded under a guard the pins the current epoch, the
+                    // returned reference will remain valid for the guard's lifetime.
+                    return match old_val {
+                        Some(old_val) => PutResult::Replaced {
+                            old: old_val,
+                            new: unsafe { new_value_ref.deref() },
+                        },
+                        None => PutResult::Inserted {
+                            new: unsafe { new_value_ref.deref() },
+                        },
+                    };
                 }
             }
         }
