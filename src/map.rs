@@ -135,17 +135,9 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 enum PutResult<'a, T> {
-    Inserted {
-        new: &'a T,
-    },
-    Replaced {
-        old: &'a T,
-        new: &'a T,
-    },
-    Exists {
-        old: &'a T,
-        not_inserted: Box<T>,
-    },
+    Inserted { new: &'a T },
+    Replaced { old: &'a T, new: &'a T },
+    Exists { old: &'a T, not_inserted: Box<T> },
 }
 
 impl<'a, T> PutResult<'a, T> {
