@@ -1373,15 +1373,15 @@ where
     ///
     /// mref.insert(37, "a");
     /// assert_eq!(mref.try_insert(37, "b"), Err(&"a"));
-    /// assert_eq!(mref.try_insert(42, "c"), Ok(()));
+    /// assert_eq!(mref.try_insert(42, "c"), Ok(&"c"));
     /// assert_eq!(mref.get(&37), Some(&"a"));
     /// assert_eq!(mref.get(&42), Some(&"c"));
     /// ```
     #[inline]
-    pub fn try_insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Result<(), &'g V> {
+    pub fn try_insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Result<&'g V, &'g V> {
         match self.put(key, value, true, guard) {
-            Some(val) => Err(val),
-            None => Ok(()),
+            PutResult::Replaced { old, .. } | PutResult::Exists { old } => Err(old),
+            PutResult::Inserted { new } => Ok(new),
         }
     }
 

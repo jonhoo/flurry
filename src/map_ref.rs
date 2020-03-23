@@ -159,7 +159,7 @@ where
     ///
     /// See also [`HashMap::try_insert`].
     #[inline]
-    pub fn try_insert(&self, key: K, value: V) -> Result<(), &'_ V> {
+    pub fn try_insert(&self, key: K, value: V) -> Result<&'_ V, &'_ V> {
         self.map.try_insert(key, value, &self.guard)
     }
 
