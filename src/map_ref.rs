@@ -1,5 +1,5 @@
 use crate::iter::*;
-use crate::{HashMap, TryInsertResult};
+use crate::{HashMap, TryInsertError};
 use crossbeam_epoch::Guard;
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
@@ -159,7 +159,7 @@ where
     ///
     /// See also [`HashMap::try_insert`].
     #[inline]
-    pub fn try_insert(&self, key: K, value: V) -> TryInsertResult<'_, V> {
+    pub fn try_insert(&self, key: K, value: V) -> Result<&'_ V, TryInsertError<'_, V>> {
         self.map.try_insert(key, value, &self.guard)
     }
 
