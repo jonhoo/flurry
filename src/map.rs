@@ -1348,18 +1348,16 @@ where
         self.put(key, value, false, guard)
     }
 
-    #[inline]
     /// Tries to insert a key-value pair into the map.
     ///
-    /// If the map did not have this key present, [`None`] is returned and the
+    /// If the map did not have this key present, `Ok(())` is returned and the
     /// key-value pair is inserted into the map.
     ///
-    /// If the map did have this key present, and the old value is returned.
+    /// If the map did have this key present, the old value is returned.
     /// Neither the key or value are updated; this matters for types that can
     /// be `==` without being identical. See the [std-collections
     /// documentation] for more.
     ///
-    /// [`None`]: std::option::Option::None
     /// [std-collections documentation]: https://doc.rust-lang.org/std/collections/index.html#insert-and-complex-keys
     ///
     /// # Examples
@@ -1371,13 +1369,17 @@ where
     /// let mref = map.pin();
     ///
     /// mref.insert(37, "a");
-    /// assert_eq!(mref.try_insert(37, "b"), Some(&"a"));
-    /// assert_eq!(mref.try_insert(42, "c"), None);
+    /// assert_eq!(mref.try_insert(37, "b"), Err(&"a"));
+    /// assert_eq!(mref.try_insert(42, "c"), Ok(()));
     /// assert_eq!(mref.get(&37), Some(&"a"));
     /// assert_eq!(mref.get(&42), Some(&"c"));
     /// ```
-    pub fn try_insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
-        self.put(key, value, true, guard)
+    #[inline]
+    pub fn try_insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Result<(), &'g V> {
+        match self.put(key, value, true, guard) {
+            Some(val) => Err(val),
+            None => Ok(())
+        }
     }
 
     fn put<'g>(
