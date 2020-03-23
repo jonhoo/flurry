@@ -144,7 +144,6 @@ enum PutResult<'a, T> {
     },
     Exists {
         old: &'a T,
-        #[allow(dead_code)]
         not_inserted: Box<T>,
     },
 }
