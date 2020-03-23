@@ -1363,11 +1363,10 @@ where
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
 
-        let value = Atomic::new(value);
-        let new_value_ref = value.load(Ordering::Relaxed, guard);
+        let value = Owned::new(value).into_shared(guard);
         let mut node = Owned::new(BinEntry::Node(Node {
             key,
-            value,
+            value: Atomic::from(value),
             hash: h,
             next: Atomic::null(),
             lock: parking_lot::Mutex::new(()),
@@ -1410,11 +1409,11 @@ where
                         // safety: we have not moved the node's value since we placed it into
                         // its `Atomic` in the very beginning of the method, so the ref is still
                         // valid. since the value is not currently marked as garbage, we know it
-                        // will not collected until at least one epoch passes, and since
-                        // `new_value_ref` was loaded under a guard the pins the current epoch, the
-                        // returned reference will remain valid for the guard's lifetime.
+                        // will not collected until at least one epoch passes, and since `value`
+                        // was produced under a guard the pins the current epoch, the returned
+                        // reference will remain valid for the guard's lifetime.
                         return PutResult::Inserted {
-                            new: unsafe { new_value_ref.deref() },
+                            new: unsafe { value.deref() },
                         };
                     }
                     Err(changed) => {
@@ -1498,11 +1497,10 @@ where
                                 // TODO: we should avoid allocating the node if we won't need it.
                                 let _ = node.into_box();
                                 // then update the value in the existing node
-                                // NOTE: using `new_value_ref` after dropping the `BinEntry` for
-                                // `node` is fine here -- the value is behind an `Atomic`, which
-                                // doesn't automatically drop its target when dropped.
-                                let now_garbage =
-                                    n.value.swap(new_value_ref, Ordering::SeqCst, guard);
+                                // NOTE: using `value` after dropping the `BinEntry` for `node` is
+                                // fine here -- the value is behind an `Atomic`, which doesn't
+                                // automatically drop its target when dropped.
+                                let now_garbage = n.value.swap(value, Ordering::SeqCst, guard);
                                 // NOTE: now_garbage == current_value
 
                                 // safety: need to guarantee that now_garbage is no longer
@@ -1550,19 +1548,19 @@ where
                     }
                     guard.flush();
 
-                    // safety: we have not moved the node's value since we placed it into
-                    // its `Atomic` in the very beginning of the method, so the ref is still
-                    // valid. since the value is not currently marked as garbage, we know it
-                    // will not collected until at least one epoch passes, and since
-                    // `new_value_ref` was loaded under a guard the pins the current epoch, the
-                    // returned reference will remain valid for the guard's lifetime.
+                    // safety: we have not moved the node's value since we placed it into its
+                    // `Atomic` in the very beginning of the method, so the ref is still valid.
+                    // since the value is not currently marked as garbage, we know it will not
+                    // collected until at least one epoch passes, and since `value` was produced
+                    // under a guard the pins the current epoch, the returned reference will remain
+                    // valid for the guard's lifetime.
                     return match old_val {
                         Some(old_val) => PutResult::Replaced {
                             old: old_val,
-                            new: unsafe { new_value_ref.deref() },
+                            new: unsafe { value.deref() },
                         },
                         None => PutResult::Inserted {
-                            new: unsafe { new_value_ref.deref() },
+                            new: unsafe { value.deref() },
                         },
                     };
                 }
