@@ -1324,12 +1324,10 @@ where
     /// If the map did not have this key present, [`None`] is returned.
     ///
     /// If the map did have this key present, the value is updated, and the old
-    /// value is returned. The key is not updated, though; this matters for
-    /// types that can be [`Eq`] without being identical. See the
-    /// [std-collections documentation] for more.
+    /// value is returned. The key is left unchanged. See the [std-collections
+    /// documentation] for more.
     ///
     /// [`None`]: std::option::Option::None
-    /// [`Eq`]: std::cmp::Eq
     /// [std-collections documentation]: https://doc.rust-lang.org/std/collections/index.html#insert-and-complex-keys
     ///
     /// # Examples
