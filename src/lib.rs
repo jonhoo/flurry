@@ -223,7 +223,7 @@ mod set;
 /// Iterator types.
 pub mod iter;
 
-pub use map::HashMap;
+pub use map::{HashMap, TryInsertError, TryInsertResult};
 pub use map_ref::HashMapRef;
 pub use set::HashSet;
 

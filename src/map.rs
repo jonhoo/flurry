@@ -168,6 +168,19 @@ impl<'a, T> PutResult<'a, T> {
     }
 }
 
+/// The error type for the [`HashMap::try_insert`] method.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TryInsertError<'a, V> {
+    /// A reference to the old value mapped to the key.
+    pub old: &'a V,
+    /// A reference to the new value, the one passed as an argument to
+    /// [`HashMap::try_insert`].
+    pub not_inserted: &'a V,
+}
+
+/// The return type of [`HashMap::try_insert`].
+pub type TryInsertResult<'a, V> = Result<&'a V, TryInsertError<'a, V>>;
+
 // ===
 // the following methods only see Ks and Vs if there have been inserts.
 // modifications to the map are all guarded by thread-safety bounds (Send + Sync + 'static).
@@ -1374,21 +1387,24 @@ where
     /// # Examples
     ///
     /// ```
-    /// use flurry::HashMap;
+    /// use flurry::{HashMap, TryInsertError};
     ///
     /// let map = HashMap::new();
     /// let mref = map.pin();
     ///
     /// mref.insert(37, "a");
-    /// assert_eq!(mref.try_insert(37, "b"), Err(&"a"));
+    /// assert_eq!(mref.try_insert(37, "b"), Err(TryInsertError { old: &"a", not_inserted: &"b"}));
     /// assert_eq!(mref.try_insert(42, "c"), Ok(&"c"));
     /// assert_eq!(mref.get(&37), Some(&"a"));
     /// assert_eq!(mref.get(&42), Some(&"c"));
     /// ```
     #[inline]
-    pub fn try_insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Result<&'g V, &'g V> {
+    pub fn try_insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> TryInsertResult<'g, V> {
         match self.put(key, value, true, guard) {
-            PutResult::Exists { old, .. } => Err(old),
+            PutResult::Exists { old, not_inserted } => Err(TryInsertError {
+                old,
+                not_inserted: Box::leak(not_inserted),
+            }),
             PutResult::Inserted { new } => Ok(new),
             PutResult::Replaced { .. } => unreachable!(
                 "When no_replacement = true, you should never get Put::Result::Replaced"
