@@ -149,13 +149,15 @@ where
     S: BuildHasher,
 {
     /// Maps `key` to `value` in this table.
+    ///
     /// See also [`HashMap::insert`].
     pub fn insert(&self, key: K, value: V) -> Option<&'_ V> {
         self.map.insert(key, value, &self.guard)
     }
 
-    /// Maps `key` to `value` in this table if, and only if, `key` is not
-    /// already mapped to a value.
+    /// Maps `key` to `value` in this table unless `key` is already mapped to a
+    /// value.
+    ///
     /// See also [`HashMap::try_insert`].
     #[inline]
     pub fn try_insert(&self, key: K, value: V) -> Result<(), &'_ V> {

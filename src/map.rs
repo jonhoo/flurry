@@ -1348,15 +1348,13 @@ where
         self.put(key, value, false, guard)
     }
 
-    /// Tries to insert a key-value pair into the map.
+    /// Insert a key-value pair into the map unless the key already exists.
     ///
-    /// If the map did not have this key present, `Ok(())` is returned and the
-    /// key-value pair is inserted into the map.
+    /// If the map does not contain the key, the key-value pair is inserted
+    /// and this method returns `Ok`.
     ///
-    /// If the map did have this key present, the old value is returned.
-    /// Neither the key or value are updated; this matters for types that can
-    /// be `==` without being identical. See the [std-collections
-    /// documentation] for more.
+    /// If the map does contain the key, the map is left unchanged and this
+    /// method returns `Err`.
     ///
     /// [std-collections documentation]: https://doc.rust-lang.org/std/collections/index.html#insert-and-complex-keys
     ///
