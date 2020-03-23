@@ -1378,8 +1378,11 @@ where
     #[inline]
     pub fn try_insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Result<&'g V, &'g V> {
         match self.put(key, value, true, guard) {
-            PutResult::Replaced { old, .. } | PutResult::Exists { old } => Err(old),
+            PutResult::Exists { old } => Err(old),
             PutResult::Inserted { new } => Ok(new),
+            PutResult::Replaced { .. } => unrechable!(
+                "When no_replacement = true, you should never get Put::Result::Replaced"
+            ),
         }
     }
 
