@@ -1378,7 +1378,7 @@ where
     pub fn try_insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Result<(), &'g V> {
         match self.put(key, value, true, guard) {
             Some(val) => Err(val),
-            None => Ok(())
+            None => Ok(()),
         }
     }
 
