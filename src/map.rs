@@ -1406,9 +1406,9 @@ where
                 not_inserted: Box::leak(not_inserted),
             }),
             PutResult::Inserted { new } => Ok(new),
-            PutResult::Replaced { .. } => unreachable!(
-                "no_replacement cannot result in PutResult::Replaced"
-            ),
+            PutResult::Replaced { .. } => {
+                unreachable!("no_replacement cannot result in PutResult::Replaced")
+            }
         }
     }
 
