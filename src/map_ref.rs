@@ -148,15 +148,14 @@ where
     V: 'static + Sync + Send,
     S: BuildHasher,
 {
-    /// Maps `key` to `value` in this table.
+    /// Inserts a key-value pair into the map.
     ///
     /// See also [`HashMap::insert`].
     pub fn insert(&self, key: K, value: V) -> Option<&'_ V> {
         self.map.insert(key, value, &self.guard)
     }
 
-    /// Maps `key` to `value` in this table unless `key` is already mapped to a
-    /// value.
+    /// Inserts a key-value pair into the map unless the key already exists.
     ///
     /// See also [`HashMap::try_insert`].
     #[inline]

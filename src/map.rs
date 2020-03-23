@@ -1348,7 +1348,7 @@ where
         self.put(key, value, false, guard)
     }
 
-    /// Insert a key-value pair into the map unless the key already exists.
+    /// Inserts a key-value pair into the map unless the key already exists.
     ///
     /// If the map does not contain the key, the key-value pair is inserted
     /// and this method returns `Ok`.
