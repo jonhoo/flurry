@@ -1391,7 +1391,7 @@ where
             PutResult::Exists { old, .. } => Err(old),
             PutResult::Inserted { new } => Ok(new),
             PutResult::Replaced { .. } => unreachable!(
-                "When no_replacement = true, you should never get Put::Result::Replaced"
+                "no_replacement cannot result in PutResult::Replaced"
             ),
         }
     }
