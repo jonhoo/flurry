@@ -133,10 +133,20 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     build_hasher: S,
 }
 
+#[derive(Eq, PartialEq, Clone, Debug)]
 enum PutResult<'a, T> {
-    Inserted { new: &'a T },
-    Replaced { old: &'a T, new: &'a T },
-    Exists { old: &'a T },
+    Inserted {
+        new: &'a T,
+    },
+    Replaced {
+        old: &'a T,
+        new: &'a T,
+    },
+    Exists {
+        old: &'a T,
+        #[allow(dead_code)]
+        not_inserted: Box<T>,
+    },
 }
 
 impl<'a, T> PutResult<'a, T> {
@@ -1449,11 +1459,16 @@ where
                 {
                     // fast path if replacement is disallowed and first bin matches
                     let v = head.value.load(Ordering::SeqCst, guard);
-                    // safety: since the value is present now, and we've held a guard from the
-                    // beginning of the search, the value cannot be dropped until the next epoch,
-                    // which won't arrive until after we drop our guard.
+                    drop(node);
+                    // safety (for v): since the value is present now, and we've held a guard from
+                    // the beginning of the search, the value cannot be dropped until the next
+                    // epoch, which won't arrive until after we drop our guard.
+                    // safety (for value): since we never inserted the node or the value in the
+                    // tree, and the node has been dropped, `value` is the last remaining pointer
+                    // to the initial value.
                     return PutResult::Exists {
                         old: unsafe { v.deref() },
+                        not_inserted: unsafe { value.into_owned().into_box() },
                     };
                 }
                 BinEntry::Node(ref head) => {
@@ -2478,6 +2493,23 @@ fn replace_existing() {
         assert_eq!(old, Some((&42, &42)));
         assert_eq!(*map.get(&42, &guard).unwrap(), 10);
         assert_eq!(map.len(), 1);
+    }
+}
+
+#[test]
+fn no_replacement_return_val() {
+    // NOTE: this test also serves as a leak test for the injected value
+    let map = HashMap::<usize, String>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, String::from("hello"), &guard);
+        assert_eq!(
+            map.put(42, String::from("world"), true, &guard),
+            PutResult::Exists {
+                old: &String::from("hello"),
+                not_inserted: Box::new(String::from("world")),
+            }
+        );
     }
 }
 
