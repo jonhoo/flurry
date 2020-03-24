@@ -136,9 +136,17 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
 
 #[derive(Eq, PartialEq, Clone, Debug)]
 enum PutResult<'a, T> {
-    Inserted { new: &'a T },
-    Replaced { old: &'a T, new: &'a T },
-    Exists { old: &'a T, not_inserted: Box<T> },
+    Inserted {
+        new: &'a T,
+    },
+    Replaced {
+        old: &'a T,
+        new: &'a T,
+    },
+    Exists {
+        current: &'a T,
+        not_inserted: Box<T>,
+    },
 }
 
 impl<'a, T> PutResult<'a, T> {
@@ -146,7 +154,7 @@ impl<'a, T> PutResult<'a, T> {
         match *self {
             PutResult::Inserted { .. } => None,
             PutResult::Replaced { old, .. } => Some(old),
-            PutResult::Exists { old, .. } => Some(old),
+            PutResult::Exists { current, .. } => Some(current),
         }
     }
 
@@ -163,10 +171,9 @@ impl<'a, T> PutResult<'a, T> {
 /// The error type for the [`HashMap::try_insert`] method.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct TryInsertError<'a, V> {
-    /// A reference to the old value mapped to the key.
-    pub old: &'a V,
-    /// A reference to the new value, the one passed as an argument to
-    /// [`HashMap::try_insert`].
+    /// A reference to the current value mapped to the key.
+    pub current: &'a V,
+    /// The value that [HashMap::try_insert] failed to insert.
     pub not_inserted: V,
 }
 
@@ -178,7 +185,7 @@ where
         write!(
             f,
             "Insert of \"{:?}\" failed as key was already present with value \"{:?}\"",
-            self.not_inserted, self.old
+            self.not_inserted, self.current
         )
     }
 }
@@ -1405,7 +1412,10 @@ where
     /// let mref = map.pin();
     ///
     /// mref.insert(37, "a");
-    /// assert_eq!(mref.try_insert(37, "b"), Err(TryInsertError { old: &"a", not_inserted: &"b"}));
+    /// assert_eq!(
+    ///     mref.try_insert(37, "b"),
+    ///     Err(TryInsertError { current: &"a", not_inserted: &"b"})
+    /// );
     /// assert_eq!(mref.try_insert(42, "c"), Ok(&"c"));
     /// assert_eq!(mref.get(&37), Some(&"a"));
     /// assert_eq!(mref.get(&42), Some(&"c"));
@@ -1418,8 +1428,11 @@ where
         guard: &'g Guard,
     ) -> Result<&'g V, TryInsertError<'g, V>> {
         match self.put(key, value, true, guard) {
-            PutResult::Exists { old, not_inserted } => Err(TryInsertError {
-                old,
+            PutResult::Exists {
+                current,
+                not_inserted,
+            } => Err(TryInsertError {
+                current,
                 not_inserted: *not_inserted,
             }),
             PutResult::Inserted { new } => Ok(new),
@@ -1534,7 +1547,7 @@ where
                     // tree, and the node has been dropped, `value` is the last remaining pointer
                     // to the initial value.
                     return PutResult::Exists {
-                        old: unsafe { v.deref() },
+                        current: unsafe { v.deref() },
                         not_inserted: unsafe { value.into_owned().into_box() },
                     };
                 }
@@ -2573,7 +2586,7 @@ fn no_replacement_return_val() {
         assert_eq!(
             map.put(42, String::from("world"), true, &guard),
             PutResult::Exists {
-                old: &String::from("hello"),
+                current: &String::from("hello"),
                 not_inserted: Box::new(String::from("world")),
             }
         );
