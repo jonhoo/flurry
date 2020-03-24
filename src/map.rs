@@ -173,7 +173,7 @@ impl<'a, T> PutResult<'a, T> {
 pub struct TryInsertError<'a, V> {
     /// A reference to the current value mapped to the key.
     pub current: &'a V,
-    /// The value that [HashMap::try_insert] failed to insert.
+    /// The value that [`HashMap::try_insert`] failed to insert.
     pub not_inserted: V,
 }
 
