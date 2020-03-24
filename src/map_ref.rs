@@ -1,5 +1,5 @@
 use crate::iter::*;
-use crate::HashMap;
+use crate::{HashMap, TryInsertError};
 use crossbeam_epoch::Guard;
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
@@ -148,10 +148,19 @@ where
     V: 'static + Sync + Send,
     S: BuildHasher,
 {
-    /// Maps `key` to `value` in this table.
+    /// Inserts a key-value pair into the map.
+    ///
     /// See also [`HashMap::insert`].
     pub fn insert(&self, key: K, value: V) -> Option<&'_ V> {
         self.map.insert(key, value, &self.guard)
+    }
+
+    /// Inserts a key-value pair into the map unless the key already exists.
+    ///
+    /// See also [`HashMap::try_insert`].
+    #[inline]
+    pub fn try_insert(&self, key: K, value: V) -> Result<&'_ V, TryInsertError<'_, V>> {
+        self.map.try_insert(key, value, &self.guard)
     }
 
     /// If the value for the specified `key` is present, attempts to

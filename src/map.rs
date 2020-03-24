@@ -3,7 +3,8 @@ use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
 use std::borrow::Borrow;
-use std::fmt::{self, Debug, Formatter};
+use std::error::Error;
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
 use std::sync::{
@@ -143,8 +144,7 @@ enum PutResult<'a, T> {
         new: &'a T,
     },
     Exists {
-        old: &'a T,
-        #[allow(dead_code)]
+        current: &'a T,
         not_inserted: Box<T>,
     },
 }
@@ -154,7 +154,7 @@ impl<'a, T> PutResult<'a, T> {
         match *self {
             PutResult::Inserted { .. } => None,
             PutResult::Replaced { old, .. } => Some(old),
-            PutResult::Exists { old, .. } => Some(old),
+            PutResult::Exists { current, .. } => Some(current),
         }
     }
 
@@ -165,6 +165,38 @@ impl<'a, T> PutResult<'a, T> {
             PutResult::Replaced { new, .. } => Some(new),
             PutResult::Exists { .. } => None,
         }
+    }
+}
+
+/// The error type for the [`HashMap::try_insert`] method.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TryInsertError<'a, V> {
+    /// A reference to the current value mapped to the key.
+    pub current: &'a V,
+    /// The value that [`HashMap::try_insert`] failed to insert.
+    pub not_inserted: V,
+}
+
+impl<'a, V> Display for TryInsertError<'a, V>
+where
+    V: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Insert of \"{:?}\" failed as key was already present with value \"{:?}\"",
+            self.not_inserted, self.current
+        )
+    }
+}
+
+impl<'a, V> Error for TryInsertError<'a, V>
+where
+    V: Debug,
+{
+    #[inline]
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
     }
 }
 
@@ -1334,8 +1366,7 @@ where
     /// If the map did not have this key present, [`None`] is returned.
     ///
     /// If the map did have this key present, the value is updated, and the old
-    /// value is returned. The key is not updated, though; this matters for
-    /// types that can be `==` without being identical. See the [std-collections
+    /// value is returned. The key is left unchanged. See the [std-collections
     /// documentation] for more.
     ///
     /// [`None`]: std::option::Option::None
@@ -1360,6 +1391,55 @@ where
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.check_guard(guard);
         self.put(key, value, false, guard).before()
+    }
+
+    /// Inserts a key-value pair into the map unless the key already exists.
+    ///
+    /// If the map does not contain the key, the key-value pair is inserted
+    /// and this method returns `Ok`.
+    ///
+    /// If the map does contain the key, the map is left unchanged and this
+    /// method returns `Err`.
+    ///
+    /// [std-collections documentation]: https://doc.rust-lang.org/std/collections/index.html#insert-and-complex-keys
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::{HashMap, TryInsertError};
+    ///
+    /// let map = HashMap::new();
+    /// let mref = map.pin();
+    ///
+    /// mref.insert(37, "a");
+    /// assert_eq!(
+    ///     mref.try_insert(37, "b"),
+    ///     Err(TryInsertError { current: &"a", not_inserted: &"b"})
+    /// );
+    /// assert_eq!(mref.try_insert(42, "c"), Ok(&"c"));
+    /// assert_eq!(mref.get(&37), Some(&"a"));
+    /// assert_eq!(mref.get(&42), Some(&"c"));
+    /// ```
+    #[inline]
+    pub fn try_insert<'g>(
+        &'g self,
+        key: K,
+        value: V,
+        guard: &'g Guard,
+    ) -> Result<&'g V, TryInsertError<'g, V>> {
+        match self.put(key, value, true, guard) {
+            PutResult::Exists {
+                current,
+                not_inserted,
+            } => Err(TryInsertError {
+                current,
+                not_inserted: *not_inserted,
+            }),
+            PutResult::Inserted { new } => Ok(new),
+            PutResult::Replaced { .. } => {
+                unreachable!("no_replacement cannot result in PutResult::Replaced")
+            }
+        }
     }
 
     fn put<'g>(
@@ -1467,7 +1547,7 @@ where
                     // tree, and the node has been dropped, `value` is the last remaining pointer
                     // to the initial value.
                     return PutResult::Exists {
-                        old: unsafe { v.deref() },
+                        current: unsafe { v.deref() },
                         not_inserted: unsafe { value.into_owned().into_box() },
                     };
                 }
@@ -2506,7 +2586,7 @@ fn no_replacement_return_val() {
         assert_eq!(
             map.put(42, String::from("world"), true, &guard),
             PutResult::Exists {
-                old: &String::from("hello"),
+                current: &String::from("hello"),
                 not_inserted: Box::new(String::from("world")),
             }
         );
