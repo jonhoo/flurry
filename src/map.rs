@@ -172,21 +172,20 @@ pub struct TryInsertError<'a, V> {
 
 impl<'a, V> Display for TryInsertError<'a, V>
 where
-    V: Display,
+    V: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "The value \"{}\" was inserted into the map, but the value \"{}\" was already associated with that key", 
-            self.not_inserted,
-            self.old
+            "Insert of \"{:?}\" failed as key was already present with value \"{:?}\"",
+            self.not_inserted, self.old
         )
     }
 }
 
 impl<'a, V> Error for TryInsertError<'a, V>
 where
-    V: Debug + Display,
+    V: Debug,
 {
     #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
