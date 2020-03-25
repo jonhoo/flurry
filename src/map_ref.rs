@@ -37,37 +37,45 @@ impl<K, V, S> HashMap<K, V, S> {
 }
 
 impl<K, V, S> HashMapRef<'_, K, V, S> {
-    /// An iterator visiting all key-value pairs in arbitrary order.
-    /// The iterator element type is `(&'g K, &'g V)`.
-    /// See also [`HashMap::iter`].
-    pub fn iter(&self) -> Iter<'_, K, V> {
-        self.map.iter(&self.guard)
-    }
-
-    /// An iterator visiting all keys in arbitrary order.
-    /// The iterator element type is `&'g K`.
-    /// See also [`HashMap::keys`].
-    pub fn keys(&self) -> Keys<'_, K, V> {
-        self.map.keys(&self.guard)
-    }
-
-    /// An iterator visiting all values in arbitrary order.
-    /// The iterator element type is `&'g V`.
-    /// See also [`HashMap::values`].
-    pub fn values(&self) -> Values<'_, K, V> {
-        self.map.values(&self.guard)
-    }
-
     /// Returns the number of entries in the map.
+    ///
     /// See also [`HashMap::len`].
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
     /// Returns `true` if the map is empty. Otherwise returns `false`.
+    ///
     /// See also [`HashMap::is_empty`].
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
+    }
+
+    /// An iterator visiting all key-value pairs in arbitrary order.
+    ///
+    /// The iterator element type is `(&'g K, &'g V)`.
+    ///
+    /// See also [`HashMap::iter`].
+    pub fn iter(&self) -> Iter<'_, K, V> {
+        self.map.iter(&self.guard)
+    }
+
+    /// An iterator visiting all keys in arbitrary order.
+    ///
+    /// The iterator element type is `&'g K`.
+    ///
+    /// See also [`HashMap::keys`].
+    pub fn keys(&self) -> Keys<'_, K, V> {
+        self.map.keys(&self.guard)
+    }
+
+    /// An iterator visiting all values in arbitrary order.
+    ///
+    /// The iterator element type is `&'g V`.
+    ///
+    /// See also [`HashMap::values`].
+    pub fn values(&self) -> Values<'_, K, V> {
+        self.map.values(&self.guard)
     }
 }
 
@@ -75,16 +83,14 @@ impl<K, V, S> HashMapRef<'_, K, V, S>
 where
     K: Clone,
 {
-    /// Tries to reserve capacity for at least additional more elements.
+    /// Tries to reserve capacity for at least `additional` more elements to be inserted in the
+    /// `HashMap`.
+    ///
+    /// The collection may reserve more space to avoid frequent reallocations.
+    ///
     /// See also [`HashMap::reserve`].
     pub fn reserve(&self, additional: usize) {
         self.map.reserve(additional, &self.guard)
-    }
-
-    /// Removes all entries from this map.
-    /// See also [`HashMap::clear`].
-    pub fn clear(&self) {
-        self.map.clear(&self.guard);
     }
 }
 
@@ -93,7 +99,8 @@ where
     K: Hash + Eq,
     S: BuildHasher,
 {
-    /// Tests if `key` is a key in this table.
+    /// Returns `true` if the map contains a value for the specified key.
+    ///
     /// See also [`HashMap::contains_key`].
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
@@ -103,7 +110,8 @@ where
         self.map.contains_key(key, &self.guard)
     }
 
-    /// Returns the value to which `key` is mapped.
+    /// Returns a reference to the value corresponding to the key.
+    ///
     /// See also [`HashMap::get`].
     #[inline]
     pub fn get<'g, Q>(&'g self, key: &Q) -> Option<&'g V>
@@ -115,6 +123,7 @@ where
     }
 
     /// Returns the key-value pair corresponding to `key`.
+    ///
     /// See also [`HashMap::get_key_value`].
     #[inline]
     pub fn get_key_value<'g, Q>(&'g self, key: &Q) -> Option<(&'g K, &'g V)>
@@ -123,6 +132,18 @@ where
         Q: ?Sized + Hash + Eq,
     {
         self.map.get_key_value(key, &self.guard)
+    }
+}
+
+impl<K, V, S> HashMapRef<'_, K, V, S>
+where
+    K: Clone,
+{
+    /// Clears the map, removing all key-value pairs.
+    ///
+    /// See also [`HashMap::clear`].
+    pub fn clear(&self) {
+        self.map.clear(&self.guard);
     }
 }
 
@@ -149,6 +170,7 @@ where
 
     /// If the value for the specified `key` is present, attempts to
     /// compute a new mapping given the key and its current mapped value.
+    ///
     /// See also [`HashMap::compute_if_present`].
     pub fn compute_if_present<'g, Q, F>(&'g self, key: &Q, remapping_function: F) -> Option<&'g V>
     where
@@ -160,7 +182,8 @@ where
             .compute_if_present(key, remapping_function, &self.guard)
     }
 
-    /// Removes the key (and its corresponding value) from this map.
+    /// Removes a key-value pair from the map, and returns the removed value (if any).
+    ///
     /// See also [`HashMap::remove`].
     pub fn remove<'g, Q>(&'g self, key: &Q) -> Option<&'g V>
     where
@@ -170,7 +193,20 @@ where
         self.map.remove(key, &self.guard)
     }
 
+    /// Removes a key from the map, returning the stored key and value if the
+    /// key was previously in the map.
+    ///
+    /// See also [`HashMap::remove_entry`].
+    pub fn remove_entry<'g, Q>(&'g self, key: &Q) -> Option<(&'g K, &'g V)>
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
+    {
+        self.map.remove_entry(key, &self.guard)
+    }
+
     /// Retains only the elements specified by the predicate.
+    ///
     /// See also [`HashMap::retain`].
     pub fn retain<F>(&self, f: F)
     where
@@ -180,6 +216,7 @@ where
     }
 
     /// Retains only the elements specified by the predicate.
+    ///
     /// See also [`HashMap::retain_force`].
     pub fn retain_force<F>(&self, f: F)
     where

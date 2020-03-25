@@ -1051,9 +1051,10 @@ where
         }
     }
 
-    /// Tries to reserve capacity for at least `additional` more elements to
-    /// be inserted in the `HashMap`. The collection may reserve more space to
-    /// avoid frequent reallocations.
+    /// Tries to reserve capacity for at least `additional` more elements to be inserted in the
+    /// `HashMap`.
+    ///
+    /// The collection may reserve more space to avoid frequent reallocations.
     ///
     /// # Examples
     ///
@@ -1885,8 +1886,7 @@ where
         }
     }
 
-    /// Removes a key from the map, returning a reference to the value at the
-    /// key if the key was previously in the map.
+    /// Removes a key-value pair from the map, and returns the removed value (if any).
     ///
     /// The key may be any borrowed form of the map's key type, but
     /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
@@ -2164,6 +2164,9 @@ where
     ///
     /// In other words, remove all pairs `(k, v)` such that `f(&k,&v)` returns `false`.
     ///
+    /// This method always deletes any key/value pair that `f` returns `false` for, even if if the
+    /// value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
+    ///
     /// # Examples
     ///
     /// ```
@@ -2177,11 +2180,6 @@ where
     /// map.pin().retain_force(|&k, _| k % 2 == 0);
     /// assert_eq!(map.pin().len(), 4);
     /// ```
-    ///
-    /// # Notes
-    ///
-    /// This method always deletes any key/value pair that `f` returns `false` for,
-    /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
     pub fn retain_force<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
