@@ -213,6 +213,8 @@
     intra_doc_link_resolution_failure
 )]
 #![warn(rust_2018_idioms)]
+use crossbeam_epoch::Guard;
+use std::ops::Deref;
 
 mod map;
 mod map_ref;
@@ -233,4 +235,20 @@ pub type DefaultHashBuilder = ahash::RandomState;
 /// Types needed to safely access shared data concurrently.
 pub mod epoch {
     pub use crossbeam_epoch::{pin, Guard};
+}
+
+pub(crate) enum GuardRef<'g> {
+    Owned(Guard),
+    Ref(&'g Guard),
+}
+
+impl Deref for GuardRef<'_> {
+    type Target = Guard;
+
+    #[inline]
+    fn deref(&self) -> &Guard {
+        match *self {
+            GuardRef::Owned(ref guard) | GuardRef::Ref(&ref guard) => guard,
+        }
+    }
 }
