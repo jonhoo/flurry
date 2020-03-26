@@ -36,14 +36,14 @@ impl<T, S> HashSet<T, S> {
 }
 
 impl<T, S> HashSetRef<'_, T, S> {
-    /// An iterator visiting all key-value pairs in arbitrary order.
-    /// The iterator element type is `(&'g K, &'g V)`.
+    /// An iterator visiting all elements in arbitrary order.
+    /// The iterator item type is `&'g T`.
     /// See also [`HashSet::iter`].
     pub fn iter(&self) -> Keys<'_, T, ()> {
         self.set.iter(&self.guard)
     }
 
-    /// Returns the number of entries in the set.
+    /// Returns the number of elements in the set.
     /// See also [`HashSet::len`].
     pub fn len(&self) -> usize {
         self.set.len()
@@ -60,13 +60,13 @@ impl<T, S> HashSetRef<'_, T, S>
 where
     T: Clone,
 {
-    /// Tries to reserve capacity for at least additional more elements.
+    /// Tries to reserve capacity for at least `additional` more elements.
     /// See also [`HashSet::reserve`].
     pub fn reserve(&self, additional: usize) {
         self.set.reserve(additional, &self.guard)
     }
 
-    /// Removes all entries from this set.
+    /// Removes all elements from this set.
     /// See also [`HashSet::clear`].
     pub fn clear(&self) {
         self.set.clear(&self.guard);
@@ -78,8 +78,8 @@ where
     T: Hash + Eq,
     S: BuildHasher,
 {
-    /// Tests if `key` is a key in this table.
-    /// See also [`HashSet::contains_key`].
+    /// Tests if `value` is an element of this set.
+    /// See also [`HashSet::contains`].
     pub fn contains<Q>(&self, value: &Q) -> bool
     where
         T: Borrow<Q>,
@@ -88,7 +88,8 @@ where
         self.set.contains(value, &self.guard)
     }
 
-    /// Returns the value to which `key` is setped.
+    /// Returns a reference to the value in the set, if any, that is equal to the given value.
+    ///
     /// See also [`HashSet::get`].
     #[inline]
     pub fn get<'g, Q>(&'g self, value: &Q) -> Option<&'g T>
@@ -105,14 +106,15 @@ where
     T: 'static + Sync + Send + Clone + Hash + Eq,
     S: BuildHasher,
 {
-    /// Inserts a key-value pair into the set.
+    /// Inserts an element into the set.
     ///
     /// See also [`HashSet::insert`].
     pub fn insert(&self, value: T) -> bool {
         self.set.insert(value, &self.guard)
     }
 
-    /// Removes the key (and its corresponding value) from this set.
+    /// Removes the element from this set.
+    ///
     /// See also [`HashSet::remove`].
     pub fn remove<'g, Q>(&'g self, value: &Q) -> bool
     where
@@ -134,6 +136,7 @@ where
     }
 
     /// Retains only the elements specified by the predicate.
+    ///
     /// See also [`HashSet::retain`].
     pub fn retain<F>(&self, f: F)
     where
