@@ -277,6 +277,89 @@ where
         self.map.get_key_value(value, guard).map(|(k, _)| k)
     }
 
+    /// Returns `true` if `self` has no elements in common with `other`.
+    /// This is equivalent to checking for an empty intersection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use flurry::HashSet;
+    ///
+    /// let a = HashSet::from_iter(&[1, 2, 3]);
+    /// let b = HashSet::new();
+    /// let guard = a.guard();
+    ///
+    /// assert_eq!(a.is_disjoint(&b, &guard), true);
+    /// b.insert(4, &guard);
+    /// assert_eq!(a.is_disjoint(&b, &guard), true);
+    /// b.insert(1, &guard);
+    /// assert_eq!(a.is_disjoint(&b, &guard), false);
+    ///
+    /// ```
+    pub fn is_disjoint(&self, other: &HashSet<T, S>, guard: &Guard) -> bool {
+        for value in self.iter(guard) {
+            if other.contains(&value, guard) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Returns `true` if the set is a subset of another, i.e., `other` contains at least all the values in `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use flurry::HashSet;
+    ///
+    /// let sup = HashSet::from_iter(&[1, 2, 3]);
+    /// let set = HashSet::new();
+    /// let guard = sup.guard();
+    ///
+    /// assert_eq!(set.is_subset(&sup, &guard), true);
+    /// set.insert(2, &guard);
+    /// assert_eq!(set.is_subset(&sup, &guard), true);
+    /// set.insert(4, &guard);
+    /// assert_eq!(set.is_subset(&sup, &guard), false);
+    /// ```
+    pub fn is_subset(&self, other: &HashSet<T, S>, guard: &Guard) -> bool {
+        for value in self.iter(guard) {
+            if !other.contains(&value, guard) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Returns `true` if the set is a superset of another, i.e., `self` contains at least all the values in `other`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use flurry::HashSet;
+    ///
+    /// let sub = HashSet::from_iter(&[1, 2]);
+    /// let set = HashSet::new();
+    /// let guard = sub.guard();
+    ///
+    /// assert_eq!(set.is_superset(&sub, &guard), false);
+    ///
+    /// set.insert(0, &guard);
+    /// set.insert(1, &guard);
+    /// assert_eq!(set.is_superset(&sub, &guard), false);
+    ///
+    /// set.insert(2, &guard);
+    /// assert_eq!(set.is_superset(&sub, &guard), true);
+    /// ```
+    pub fn is_superset(&self, other: &HashSet<T, S>, guard: &Guard) -> bool {
+        other.is_subset(self, guard)
+    }
+
     pub(crate) fn guarded_eq(&self, other: &Self, our_guard: &Guard, their_guard: &Guard) -> bool {
         self.map.guarded_eq(&other.map, our_guard, their_guard)
     }
