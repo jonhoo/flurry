@@ -288,18 +288,22 @@ where
     ///
     /// let a = HashSet::from_iter(&[1, 2, 3]);
     /// let b = HashSet::new();
-    /// let guard = a.guard();
     ///
-    /// assert_eq!(a.is_disjoint(&b, &guard), true);
-    /// b.insert(4, &guard);
-    /// assert_eq!(a.is_disjoint(&b, &guard), true);
-    /// b.insert(1, &guard);
-    /// assert_eq!(a.is_disjoint(&b, &guard), false);
+    /// assert_eq!(a.pin().is_disjoint(&b.pin()), true);
+    /// b.pin().insert(4);
+    /// assert_eq!(a.pin().is_disjoint(&b.pin()), true);
+    /// b.pin().insert(1);
+    /// assert_eq!(a.pin().is_disjoint(&b.pin()), false);
     ///
     /// ```
-    pub fn is_disjoint(&self, other: &HashSet<T, S>, guard: &Guard) -> bool {
-        for value in self.iter(guard) {
-            if other.contains(&value, guard) {
+    pub fn is_disjoint(
+        &self,
+        other: &HashSet<T, S>,
+        our_guard: &Guard,
+        their_guard: &Guard,
+    ) -> bool {
+        for value in self.iter(our_guard) {
+            if other.contains(&value, their_guard) {
                 return false;
             }
         }
@@ -317,17 +321,16 @@ where
     ///
     /// let sup = HashSet::from_iter(&[1, 2, 3]);
     /// let set = HashSet::new();
-    /// let guard = sup.guard();
     ///
-    /// assert_eq!(set.is_subset(&sup, &guard), true);
-    /// set.insert(2, &guard);
-    /// assert_eq!(set.is_subset(&sup, &guard), true);
-    /// set.insert(4, &guard);
-    /// assert_eq!(set.is_subset(&sup, &guard), false);
+    /// assert_eq!(set.pin().is_subset(&sup.pin()), true);
+    /// set.pin().insert(2);
+    /// assert_eq!(set.pin().is_subset(&sup.pin()), true);
+    /// set.pin().insert(4);
+    /// assert_eq!(set.pin().is_subset(&sup.pin()), false);
     /// ```
-    pub fn is_subset(&self, other: &HashSet<T, S>, guard: &Guard) -> bool {
-        for value in self.iter(guard) {
-            if !other.contains(&value, guard) {
+    pub fn is_subset(&self, other: &HashSet<T, S>, our_guard: &Guard, their_guard: &Guard) -> bool {
+        for value in self.iter(our_guard) {
+            if !other.contains(&value, their_guard) {
                 return false;
             }
         }
@@ -345,19 +348,23 @@ where
     ///
     /// let sub = HashSet::from_iter(&[1, 2]);
     /// let set = HashSet::new();
-    /// let guard = sub.guard();
     ///
-    /// assert_eq!(set.is_superset(&sub, &guard), false);
+    /// assert_eq!(set.pin().is_superset(&sub.pin()), false);
     ///
-    /// set.insert(0, &guard);
-    /// set.insert(1, &guard);
-    /// assert_eq!(set.is_superset(&sub, &guard), false);
+    /// set.pin().insert(0);
+    /// set.pin().insert(1);
+    /// assert_eq!(set.pin().is_superset(&sub.pin()), false);
     ///
-    /// set.insert(2, &guard);
-    /// assert_eq!(set.is_superset(&sub, &guard), true);
+    /// set.pin().insert(2);
+    /// assert_eq!(set.pin().is_superset(&sub.pin()), true);
     /// ```
-    pub fn is_superset(&self, other: &HashSet<T, S>, guard: &Guard) -> bool {
-        other.is_subset(self, guard)
+    pub fn is_superset(
+        &self,
+        other: &HashSet<T, S>,
+        our_guard: &Guard,
+        their_guard: &Guard,
+    ) -> bool {
+        other.is_subset(self, their_guard, our_guard)
     }
 
     pub(crate) fn guarded_eq(&self, other: &Self, our_guard: &Guard, their_guard: &Guard) -> bool {
