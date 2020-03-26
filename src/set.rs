@@ -389,7 +389,6 @@ where
     /// set.pin().retain(|&e| e % 2 == 0);
     /// assert_eq!(set.pin().len(), 4);
     /// ```
-    #[inline]
     pub fn retain<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&T) -> bool,
@@ -415,15 +414,15 @@ where
     /// set.pin().clear();
     /// assert!(set.pin().is_empty());
     /// ```
-    #[inline]
     pub fn clear(&self, guard: &Guard) {
         self.map.clear(guard)
     }
 
     /// Tries to reserve capacity for at least `additional` more elements to
-    /// be inserted in the `HashSet`. The collection may reserve more space to
+    /// be inserted in the `HashSet`.
+    ///
+    /// The collection may reserve more space to
     /// avoid frequent reallocations.
-    #[inline]
     pub fn reserve(&self, additional: usize, guard: &Guard) {
         self.map.reserve(additional, guard)
     }
