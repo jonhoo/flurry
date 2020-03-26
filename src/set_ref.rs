@@ -103,22 +103,31 @@ where
     /// Returns `true` if `self` has no elements in common with `other`.
     ///
     /// See also [`HashSet::is_disjoint`].
-    pub fn is_disjoint(&self, other: &HashSet<T, S>) -> bool {
-        self.set.is_disjoint(other, &self.guard)
+    pub fn is_disjoint<Q>(&self, other: &Q) -> bool
+    where
+        Q: AsRef<HashSet<T, S>>,
+    {
+        self.set.is_disjoint(other.as_ref(), &self.guard)
     }
 
     /// Returns `true` if the set is a subset of another, i.e., `other` contains at least all the values in `self`.
     ///
     /// See also [`HashSet::is_subset`].
-    pub fn is_subset(&self, other: &HashSet<T, S>) -> bool {
-        self.set.is_subset(other, &self.guard)
+    pub fn is_subset<Q>(&self, other: &Q) -> bool
+    where
+        Q: AsRef<HashSet<T, S>>,
+    {
+        self.set.is_subset(other.as_ref(), &self.guard)
     }
 
     /// Returns `true` if the set is a superset of another, i.e., `self` contains at least all the values in `other`.
     ///
     /// See also [`HashSet::is_superset`].
-    pub fn is_superset(&self, other: &HashSet<T, S>) -> bool {
-        self.set.is_superset(other, &self.guard)
+    pub fn is_superset<Q>(&self, other: &Q) -> bool
+    where
+        Q: AsRef<HashSet<T, S>>,
+    {
+        self.set.is_superset(other.as_ref(), &self.guard)
     }
 }
 
