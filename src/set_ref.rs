@@ -1,5 +1,5 @@
 use crate::iter::*;
-use crate::{HashSet, GuardRef};
+use crate::{GuardRef, HashSet};
 use crossbeam_epoch::Guard;
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
@@ -122,10 +122,13 @@ where
         self.set.remove(value, &self.guard)
     }
 
+    /// Removes and returns the value in the set, if any, that is equal to the given one.
+    ///
+    /// See also [`HashSet::take`].
     pub fn take<Q>(&self, value: &Q) -> Option<&'_ T>
-        where
-            T: Borrow<Q>,
-            Q:?Sized + Hash + Eq
+    where
+        T: Borrow<Q>,
+        Q: ?Sized + Hash + Eq,
     {
         self.set.take(value, &self.guard)
     }

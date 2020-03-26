@@ -229,6 +229,7 @@ pub mod iter;
 pub use map::{HashMap, TryInsertError};
 pub use map_ref::HashMapRef;
 pub use set::HashSet;
+pub use set_ref::HashSetRef;
 
 /// Default hasher for [`HashMap`].
 pub type DefaultHashBuilder = ahash::RandomState;

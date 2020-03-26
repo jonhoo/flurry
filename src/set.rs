@@ -276,6 +276,10 @@ where
     {
         self.map.get_key_value(value, guard).map(|(k, _)| k)
     }
+
+    pub(crate) fn guarded_eq(&self, other: &Self, our_guard: &Guard, their_guard: &Guard) -> bool {
+        self.map.guarded_eq(&other.map, our_guard, their_guard)
+    }
 }
 
 impl<T, S> HashSet<T, S>
@@ -387,16 +391,16 @@ where
     /// ```
     #[inline]
     pub fn retain<F>(&self, mut f: F, guard: &Guard)
-        where
-            F: FnMut(&T) -> bool,
+    where
+        F: FnMut(&T) -> bool,
     {
         self.map.retain(|value, ()| f(value), guard)
     }
 }
 
 impl<T, S> HashSet<T, S>
-    where
-        T: Clone,
+where
+    T: Clone,
 {
     /// Clears the set, removing all elements.
     ///
@@ -412,12 +416,12 @@ impl<T, S> HashSet<T, S>
     /// assert!(set.pin().is_empty());
     /// ```
     #[inline]
-    pub fn clear(&self, Guard: &Guard) {
+    pub fn clear(&self, guard: &Guard) {
         self.map.clear(guard)
     }
 
-    /// Tries to reserve capacity for at least `additional` more elements to 
-    /// be inserted in the `HashSet`. The collection may reserve more space to 
+    /// Tries to reserve capacity for at least `additional` more elements to
+    /// be inserted in the `HashSet`. The collection may reserve more space to
     /// avoid frequent reallocations.
     #[inline]
     pub fn reserve(&self, additional: usize, guard: &Guard) {
