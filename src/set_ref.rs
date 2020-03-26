@@ -1,10 +1,9 @@
 use crate::iter::*;
-use crate::{HashSet, GuardRef, TryInsertError};
+use crate::{HashSet, GuardRef};
 use crossbeam_epoch::Guard;
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
-use std::ops::Index;
 
 /// A reference to a [`HashSet`], constructed with [`HashSet::pin`] or [`HashSet::with_guard`].
 ///
@@ -15,7 +14,7 @@ pub struct HashSetRef<'set, T, S = crate::DefaultHashBuilder> {
     guard: GuardRef<'set>,
 }
 
-impl<K, V, S> HashSet<T, S> {
+impl<T, S> HashSet<T, S> {
     /// Get a reference to this set with the current thread pinned.
     ///
     /// Keep in mind that for as long as you hold onto this, you are preventing the collection of
@@ -57,9 +56,9 @@ impl<T, S> HashSetRef<'_, T, S> {
     }
 }
 
-impl<K, V, S> HashSetRef<'_, K, V, S>
+impl<T, S> HashSetRef<'_, T, S>
 where
-    K: Clone,
+    T: Clone,
 {
     /// Tries to reserve capacity for at least additional more elements.
     /// See also [`HashSet::reserve`].
@@ -74,9 +73,9 @@ where
     }
 }
 
-impl<K, V, S> HashSetRef<'_, K, V, S>
+impl<T, S> HashSetRef<'_, T, S>
 where
-    K: Hash + Eq,
+    T: Hash + Eq,
     S: BuildHasher,
 {
     /// Tests if `key` is a key in this table.
@@ -92,7 +91,7 @@ where
     /// Returns the value to which `key` is setped.
     /// See also [`HashSet::get`].
     #[inline]
-    pub fn get<'g, Q>(&'g self, value: &Q) -> Option<&'g V>
+    pub fn get<'g, Q>(&'g self, value: &Q) -> Option<&'g T>
     where
         T: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -110,20 +109,7 @@ where
     ///
     /// See also [`HashSet::insert`].
     pub fn insert(&self, value: T) -> bool {
-        self.set.insert(key, value, &self.guard)
-    }
-
-    /// If the value for the specified `key` is present, attempts to
-    /// compute a new setping given the key and its current setped value.
-    /// See also [`HashSet::compute_if_present`].
-    pub fn compute_if_present<'g, Q, F>(&'g self, key: &Q, resetping_function: F) -> Option<&'g V>
-    where
-        K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
-        F: FnOnce(&K, &V) -> Option<V>,
-    {
-        self.set
-            .compute_if_present(key, resetping_function, &self.guard)
+        self.set.insert(value, &self.guard)
     }
 
     /// Removes the key (and its corresponding value) from this set.
@@ -136,30 +122,21 @@ where
         self.set.remove(value, &self.guard)
     }
 
-    pub fn take<'g, Q>(&self, value: &Q) -> Option<&'g T>
+    pub fn take<Q>(&self, value: &Q) -> Option<&'_ T>
         where
             T: Borrow<Q>,
             Q:?Sized + Hash + Eq
     {
-        self.set.take(value, self.guard)
+        self.set.take(value, &self.guard)
     }
 
     /// Retains only the elements specified by the predicate.
     /// See also [`HashSet::retain`].
     pub fn retain<F>(&self, f: F)
     where
-        F: FnMut(&K, &V) -> bool,
+        F: FnMut(&T) -> bool,
     {
         self.set.retain(f, &self.guard);
-    }
-
-    /// Retains only the elements specified by the predicate.
-    /// See also [`HashSet::retain_force`].
-    pub fn retain_force<F>(&self, f: F)
-    where
-        F: FnMut(&K, &V) -> bool,
-    {
-        self.set.retain_force(f, &self.guard);
     }
 }
 
@@ -183,10 +160,7 @@ where
 
 impl<T, S> Clone for HashSetRef<'_, T, S> {
     fn clone(&self) -> Self {
-        Self {
-            set: self.set.clone(),
-            guard: self.guard.clone()
-        }
+        self.set.pin()
     }
 }
 
@@ -202,11 +176,10 @@ where
 
 impl<T, S> PartialEq<HashSet<T, S>> for HashSetRef<'_, T, S>
 where
-    K: Hash + Eq,
-    V: PartialEq,
+    T: Hash + Eq,
     S: BuildHasher,
 {
-    fn eq(&self, other: &HashSet<K, V, S>) -> bool {
+    fn eq(&self, other: &HashSet<T, S>) -> bool {
         self.set.guarded_eq(&other, &self.guard, &other.guard())
     }
 }
@@ -216,14 +189,14 @@ where
     T: Hash + Eq,
     S: BuildHasher,
 {
-    fn eq(&self, other: &HashSetRef<'_, K, V, S>) -> bool {
+    fn eq(&self, other: &HashSetRef<'_, T, S>) -> bool {
         self.guarded_eq(&other.set, &self.guard(), &other.guard)
     }
 }
 
 impl<T, S> Eq for HashSetRef<'_, T, S>
 where
-    K: Hash + Eq,
+    T: Hash + Eq,
     S: BuildHasher,
 {
 }

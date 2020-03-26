@@ -367,6 +367,62 @@ where
     {
         self.map.remove_entry(value, guard).map(|(k, _)| k)
     }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all elements `e` such that `f(&e)` returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    ///
+    /// for i in 0..8 {
+    ///     set.pin().insert(i);
+    /// }
+    /// set.pin().retain(|&e| e % 2 == 0);
+    /// assert_eq!(set.pin().len(), 4);
+    /// ```
+    #[inline]
+    pub fn retain<F>(&self, mut f: F, guard: &Guard)
+        where
+            F: FnMut(&T) -> bool,
+    {
+        self.map.retain(|value, ()| f(value), guard)
+    }
+}
+
+impl<T, S> HashSet<T, S>
+    where
+        T: Clone,
+{
+    /// Clears the set, removing all elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    ///
+    /// set.pin().insert("a");
+    /// set.pin().clear();
+    /// assert!(set.pin().is_empty());
+    /// ```
+    #[inline]
+    pub fn clear(&self, Guard: &Guard) {
+        self.map.clear(guard)
+    }
+
+    /// Tries to reserve capacity for at least `additional` more elements to 
+    /// be inserted in the `HashSet`. The collection may reserve more space to 
+    /// avoid frequent reallocations.
+    #[inline]
+    pub fn reserve(&self, additional: usize, guard: &Guard) {
+        self.map.reserve(additional, guard)
+    }
 }
 
 impl<T, S> PartialEq for HashSet<T, S>

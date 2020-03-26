@@ -221,6 +221,7 @@ mod map_ref;
 mod node;
 mod raw;
 mod set;
+mod set_ref;
 
 /// Iterator types.
 pub mod iter;
