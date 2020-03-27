@@ -1,6 +1,7 @@
 use crate::iter::*;
 use crate::{GuardRef, HashSet};
 use crossbeam_epoch::Guard;
+use serde::{Serialize, Serializer};
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
@@ -234,4 +235,16 @@ where
     T: Hash + Eq,
     S: BuildHasher,
 {
+}
+
+impl<T, S> Serialize for HashSetRef<'_, T, S>
+where
+    T: Serialize,
+{
+    fn serialize<Sr>(&self, serilizer: Sr) -> Result<Sr::Ok, Sr::Error>
+    where
+        Sr: Serializer,
+    {
+        serilizer.collect_seq(self.iter())
+    }
 }
