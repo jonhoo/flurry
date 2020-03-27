@@ -289,11 +289,11 @@ where
     /// let a = HashSet::from_iter(&[1, 2, 3]);
     /// let b = HashSet::new();
     ///
-    /// assert_eq!(a.pin().is_disjoint(&b.pin()), true);
+    /// assert!(a.pin().is_disjoint(&b.pin()));
     /// b.pin().insert(4);
-    /// assert_eq!(a.pin().is_disjoint(&b.pin()), true);
+    /// assert!(a.pin().is_disjoint(&b.pin()));
     /// b.pin().insert(1);
-    /// assert_eq!(a.pin().is_disjoint(&b.pin()), false);
+    /// assert!(!a.pin().is_disjoint(&b.pin()));
     ///
     /// ```
     pub fn is_disjoint(
@@ -322,11 +322,11 @@ where
     /// let sup = HashSet::from_iter(&[1, 2, 3]);
     /// let set = HashSet::new();
     ///
-    /// assert_eq!(set.pin().is_subset(&sup.pin()), true);
+    /// assert!(set.pin().is_subset(&sup.pin()));
     /// set.pin().insert(2);
-    /// assert_eq!(set.pin().is_subset(&sup.pin()), true);
+    /// assert!(set.pin().is_subset(&sup.pin()));
     /// set.pin().insert(4);
-    /// assert_eq!(set.pin().is_subset(&sup.pin()), false);
+    /// assert!(!set.pin().is_subset(&sup.pin()));
     /// ```
     pub fn is_subset(&self, other: &HashSet<T, S>, our_guard: &Guard, their_guard: &Guard) -> bool {
         for value in self.iter(our_guard) {
@@ -349,14 +349,14 @@ where
     /// let sub = HashSet::from_iter(&[1, 2]);
     /// let set = HashSet::new();
     ///
-    /// assert_eq!(set.pin().is_superset(&sub.pin()), false);
+    /// assert!(!set.pin().is_superset(&sub.pin()));
     ///
     /// set.pin().insert(0);
     /// set.pin().insert(1);
-    /// assert_eq!(set.pin().is_superset(&sub.pin()), false);
+    /// assert!(!set.pin().is_superset(&sub.pin()));
     ///
     /// set.pin().insert(2);
-    /// assert_eq!(set.pin().is_superset(&sub.pin()), true);
+    /// assert!(set.pin().is_superset(&sub.pin()));
     /// ```
     pub fn is_superset(
         &self,
