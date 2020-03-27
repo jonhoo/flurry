@@ -2,6 +2,7 @@
 //!
 //! See `HashSet` for details.
 
+use serde::{Serialize, Serializer};
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
@@ -598,5 +599,17 @@ where
         Self {
             map: self.map.clone(),
         }
+    }
+}
+
+impl<T, S> Serialize for HashSet<T, S>
+where
+    T: Serialize,
+{
+    fn serialize<Sr>(&self, serializer: Sr) -> Result<Sr::Ok, Sr::Error>
+    where
+        Sr: Serializer,
+    {
+        self.pin().serialize(serializer)
     }
 }

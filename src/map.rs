@@ -2,6 +2,7 @@ use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
+use serde::{Serialize, Serializer};
 use std::borrow::Borrow;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -2350,6 +2351,19 @@ where
             }
         }
         cloned_map
+    }
+}
+
+impl<K, V, S> Serialize for HashMap<K, V, S>
+where
+    K: Serialize,
+    V: Serialize,
+{
+    fn serialize<Sr>(&self, serializer: Sr) -> Result<Sr::Ok, Sr::Error>
+    where
+        Sr: Serializer,
+    {
+        self.pin().serialize(serializer)
     }
 }
 
