@@ -1,10 +1,10 @@
 use crate::iter::*;
-use crate::{HashMap, TryInsertError};
+use crate::{GuardRef, HashMap, TryInsertError};
 use crossbeam_epoch::Guard;
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
-use std::ops::{Deref, Index};
+use std::ops::Index;
 
 /// A reference to a [`HashMap`], constructed with [`HashMap::pin`] or [`HashMap::with_guard`].
 ///
@@ -13,22 +13,6 @@ use std::ops::{Deref, Index};
 pub struct HashMapRef<'map, K, V, S = crate::DefaultHashBuilder> {
     map: &'map HashMap<K, V, S>,
     guard: GuardRef<'map>,
-}
-
-enum GuardRef<'g> {
-    Owned(Guard),
-    Ref(&'g Guard),
-}
-
-impl Deref for GuardRef<'_> {
-    type Target = Guard;
-
-    #[inline]
-    fn deref(&self) -> &Guard {
-        match *self {
-            GuardRef::Owned(ref guard) | GuardRef::Ref(&ref guard) => guard,
-        }
-    }
 }
 
 impl<K, V, S> HashMap<K, V, S> {
