@@ -35,6 +35,10 @@ default-features = false
 rand = "0.7"
 rayon = "1.3"
 criterion = "0.3"
+bustle = "0.3"
+
+[profile.bench]
+debug = true
 
 [[bench]]
 name = "flurry_dashmap" 
@@ -42,4 +46,8 @@ harness = false
 
 [[bench]]
 name = "flurry_hashbrown" 
+harness = false
+
+[[bench]]
+name = "bustle"
 harness = false
