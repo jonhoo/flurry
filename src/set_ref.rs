@@ -80,6 +80,7 @@ where
 {
     /// Tests if `value` is an element of this set.
     /// See also [`HashSet::contains`].
+    #[inline]
     pub fn contains<Q>(&self, value: &Q) -> bool
     where
         T: Borrow<Q>,
@@ -91,7 +92,6 @@ where
     /// Returns a reference to the value in the set, if any, that is equal to the given value.
     ///
     /// See also [`HashSet::get`].
-    #[inline]
     pub fn get<'g, Q>(&'g self, value: &Q) -> Option<&'g T>
     where
         T: Borrow<Q>,
