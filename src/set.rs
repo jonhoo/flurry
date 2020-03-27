@@ -156,7 +156,7 @@ impl<T, S> HashSet<T, S> {
         self.map.guard()
     }
 
-    /// Returns the number of entries in the set.
+    /// Returns the number of elements in the set.
     ///
     /// # Examples
     ///
@@ -190,9 +190,9 @@ impl<T, S> HashSet<T, S> {
         self.len() == 0
     }
 
-    /// An iterator visiting all values in arbitrary order.
+    /// An iterator visiting all elements in arbitrary order.
     ///
-    /// The iterator element type is `(&'g K, &'g V)`.
+    /// The iterator element type is `&'g T`.
     ///
     /// See [`HashMap::keys`] for details.
     ///
@@ -220,7 +220,7 @@ where
     T: Hash + Eq,
     S: BuildHasher,
 {
-    /// Returns `true` if the set contains the specified value.
+    /// Returns `true` if the given value is an element of this set.
     ///
     /// The value may be any borrowed form of the set's value type, but
     /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
@@ -250,7 +250,7 @@ where
         self.map.contains_key(value, guard)
     }
 
-    /// Returns a reference to the value in the set, if any, that is equal to the given value.
+    /// Returns a reference to the element in the set, if any, that is equal to the given value.
     ///
     /// The value may be any borrowed form of the set's value type, but
     /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
@@ -278,6 +278,7 @@ where
     }
 
     /// Returns `true` if `self` has no elements in common with `other`.
+    ///
     /// This is equivalent to checking for an empty intersection.
     ///
     /// # Examples
@@ -511,8 +512,7 @@ where
     /// Tries to reserve capacity for at least `additional` more elements to
     /// be inserted in the `HashSet`.
     ///
-    /// The collection may reserve more space to
-    /// avoid frequent reallocations.
+    /// The collection may reserve more space to avoid frequent reallocations.
     pub fn reserve(&self, additional: usize, guard: &Guard) {
         self.map.reserve(additional, guard)
     }
