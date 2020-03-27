@@ -36,40 +36,27 @@ impl<T, S> HashSet<T, S> {
 }
 
 impl<T, S> HashSetRef<'_, T, S> {
-    /// An iterator visiting all elements in arbitrary order.
-    /// The iterator item type is `&'g T`.
-    /// See also [`HashSet::iter`].
-    pub fn iter(&self) -> Keys<'_, T, ()> {
-        self.set.iter(&self.guard)
-    }
-
     /// Returns the number of elements in the set.
+    ///
     /// See also [`HashSet::len`].
     pub fn len(&self) -> usize {
         self.set.len()
     }
 
     /// Returns `true` if the set is empty. Otherwise returns `false`.
+    ///
     /// See also [`HashSet::is_empty`].
     pub fn is_empty(&self) -> bool {
         self.set.is_empty()
     }
-}
 
-impl<T, S> HashSetRef<'_, T, S>
-where
-    T: Clone,
-{
-    /// Tries to reserve capacity for at least `additional` more elements.
-    /// See also [`HashSet::reserve`].
-    pub fn reserve(&self, additional: usize) {
-        self.set.reserve(additional, &self.guard)
-    }
-
-    /// Removes all elements from this set.
-    /// See also [`HashSet::clear`].
-    pub fn clear(&self) {
-        self.set.clear(&self.guard);
+    /// An iterator visiting all elements in arbitrary order.
+    ///
+    /// The iterator element type is `&'g T`.
+    ///
+    /// See also [`HashSet::iter`].
+    pub fn iter(&self) -> Keys<'_, T, ()> {
+        self.set.iter(&self.guard)
     }
 }
 
@@ -78,8 +65,10 @@ where
     T: Hash + Eq,
     S: BuildHasher,
 {
-    /// Tests if `value` is an element of this set.
+    /// Returns `true` if the given value is an element of this set.
+    ///
     /// See also [`HashSet::contains`].
+    #[inline]
     pub fn contains<Q>(&self, value: &Q) -> bool
     where
         T: Borrow<Q>,
@@ -88,10 +77,9 @@ where
         self.set.contains(value, &self.guard)
     }
 
-    /// Returns a reference to the value in the set, if any, that is equal to the given value.
+    /// Returns a reference to the element in the set, if any, that is equal to the given value.
     ///
     /// See also [`HashSet::get`].
-    #[inline]
     pub fn get<'g, Q>(&'g self, value: &Q) -> Option<&'g T>
     where
         T: Borrow<Q>,
@@ -103,14 +91,14 @@ where
     /// Returns `true` if `self` has no elements in common with `other`.
     ///
     /// See also [`HashSet::is_disjoint`].
-    pub fn is_disjoint<'other>(&self, other: &HashSetRef<'other, T, S>) -> bool {
+    pub fn is_disjoint(&self, other: &HashSetRef<'_, T, S>) -> bool {
         self.set.is_disjoint(other.set, &self.guard, &other.guard)
     }
 
     /// Returns `true` if the set is a subset of another, i.e., `other` contains at least all the values in `self`.
     ///
     /// See also [`HashSet::is_subset`].
-    pub fn is_subset<'other>(&self, other: &HashSetRef<'other, T, S>) -> bool {
+    pub fn is_subset(&self, other: &HashSetRef<'_, T, S>) -> bool {
         self.set.is_subset(other.set, &self.guard, &other.guard)
     }
 
@@ -127,17 +115,17 @@ where
     T: 'static + Sync + Send + Clone + Hash + Eq,
     S: BuildHasher,
 {
-    /// Inserts an element into the set.
+    /// Adds a value to the set.
     ///
     /// See also [`HashSet::insert`].
     pub fn insert(&self, value: T) -> bool {
         self.set.insert(value, &self.guard)
     }
 
-    /// Removes the element from this set.
+    /// Removes a value from the set.
     ///
     /// See also [`HashSet::remove`].
-    pub fn remove<'g, Q>(&'g self, value: &Q) -> bool
+    pub fn remove<Q>(&self, value: &Q) -> bool
     where
         T: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -148,7 +136,7 @@ where
     /// Removes and returns the value in the set, if any, that is equal to the given one.
     ///
     /// See also [`HashSet::take`].
-    pub fn take<Q>(&self, value: &Q) -> Option<&'_ T>
+    pub fn take<'g, Q>(&'g self, value: &Q) -> Option<&'g T>
     where
         T: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
@@ -164,6 +152,26 @@ where
         F: FnMut(&T) -> bool,
     {
         self.set.retain(f, &self.guard);
+    }
+}
+
+impl<T, S> HashSetRef<'_, T, S>
+where
+    T: Clone,
+{
+    /// Clears the set, removing all elements.
+    ///
+    /// See also [`HashSet::clear`].
+    pub fn clear(&self) {
+        self.set.clear(&self.guard);
+    }
+
+    /// Tries to reserve capacity for at least `additional` more elements to
+    /// be inserted into the underlying `HashSet`.
+    ///
+    /// See also [`HashSet::reserve`].
+    pub fn reserve(&self, additional: usize) {
+        self.set.reserve(additional, &self.guard)
     }
 }
 
