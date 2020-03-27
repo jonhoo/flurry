@@ -148,7 +148,7 @@ where
     /// Removes and returns the value in the set, if any, that is equal to the given one.
     ///
     /// See also [`HashSet::take`].
-    pub fn take<Q>(&self, value: &Q) -> Option<&'_ T>
+    pub fn take<'g, Q>(&'g self, value: &Q) -> Option<&'g T>
     where
         T: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
