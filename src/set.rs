@@ -395,7 +395,7 @@ where
     /// assert_eq!(set.insert(2, &guard), false);
     /// assert!(set.contains(&2, &guard));
     /// ```
-    pub fn insert<'g>(&'g self, value: T, guard: &'g Guard) -> bool {
+    pub fn insert(&self, value: T, guard: &Guard) -> bool {
         let old = self.map.insert(value, (), guard);
         old.is_none()
     }
@@ -426,7 +426,7 @@ where
     /// assert!(!set.contains(&2, &guard));
     /// assert_eq!(set.remove(&2, &guard), false);
     /// ```
-    pub fn remove<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> bool
+    pub fn remove<Q>(&self, value: &Q, guard: &Guard) -> bool
     where
         T: Borrow<Q>,
         Q: ?Sized + Hash + Eq,
