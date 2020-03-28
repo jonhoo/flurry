@@ -2,6 +2,7 @@ use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
+#[cfg(feature = "serialize")]
 use serde::{
     de::{MapAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -11,6 +12,7 @@ use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
+#[cfg(feature = "serialize")]
 use std::marker::PhantomData;
 use std::sync::{
     atomic::{AtomicIsize, AtomicUsize, Ordering},
@@ -2358,6 +2360,7 @@ where
     }
 }
 
+#[cfg(feature = "serialize")]
 impl<K, V, S> Serialize for HashMap<K, V, S>
 where
     K: Serialize,
@@ -2371,6 +2374,7 @@ where
     }
 }
 
+#[cfg(feature = "serialize")]
 impl<'de, K, V> Deserialize<'de> for HashMap<K, V, crate::DefaultHashBuilder>
 where
     K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
@@ -2384,11 +2388,13 @@ where
     }
 }
 
+#[cfg(feature = "serialize")]
 struct HashMapVisitor<K, V> {
     key_marker: PhantomData<K>,
     value_marker: PhantomData<V>,
 }
 
+#[cfg(feature = "serialize")]
 impl<K, V> HashMapVisitor<K, V> {
     pub(crate) fn new() -> Self {
         Self {
@@ -2398,6 +2404,7 @@ impl<K, V> HashMapVisitor<K, V> {
     }
 }
 
+#[cfg(feature = "serialize")]
 impl<'de, K, V> Visitor<'de> for HashMapVisitor<K, V>
 where
     K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,

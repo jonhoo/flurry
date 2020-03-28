@@ -1,6 +1,7 @@
 use crate::iter::*;
 use crate::{GuardRef, HashMap, TryInsertError};
 use crossbeam_epoch::Guard;
+#[cfg(feature = "serialize")]
 use serde::{Serialize, Serializer};
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
@@ -306,6 +307,7 @@ where
     }
 }
 
+#[cfg(feature = "serialize")]
 impl<K, V, S> Serialize for HashMapRef<'_, K, V, S>
 where
     K: Serialize,
