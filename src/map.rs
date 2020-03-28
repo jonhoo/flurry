@@ -2426,7 +2426,7 @@ where
         while let Some((key, value)) = access.next_entry()? {
             if let Some(_old_value) = map.insert(key, value, &guard) {
                 unreachable!(
-                    "`MapAccess::next_entry` should yield two diffirent value associated with the same key"
+                    "Serialized map held two values with the same key"
                 );
             }
         }
