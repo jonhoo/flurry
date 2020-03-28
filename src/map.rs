@@ -2412,6 +2412,7 @@ where
 {
     type Value = HashMap<K, V, crate::DefaultHashBuilder>;
 
+    // TODO: Create an error message
     fn expecting(&self, _f: &mut Formatter<'_>) -> fmt::Result {
         todo!("Create an error message");
     }
@@ -2420,7 +2421,10 @@ where
     where
         M: MapAccess<'de>,
     {
-        let map = HashMap::with_capacity(access.size_hint().unwrap_or(0));
+        let map = match access.size_hint() {
+            Some(n) => HashMap::with_capacity(n),
+            None => HashMap::new(),
+        };
         let guard = map.guard();
 
         while let Some((key, value)) = access.next_entry()? {
