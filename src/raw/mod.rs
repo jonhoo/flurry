@@ -154,14 +154,14 @@ impl<K, V> Table<K, V> {
                     let bin = unsafe { bin.deref() };
 
                     match *bin {
-                        BinEntry::Node(_) => break table.find(bin, hash, key, guard),
+                        BinEntry::Node(_) | BinEntry::TreeNode(_) | BinEntry::Tree(_) => {
+                            break table.find(bin, hash, key, guard)
+                        }
                         BinEntry::Moved => {
                             // safety: same as above.
                             table = unsafe { table.next_table(guard).deref() };
                             continue;
                         }
-                        BinEntry::TreeNode(_) => break table.find(bin, hash, key, guard),
-                        BinEntry::Tree(_) => break table.find(bin, hash, key, guard),
                     }
                 }
             }
@@ -224,6 +224,7 @@ impl<K, V> Table<K, V> {
                     } else {
                         unreachable!();
                     };
+                    // TreeBin::drop will take care of freeing the contained TreeNodes and their values
                     drop(bin);
                 }
                 BinEntry::TreeNode(_) => unreachable!(
