@@ -2,12 +2,16 @@ use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
-use serde::{Serialize, Serializer};
+use serde::{
+    de::{MapAccess, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use std::borrow::Borrow;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
+use std::marker::PhantomData;
 use std::sync::{
     atomic::{AtomicIsize, AtomicUsize, Ordering},
     Once,
@@ -2364,6 +2368,63 @@ where
         Sr: Serializer,
     {
         self.pin().serialize(serializer)
+    }
+}
+
+impl<'de, K, V> Deserialize<'de> for HashMap<K, V, crate::DefaultHashBuilder>
+where
+    K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
+    V: 'static + Deserialize<'de> + Send + Sync + Eq,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_map(HashMapVisitor::new())
+    }
+}
+
+struct HashMapVisitor<K, V> {
+    key_marker: PhantomData<K>,
+    value_marker: PhantomData<V>,
+}
+
+impl<K, V> HashMapVisitor<K, V> {
+    pub(crate) fn new() -> Self {
+        Self {
+            key_marker: PhantomData,
+            value_marker: PhantomData,
+        }
+    }
+}
+
+impl<'de, K, V> Visitor<'de> for HashMapVisitor<K, V>
+where
+    K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
+    V: 'static + Deserialize<'de> + Send + Sync + Eq,
+{
+    type Value = HashMap<K, V, crate::DefaultHashBuilder>;
+
+    fn expecting(&self, _f: &mut Formatter<'_>) -> fmt::Result {
+        todo!("Create an error message");
+    }
+
+    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+    where
+        M: MapAccess<'de>,
+    {
+        let map = HashMap::with_capacity(access.size_hint().unwrap_or(0));
+        let guard = map.guard();
+
+        while let Some((key, value)) = access.next_entry()? {
+            if let Some(_old_value) = map.insert(key, value, &guard) {
+                unreachable!(
+                    "`MapAccess::next_entry` should yield two diffirent value associated with the same key"
+                );
+            }
+        }
+
+        Ok(map)
     }
 }
 
