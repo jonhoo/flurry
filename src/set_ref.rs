@@ -1,7 +1,7 @@
 use crate::iter::*;
 use crate::{GuardRef, HashSet};
 use crossbeam_epoch::Guard;
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
@@ -238,7 +238,7 @@ where
 {
 }
 
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 impl<T, S> Serialize for HashSetRef<'_, T, S>
 where
     T: Serialize,

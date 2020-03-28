@@ -2,7 +2,7 @@
 //!
 //! See `HashSet` for details.
 
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 use serde::{Serialize, Serializer};
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
@@ -603,7 +603,7 @@ where
     }
 }
 
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 impl<T, S> Serialize for HashSet<T, S>
 where
     T: Serialize,

@@ -2,7 +2,7 @@ use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 use serde::{
     de::{MapAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
@@ -12,7 +12,7 @@ use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 use std::marker::PhantomData;
 use std::sync::{
     atomic::{AtomicIsize, AtomicUsize, Ordering},
@@ -2360,7 +2360,7 @@ where
     }
 }
 
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 impl<K, V, S> Serialize for HashMap<K, V, S>
 where
     K: Serialize,
@@ -2374,7 +2374,7 @@ where
     }
 }
 
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 impl<'de, K, V> Deserialize<'de> for HashMap<K, V, crate::DefaultHashBuilder>
 where
     K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
@@ -2388,13 +2388,13 @@ where
     }
 }
 
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 struct HashMapVisitor<K, V> {
     key_marker: PhantomData<K>,
     value_marker: PhantomData<V>,
 }
 
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 impl<K, V> HashMapVisitor<K, V> {
     pub(crate) fn new() -> Self {
         Self {
@@ -2404,7 +2404,7 @@ impl<K, V> HashMapVisitor<K, V> {
     }
 }
 
-#[cfg(feature = "serialize")]
+#[cfg(feature = "serde")]
 impl<'de, K, V> Visitor<'de> for HashMapVisitor<K, V>
 where
     K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
@@ -2425,9 +2425,7 @@ where
 
         while let Some((key, value)) = access.next_entry()? {
             if let Some(_old_value) = map.insert(key, value, &guard) {
-                unreachable!(
-                    "Serialized map held two values with the same key"
-                );
+                unreachable!("Serialized map held two values with the same key");
             }
         }
 

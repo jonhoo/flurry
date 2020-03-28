@@ -21,7 +21,6 @@ maintenance = { status = "experimental" }
 
 [features]
 sanitize = ['crossbeam-epoch/sanitize']
-serialize = ["serde"]
 
 [dependencies]
 crossbeam-epoch = "0.8.2"
