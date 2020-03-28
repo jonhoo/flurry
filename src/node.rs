@@ -74,13 +74,7 @@ impl<K, V> Node<K, V> {
     where
         AV: Into<Atomic<V>>,
     {
-        Node {
-            hash,
-            key,
-            value: value.into(),
-            next: Atomic::null(),
-            lock: Mutex::new(()),
-        }
+        Node::with_next(hash, key, value, Atomic::null())
     }
     pub(crate) fn with_next<AV>(hash: u64, key: K, value: AV, next: Atomic<BinEntry<K, V>>) -> Self
     where
@@ -113,6 +107,10 @@ pub(crate) struct TreeNode<K, V> {
 }
 
 impl<K, V> TreeNode<K, V> {
+    /// Constructs a new TreeNode with the given attributes to be inserted into a TreeBin.
+    ///
+    /// This does yet not arrange this node and its `next` nodes into a tree, since the tree
+    /// structure is maintained globally by the bin.
     pub(crate) fn new(
         hash: u64,
         key: K,
@@ -158,17 +156,14 @@ impl<K, V> TreeNode<K, V> {
             // long as we hold onto the guard.
             // Structurally, TreeNodes always point to TreeNodes, so this is sound.
             let p_deref = unsafe { Self::get_tree_node(p) };
-            let p_left = p_deref.left.load(Ordering::SeqCst, guard);
-            let p_right = p_deref.right.load(Ordering::SeqCst, guard);
             let p_hash = p_deref.node.hash;
 
             // first attempt to follow the tree order with the given hash
             if p_hash > hash {
-                p = p_left;
+                p = p_deref.left.load(Ordering::SeqCst, guard);
                 continue;
-            }
-            if p_hash < hash {
-                p = p_right;
+            } else if p_hash < hash {
+                p = p_deref.right.load(Ordering::SeqCst, guard);
                 continue;
             }
 
@@ -180,26 +175,25 @@ impl<K, V> TreeNode<K, V> {
             }
 
             // If the key does not match, we need to descend down the tree.
+            let p_left = p_deref.left.load(Ordering::SeqCst, guard);
+            let p_right = p_deref.right.load(Ordering::SeqCst, guard);
             // If one of the children is empty, there is only one child to check.
             if p_left.is_null() {
                 p = p_right;
                 continue;
-            }
-            if p_right.is_null() {
+            } else if p_right.is_null() {
                 p = p_left;
                 continue;
             }
 
             // Otherwise, we compare keys to find the next child to look at.
-            let dir = match p_key.borrow().cmp(&key) {
-                std::cmp::Ordering::Greater => -1,
-                std::cmp::Ordering::Less => 1,
+            p = match p_key.borrow().cmp(&key) {
+                std::cmp::Ordering::Greater => p_left,
+                std::cmp::Ordering::Less => p_right,
                 std::cmp::Ordering::Equal => {
                     unreachable!("Ord and Eq have to match and Eq is checked above")
                 }
             };
-            p = if dir < 0 { p_left } else { p_right };
-
             // NOTE: the Java code has some addional cases here in case the keys
             // _are not_ equal (p_key != key and !key.equals(p_key)), but
             // _compare_ equal (k.compareTo(p_key) == 0). In this case, both
@@ -214,6 +208,12 @@ impl<K, V> TreeNode<K, V> {
 const WRITER: i64 = 1; // set while holding write lock
 const WAITER: i64 = 2; // set when waiting for write lock
 const READER: i64 = 4; // increment value for setting read lock
+
+/// Private representation for movement direction along tree successors.
+enum Dir {
+    Left,
+    Right,
+}
 
 /// TreeNodes used at the heads of bins. TreeBins do not hold user keys or
 /// values, but instead point to a list of TreeNodes and their root. They also
@@ -233,18 +233,20 @@ impl<K, V> TreeBin<K, V>
 where
     K: Ord,
 {
-    pub(crate) fn new<'g>(bin: Shared<'g, BinEntry<K, V>>, guard: &'g Guard) -> Self {
-        let mut root: Shared<'_, BinEntry<K, V>> = Shared::null();
-        let mut x = bin;
-        let mut next: Shared<'_, BinEntry<K, V>>;
+    /// Constructs a new bin from the given nodes.
+    ///
+    /// Nodes are arranged into an ordered red-black tree.
+    pub(crate) fn new(bin: Owned<BinEntry<K, V>>, guard: &Guard) -> Self {
+        let mut root = Shared::null();
+        let bin = bin.into_shared(guard);
 
-        // safety: when creating a new TreeBin, the nodes used are created just
-        // for this bin and not shared with another thread, so they cannot get
-        // invalidated.
+        // safety: We own the nodes for creating this new TreeBin, so they are
+        // not shared with another thread and cannot get invalidated.
         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
+        let mut x = bin;
         while !x.is_null() {
             let x_deref = unsafe { TreeNode::get_tree_node(x) };
-            next = x_deref.node.next.load(Ordering::SeqCst, guard);
+            let next = x_deref.node.next.load(Ordering::Relaxed, guard);
             x_deref.left.store(Shared::null(), Ordering::Relaxed);
             x_deref.right.store(Shared::null(), Ordering::Relaxed);
 
@@ -267,35 +269,37 @@ where
                 let p_deref = unsafe { TreeNode::get_tree_node(p) };
                 let p_key = &p_deref.node.key;
                 let p_hash = p_deref.node.hash;
-                let dir = match p_hash.cmp(&hash) {
-                    std::cmp::Ordering::Greater => -1,
-                    std::cmp::Ordering::Less => 1,
-                    std::cmp::Ordering::Equal => match p_key.cmp(&key) {
-                        std::cmp::Ordering::Greater => -1,
-                        std::cmp::Ordering::Less => 1,
-                        std::cmp::Ordering::Equal => unreachable!("one key references two nodes"),
-                    },
-                };
 
-                // Select successor of p in the direction dir. We will continue
+                // Select successor of p in the correct direction. We will continue
                 // to descend the tree through this successor.
                 let xp = p;
-                p = if dir <= 0 {
-                    p_deref.left.load(Ordering::SeqCst, guard)
-                } else {
-                    p_deref.right.load(Ordering::SeqCst, guard)
-                };
+                let dir;
+                p = match p_hash.cmp(&hash).then(p_key.cmp(&key)) {
+                    std::cmp::Ordering::Greater => {
+                        dir = Dir::Left;
+                        &p_deref.left
+                    }
+                    std::cmp::Ordering::Less => {
+                        dir = Dir::Right;
+                        &p_deref.right
+                    }
+                    std::cmp::Ordering::Equal => unreachable!("one key references two nodes"),
+                }
+                .load(Ordering::Relaxed, guard);
 
                 if p.is_null() {
-                    x_deref.parent.store(xp, Ordering::SeqCst);
-                    if dir <= 0 {
-                        unsafe { TreeNode::get_tree_node(xp) }
-                            .left
-                            .store(x, Ordering::SeqCst);
-                    } else {
-                        unsafe { TreeNode::get_tree_node(xp) }
-                            .right
-                            .store(x, Ordering::SeqCst);
+                    x_deref.parent.store(xp, Ordering::Relaxed);
+                    match dir {
+                        Dir::Left => {
+                            unsafe { TreeNode::get_tree_node(xp) }
+                                .left
+                                .store(x, Ordering::Relaxed);
+                        }
+                        Dir::Right => {
+                            unsafe { TreeNode::get_tree_node(xp) }
+                                .right
+                                .store(x, Ordering::Relaxed);
+                        }
                     }
                     root = TreeNode::balance_insertion(root, x, guard);
                     break;
@@ -305,7 +309,7 @@ where
             x = next;
         }
 
-        if cfg!(debug) {
+        if cfg!(debug_assertions) {
             assert!(TreeNode::check_invariants(root, guard));
         }
         TreeBin {
@@ -437,7 +441,8 @@ impl<K, V> TreeBin<K, V> {
                     TreeNode::find_tree_node(root, hash, key, guard)
                 };
                 if bin_deref.lock_state.fetch_add(-READER, Ordering::SeqCst) == (READER | WRITER) {
-                    // check if another thread is waiting and, if so, unpark it
+                    // we were the last reader holding up a waiting writer
+                    // check that another thread is actually waiting and, if so, unpark it
                     let waiter = &bin_deref.waiter.load(Ordering::SeqCst, guard);
                     if !waiter.is_null() {
                         // safety: we do not destroy waiting threads
@@ -451,11 +456,12 @@ impl<K, V> TreeBin<K, V> {
         Shared::null()
     }
 
-    /// Unlinks the given node, which must be present before this call. This is
-    /// messier than typical red-black deletion code because we cannot swap the
-    /// contents of an interior node with a leaf successor that is pinned by
-    /// `next` pointers that are accessible independently of the bin lock. So
-    /// instead we swap the tree links.
+    /// Unlinks the given node, which must be present before this call.
+    ///
+    /// This is messier than typical red-black deletion code because we cannot
+    /// swap the contents of an interior node with a leaf successor that is
+    /// pinned by `next` pointers that are accessible independently of the bin
+    /// lock. So instead we swap the tree links.
     ///
     /// Returns `true` if the bin is now too small and should be untreeified.
     ///
@@ -486,6 +492,7 @@ impl<K, V> TreeBin<K, V> {
         let p_deref = TreeNode::get_tree_node(p);
         let next = p_deref.node.next.load(Ordering::SeqCst, guard);
         let prev = p_deref.prev.load(Ordering::SeqCst, guard);
+
         // unlink traversal pointers
         if prev.is_null() {
             // the node to delete is the first node
@@ -515,6 +522,11 @@ impl<K, V> TreeBin<K, V> {
         // about restructuring the tree since the bin will be untreeified
         // anyway, so we check that
         let mut root = self.root.load(Ordering::SeqCst, guard);
+        // TODO: Can `root` even be `null`?
+        // The Java code has `NULL` checks for this, but in theory it should not be possible to
+        // encounter a tree that has no root when we have its lock. It should always have at
+        // least `UNTREEIFY_THRESHOLD` nodes. If it is indeed impossible we should replace
+        // this with an assertion instead.
         if root.is_null()
             || TreeNode::get_tree_node(root)
                 .right
@@ -563,7 +575,8 @@ impl<K, V> TreeBin<K, V> {
             let successor_right = successor_deref.right.load(Ordering::Relaxed, guard);
             let p_parent = p_deref.parent.load(Ordering::Relaxed, guard);
             if successor == p_right {
-                // `p` was the direct parent of the smallest successor
+                // `p` was the direct parent of the smallest successor.
+                // the two nodes will be swapped
                 p_deref.parent.store(successor, Ordering::Relaxed);
                 successor_deref.right.store(p, Ordering::Relaxed);
             } else {
@@ -591,6 +604,7 @@ impl<K, V> TreeBin<K, V> {
                         .store(successor, Ordering::Relaxed);
                 }
             }
+            debug_assert!(successor_left.is_null());
             p_deref.left.store(Shared::null(), Ordering::Relaxed);
             p_deref.right.store(successor_right, Ordering::Relaxed);
             if !successor_right.is_null() {
@@ -709,7 +723,7 @@ impl<K, V> TreeBin<K, V> {
         }
 
         self.unlock_root();
-        if cfg!(debug) {
+        if cfg!(debug_assertions) {
             assert!(TreeNode::check_invariants(
                 self.root.load(Ordering::SeqCst, guard),
                 guard
@@ -842,7 +856,7 @@ where
             }
         }
 
-        if cfg!(debug) {
+        if cfg!(debug_assertions) {
             assert!(TreeNode::check_invariants(
                 self.root.load(Ordering::SeqCst, guard),
                 guard
