@@ -2425,7 +2425,10 @@ where
     where
         M: MapAccess<'de>,
     {
-        let map = HashMap::default();
+        let map = match access.size_hint() {
+            Some(n) => HashMap::with_capacity_and_hasher(n, S::default()),
+            None => HashMap::with_hasher(S::default()),
+        };
         let guard = map.guard();
 
         while let Some((key, value)) = access.next_entry()? {
