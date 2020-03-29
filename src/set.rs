@@ -3,11 +3,16 @@
 //! See `HashSet` for details.
 
 #[cfg(feature = "serde")]
-use serde::{Serialize, Serializer};
+use serde::{
+    de::{SeqAccess, Visitor},
+    Deserialize, Deserializer, Serialize, Serializer,
+};
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
+#[cfg(feature = "serde")]
+use std::marker::PhantomData;
 
 use crate::epoch::Guard;
 use crate::iter::Keys;
@@ -620,7 +625,7 @@ where
 impl<'de, T, S> Deserialize<'de> for HashSet<T, S>
 where
     T: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
-    S: Default,
+    S: Default + BuildHasher,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -632,7 +637,7 @@ where
 
 #[cfg(feature = "serde")]
 struct HashSetVisitor<T, S> {
-    type_marker: PhantomData<K>,
+    type_marker: PhantomData<T>,
     hash_builder_marker: PhantomData<S>,
 }
 
@@ -650,7 +655,7 @@ impl<T, S> HashSetVisitor<T, S> {
 impl<'de, T, S> Visitor<'de> for HashSetVisitor<T, S>
 where
     T: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
-    S: Default,
+    S: Default + BuildHasher,
 {
     type Value = HashSet<T, S>;
 
@@ -659,11 +664,11 @@ where
         todo!("Create an error message");
     }
 
-    fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+    fn visit_seq<A>(self, mut access: A) -> Result<Self::Value, A::Error>
     where
         A: SeqAccess<'de>,
     {
-        let set = S::default();
+        let set = HashSet::default();
         let guard = set.guard();
 
         while let Some(value) = access.next_element()? {

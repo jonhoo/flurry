@@ -2379,7 +2379,7 @@ impl<'de, K, V, S> Deserialize<'de> for HashMap<K, V, S>
 where
     K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
     V: 'static + Deserialize<'de> + Send + Sync + Eq,
-    S: Default,
+    S: Default + BuildHasher,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -2412,7 +2412,7 @@ impl<'de, K, V, S> Visitor<'de> for HashMapVisitor<K, V, S>
 where
     K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
     V: 'static + Deserialize<'de> + Send + Sync + Eq,
-    S: Default,
+    S: Default + BuildHasher,
 {
     type Value = HashMap<K, V, S>;
 
@@ -2425,7 +2425,7 @@ where
     where
         M: MapAccess<'de>,
     {
-        let map = S::default();
+        let map = HashMap::default();
         let guard = map.guard();
 
         while let Some((key, value)) = access.next_entry()? {
