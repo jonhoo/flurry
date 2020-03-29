@@ -2375,10 +2375,11 @@ where
 }
 
 #[cfg(feature = "serde")]
-impl<'de, K, V> Deserialize<'de> for HashMap<K, V, crate::DefaultHashBuilder>
+impl<'de, K, V, S> Deserialize<'de> for HashMap<K, V, S>
 where
     K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
     V: 'static + Deserialize<'de> + Send + Sync + Eq,
+    S: Default,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -2389,26 +2390,29 @@ where
 }
 
 #[cfg(feature = "serde")]
-struct HashMapVisitor<K, V> {
+struct HashMapVisitor<K, V, S> {
     key_marker: PhantomData<K>,
     value_marker: PhantomData<V>,
+    hash_builder_marker: PhantomData<S>,
 }
 
 #[cfg(feature = "serde")]
-impl<K, V> HashMapVisitor<K, V> {
+impl<K, V, S> HashMapVisitor<K, V, S> {
     pub(crate) fn new() -> Self {
         Self {
             key_marker: PhantomData,
             value_marker: PhantomData,
+            hash_builder_marker: PhantomData,
         }
     }
 }
 
 #[cfg(feature = "serde")]
-impl<'de, K, V> Visitor<'de> for HashMapVisitor<K, V>
+impl<'de, K, V, S> Visitor<'de> for HashMapVisitor<K, V, S>
 where
     K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
     V: 'static + Deserialize<'de> + Send + Sync + Eq,
+    S: Default,
 {
     type Value = HashMap<K, V, crate::DefaultHashBuilder>;
 
@@ -2421,10 +2425,7 @@ where
     where
         M: MapAccess<'de>,
     {
-        let map = match access.size_hint() {
-            Some(n) => HashMap::with_capacity(n),
-            None => HashMap::new(),
-        };
+        let map = S::default();
         let guard = map.guard();
 
         while let Some((key, value)) = access.next_entry()? {
