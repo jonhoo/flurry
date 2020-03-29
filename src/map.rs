@@ -2414,7 +2414,7 @@ where
     V: 'static + Deserialize<'de> + Send + Sync + Eq,
     S: Default,
 {
-    type Value = HashMap<K, V, crate::DefaultHashBuilder>;
+    type Value = HashMap<K, V, S>;
 
     // TODO: Create an error message
     fn expecting(&self, _f: &mut Formatter<'_>) -> fmt::Result {

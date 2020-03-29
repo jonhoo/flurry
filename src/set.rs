@@ -615,3 +615,61 @@ where
         self.pin().serialize(serializer)
     }
 }
+
+#[cfg(feature = "serde")]
+impl<'de, T, S> Deserialize<'de> for HashSet<T, S>
+where
+    T: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
+    S: Default,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(HashSetVisitor::new())
+    }
+}
+
+#[cfg(feature = "serde")]
+struct HashSetVisitor<T, S> {
+    type_marker: PhantomData<K>,
+    hash_builder_marker: PhantomData<S>,
+}
+
+#[cfg(feature = "serde")]
+impl<T, S> HashSetVisitor<T, S> {
+    pub(crate) fn new() -> Self {
+        Self {
+            type_marker: PhantomData,
+            hash_builder_marker: PhantomData,
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, T, S> Visitor<'de> for HashSetVisitor<T, S>
+where
+    T: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
+    S: Default,
+{
+    type Value = HashSet<T, S>;
+
+    // TODO: Create an error message
+    fn expecting(&self, _f: &mut Formatter<'_>) -> fmt::Result {
+        todo!("Create an error message");
+    }
+
+    fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        let set = S::default();
+        let guard = set.guard();
+
+        while let Some(value) = access.next_element()? {
+            let _ = set.insert(value, &guard);
+        }
+
+        Ok(set)
+    }
+}
