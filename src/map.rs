@@ -2416,9 +2416,8 @@ where
 {
     type Value = HashMap<K, V, S>;
 
-    // TODO: Create an error message
-    fn expecting(&self, _f: &mut Formatter<'_>) -> fmt::Result {
-        todo!("Create an error message");
+    fn expecting(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "a map could no be deserialized");
     }
 
     fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>

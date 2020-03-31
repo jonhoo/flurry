@@ -660,8 +660,8 @@ where
     type Value = HashSet<T, S>;
 
     // TODO: Create an error message
-    fn expecting(&self, _f: &mut Formatter<'_>) -> fmt::Result {
-        todo!("Create an error message");
+    fn expecting(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "a set could not be parsed");
     }
 
     fn visit_seq<A>(self, mut access: A) -> Result<Self::Value, A::Error>
