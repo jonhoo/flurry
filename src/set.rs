@@ -661,7 +661,7 @@ where
 
     // TODO: Create an error message
     fn expecting(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "a set could not be parsed");
+        write!(f, "a set could not be parsed")
     }
 
     fn visit_seq<A>(self, mut access: A) -> Result<Self::Value, A::Error>
