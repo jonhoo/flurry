@@ -1,8 +1,6 @@
 use crate::iter::*;
 use crate::{GuardRef, HashMap, TryInsertError};
 use crossbeam_epoch::Guard;
-#[cfg(feature = "serde")]
-use serde::{Serialize, Serializer};
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
@@ -304,19 +302,5 @@ where
 
     fn index(&self, key: &Q) -> &V {
         self.get(key).expect("no entry found for key")
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<K, V, S> Serialize for HashMapRef<'_, K, V, S>
-where
-    K: Serialize,
-    V: Serialize,
-{
-    fn serialize<Sr>(&self, serializer: Sr) -> Result<Sr::Ok, Sr::Error>
-    where
-        Sr: Serializer,
-    {
-        serializer.collect_map(self.iter())
     }
 }

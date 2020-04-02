@@ -2,18 +2,10 @@
 //!
 //! See `HashSet` for details.
 
-#[cfg(feature = "serde")]
-use serde::{
-    de::{SeqAccess, Visitor},
-    Deserialize, Deserializer, Serialize, Serializer,
-};
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
-#[cfg(feature = "serde")]
-use std::marker::PhantomData;
-
 use crate::epoch::Guard;
 use crate::iter::Keys;
 use crate::HashMap;
@@ -605,75 +597,5 @@ where
         Self {
             map: self.map.clone(),
         }
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<T, S> Serialize for HashSet<T, S>
-where
-    T: Serialize,
-{
-    fn serialize<Sr>(&self, serializer: Sr) -> Result<Sr::Ok, Sr::Error>
-    where
-        Sr: Serializer,
-    {
-        self.pin().serialize(serializer)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de, T, S> Deserialize<'de> for HashSet<T, S>
-where
-    T: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
-    S: Default + BuildHasher,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_seq(HashSetVisitor::new())
-    }
-}
-
-#[cfg(feature = "serde")]
-struct HashSetVisitor<T, S> {
-    type_marker: PhantomData<T>,
-    hash_builder_marker: PhantomData<S>,
-}
-
-#[cfg(feature = "serde")]
-impl<T, S> HashSetVisitor<T, S> {
-    pub(crate) fn new() -> Self {
-        Self {
-            type_marker: PhantomData,
-            hash_builder_marker: PhantomData,
-        }
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de, T, S> Visitor<'de> for HashSetVisitor<T, S>
-where
-    T: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
-    S: Default + BuildHasher,
-{
-    type Value = HashSet<T, S>;
-
-    fn expecting(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "a set")
-    }
-
-    fn visit_seq<A>(self, mut access: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        let set = HashSet::default();
-        let guard = set.guard();
-
-        while let Some(value) = access.next_element()? {
-            let _ = set.insert(value, &guard);
-        }
-
-        Ok(set)
     }
 }

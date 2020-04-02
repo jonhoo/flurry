@@ -2,18 +2,11 @@ use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
-#[cfg(feature = "serde")]
-use serde::{
-    de::{MapAccess, Visitor},
-    Deserialize, Deserializer, Serialize, Serializer,
-};
 use std::borrow::Borrow;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
-#[cfg(feature = "serde")]
-use std::marker::PhantomData;
 use std::sync::{
     atomic::{AtomicIsize, AtomicUsize, Ordering},
     Once,
@@ -2357,86 +2350,6 @@ where
             }
         }
         cloned_map
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<K, V, S> Serialize for HashMap<K, V, S>
-where
-    K: Serialize,
-    V: Serialize,
-{
-    fn serialize<Sr>(&self, serializer: Sr) -> Result<Sr::Ok, Sr::Error>
-    where
-        Sr: Serializer,
-    {
-        self.pin().serialize(serializer)
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de, K, V, S> Deserialize<'de> for HashMap<K, V, S>
-where
-    K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
-    V: 'static + Deserialize<'de> + Send + Sync + Eq,
-    S: Default + BuildHasher,
-{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_map(HashMapVisitor::new())
-    }
-}
-
-#[cfg(feature = "serde")]
-struct HashMapVisitor<K, V, S> {
-    key_marker: PhantomData<K>,
-    value_marker: PhantomData<V>,
-    hash_builder_marker: PhantomData<S>,
-}
-
-#[cfg(feature = "serde")]
-impl<K, V, S> HashMapVisitor<K, V, S> {
-    pub(crate) fn new() -> Self {
-        Self {
-            key_marker: PhantomData,
-            value_marker: PhantomData,
-            hash_builder_marker: PhantomData,
-        }
-    }
-}
-
-#[cfg(feature = "serde")]
-impl<'de, K, V, S> Visitor<'de> for HashMapVisitor<K, V, S>
-where
-    K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Eq,
-    V: 'static + Deserialize<'de> + Send + Sync + Eq,
-    S: Default + BuildHasher,
-{
-    type Value = HashMap<K, V, S>;
-
-    fn expecting(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "a map")
-    }
-
-    fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
-    where
-        M: MapAccess<'de>,
-    {
-        let map = match access.size_hint() {
-            Some(n) => HashMap::with_capacity_and_hasher(n, S::default()),
-            None => HashMap::with_hasher(S::default()),
-        };
-        let guard = map.guard();
-
-        while let Some((key, value)) = access.next_entry()? {
-            if let Some(_old_value) = map.insert(key, value, &guard) {
-                unreachable!("Serialized map held two values with the same key");
-            }
-        }
-
-        Ok(map)
     }
 }
 

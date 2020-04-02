@@ -223,6 +223,9 @@ mod raw;
 mod set;
 mod set_ref;
 
+#[cfg(feature = "serde")]
+mod serde_impls;
+
 /// Iterator types.
 pub mod iter;
 
