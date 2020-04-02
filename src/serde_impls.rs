@@ -3,9 +3,9 @@ use serde::{
     de::{MapAccess, SeqAccess, Visitor},
     Deserialize, Deserializer, Serialize, Serializer,
 };
-use std::marker::PhantomData;
 use std::fmt::{self, Formatter};
 use std::hash::{BuildHasher, Hash};
+use std::marker::PhantomData;
 
 struct HashMapVisitor<K, V, S> {
     key_marker: PhantomData<K>,
@@ -169,5 +169,48 @@ where
         }
 
         Ok(set)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{HashMap, HashSet};
+
+    #[test]
+    fn test_map() {
+        let map: HashMap<u8, u8> = HashMap::with_capacity(5);
+        let guard = map.guard();
+
+        let _ = map.insert(0, 4, &guard);
+        let _ = map.insert(1, 3, &guard);
+        let _ = map.insert(2, 2, &guard);
+        let _ = map.insert(3, 1, &guard);
+        let _ = map.insert(4, 0, &guard);
+
+        let serialized = serde_json::to_string(&map).expect("Couldn't serialize map");
+
+        let deserialized: HashMap<u8, u8> =
+            serde_json::from_str(&serialized).expect("Couldn't deserialize map");
+
+        assert_eq!(map, deserialized);
+    }
+
+    #[test]
+    fn test_set() {
+        let set: HashSet<u8> = HashSet::with_capacity(5);
+        let guard = set.guard();
+
+        let _ = set.insert(0, &guard);
+        let _ = set.insert(1, &guard);
+        let _ = set.insert(2, &guard);
+        let _ = set.insert(3, &guard);
+        let _ = set.insert(4, &guard);
+
+        let serialized = serde_json::to_string(&set).expect("Couldn't serialize map");
+
+        let deserialized: HashSet<u8> =
+            serde_json::from_str(&serialized).expect("Couldn't deserialize map");
+
+        assert_eq!(set, deserialized);
     }
 }
