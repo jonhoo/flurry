@@ -2,14 +2,13 @@
 //!
 //! See `HashSet` for details.
 
+use crate::epoch::Guard;
+use crate::iter::Keys;
+use crate::HashMap;
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
-
-use crate::epoch::Guard;
-use crate::iter::Keys;
-use crate::HashMap;
 
 /// A concurrent hash set implemented as a `HashMap` where the value is `()`.
 ///
