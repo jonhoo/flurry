@@ -3357,6 +3357,75 @@ mod tree_bins {
     }
 
     #[test]
+    fn concurrent_tree_bin() {
+        let map = HashMap::<usize, usize, _>::with_hasher(ZeroHashBuilder);
+        // first, ensure that we have a tree bin
+        {
+            let guard = &map.guard();
+            // Force creation of a tree bin by inserting enough values that hash to 0
+            for i in 0..10 {
+                map.insert(i, i, guard);
+            }
+            // Ensure the bin was correctly treeified
+            let t = map.table.load(Ordering::Relaxed, guard);
+            let t = unsafe { t.deref() };
+            let bini = t.bini(0);
+            let bin = t.bin(bini, guard);
+            match unsafe { bin.deref() } {
+                BinEntry::Tree(_) => {} // pass
+                BinEntry::Moved => panic!("bin was not correctly treeified -- is Moved"),
+                BinEntry::Node(_) => panic!("bin was not correctly treeified -- is Node"),
+                BinEntry::TreeNode(_) => panic!("bin was not correctly treeified -- is TreeNode"),
+            }
+
+            guard.flush();
+            drop(guard);
+        }
+        // then, spin up lots of reading and writing threads on a small range of keys
+        const NUM_THREADS: usize = 100;
+        const NUM_REPEATS: usize = 1000;
+        use rand::{
+            distributions::{Distribution, Uniform},
+            thread_rng,
+        };
+        let uniform = Uniform::new(10, 20);
+        let m = std::sync::Arc::new(map);
+
+        let mut handles = Vec::with_capacity(2 * NUM_THREADS);
+        for i in 0..NUM_THREADS {
+            // NUM_THREADS times, create a writing thread...
+            let map = m.clone();
+            handles.push(std::thread::spawn(move || {
+                let guard = &map.guard();
+                let mut trng = thread_rng();
+                for _ in 0..NUM_REPEATS {
+                    let key = uniform.sample(&mut trng);
+                    map.insert(key, i, guard);
+                }
+            }));
+            // ...and a reading thread
+            let map = m.clone();
+            handles.push(std::thread::spawn(move || {
+                let guard = &map.guard();
+                let mut trng = thread_rng();
+                for _ in 0..NUM_REPEATS {
+                    let key = uniform.sample(&mut trng);
+                    if let Some(v) = map.get(&key, guard) {
+                        criterion::black_box(v);
+                    }
+                }
+            }));
+        }
+
+        // in the end, join all threads
+        for handle in handles {
+            if let Err(_) = handle.join() {
+                panic!();
+            }
+        }
+    }
+
+    #[test]
     fn untreeify_shared_values_remove() {
         test_tree_bin_remove(|i, map, guard| {
             assert_eq!(map.remove(&i, guard), Some(&i));
