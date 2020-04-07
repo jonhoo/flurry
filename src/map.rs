@@ -3382,16 +3382,17 @@ mod tree_bins {
             drop(guard);
         }
         // then, spin up lots of reading and writing threads on a small range of keys
-        const NUM_THREADS: usize = 100;
+        const NUM_THREADS: usize = 20;
         const NUM_REPEATS: usize = 1000;
+        const NUM_KEYS: usize = 1000;
         use rand::{
             distributions::{Distribution, Uniform},
             thread_rng,
         };
-        let uniform = Uniform::new(10, 20);
+        let uniform = Uniform::new(10, NUM_KEYS + 10);
         let m = std::sync::Arc::new(map);
 
-        let mut handles = Vec::with_capacity(2 * NUM_THREADS);
+        let mut handles = Vec::with_capacity(3 * NUM_THREADS);
         for i in 0..NUM_THREADS {
             // NUM_THREADS times, create a writing thread...
             let map = m.clone();
@@ -3401,6 +3402,18 @@ mod tree_bins {
                 for _ in 0..NUM_REPEATS {
                     let key = uniform.sample(&mut trng);
                     map.insert(key, i, guard);
+                }
+            }));
+            // ...a removing thread...
+            let map = m.clone();
+            handles.push(std::thread::spawn(move || {
+                let guard = &map.guard();
+                let mut trng = thread_rng();
+                for _ in 0..NUM_REPEATS {
+                    let key = uniform.sample(&mut trng);
+                    if let Some(v) = map.remove(&key, guard) {
+                        criterion::black_box(v);
+                    }
                 }
             }));
             // ...and a reading thread
@@ -3419,9 +3432,7 @@ mod tree_bins {
 
         // in the end, join all threads
         for handle in handles {
-            if let Err(_) = handle.join() {
-                panic!();
-            }
+            handle.join().unwrap();
         }
     }
 
