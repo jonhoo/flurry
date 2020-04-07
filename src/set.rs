@@ -216,16 +216,16 @@ impl<T, S> HashSet<T, S> {
 
 impl<T, S> HashSet<T, S>
 where
-    T: Hash + Eq,
+    T: Hash + Ord,
     S: BuildHasher,
 {
     /// Returns `true` if the given value is an element of this set.
     ///
     /// The value may be any borrowed form of the set's value type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
     /// the value type.
     ///
-    /// [`Eq`]: std::cmp::Eq
+    /// [`Ord`]: std::cmp::Ord
     /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
@@ -244,7 +244,7 @@ where
     pub fn contains<'g, Q>(&self, value: &Q, guard: &'g Guard) -> bool
     where
         T: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.contains_key(value, guard)
     }
@@ -252,8 +252,11 @@ where
     /// Returns a reference to the element in the set, if any, that is equal to the given value.
     ///
     /// The value may be any borrowed form of the set's value type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
     /// the value type.
+    ///
+    /// [`Ord`]: std::cmp::Ord
+    /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
     ///
@@ -265,13 +268,10 @@ where
     /// assert_eq!(set.get(&2, &guard), Some(&2));
     /// assert_eq!(set.get(&4, &guard), None);
     /// ```
-    ///
-    /// [`Eq`]: ../../std/cmp/trait.Eq.html
-    /// [`Hash`]: ../../std/hash/trait.Hash.html
     pub fn get<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> Option<&'g T>
     where
         T: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.get_key_value(value, guard).map(|(k, _)| k)
     }
@@ -374,7 +374,7 @@ where
 
 impl<T, S> HashSet<T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Eq,
+    T: 'static + Sync + Send + Clone + Hash + Ord,
     S: BuildHasher,
 {
     /// Adds a value to the set.
@@ -407,10 +407,10 @@ where
     /// If the set did have this value present, `true` is returned.
     ///
     /// The value may be any borrowed form of the set's value type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
     /// the value type.
     ///
-    /// [`Eq`]: std::cmp::Eq
+    /// [`Ord`]: std::cmp::Ord
     /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
@@ -429,7 +429,7 @@ where
     pub fn remove<Q>(&self, value: &Q, guard: &Guard) -> bool
     where
         T: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         let removed = self.map.remove(value, guard);
         removed.is_some()
@@ -438,8 +438,11 @@ where
     /// Removes and returns the value in the set, if any, that is equal to the given one.
     ///
     /// The value may be any borrowed form of the set's value type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
+    /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
     /// the value type.
+    ///
+    /// [`Ord`]: std::cmp::Ord
+    /// [`Hash`]: std::hash::Hash
     ///
     /// # Examples
     ///
@@ -451,13 +454,10 @@ where
     /// assert_eq!(set.take(&2, &guard), Some(&2));
     /// assert_eq!(set.take(&2, &guard), None);
     /// ```
-    ///
-    /// [`Eq`]: ../../std/cmp/trait.Eq.html
-    /// [`Hash`]: ../../std/hash/trait.Hash.html
     pub fn take<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> Option<&'g T>
     where
         T: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.remove_entry(value, guard).map(|(k, _)| k)
     }
@@ -489,7 +489,7 @@ where
 
 impl<T, S> HashSet<T, S>
 where
-    T: Clone,
+    T: Clone + Ord,
 {
     /// Clears the set, removing all elements.
     ///
@@ -519,7 +519,7 @@ where
 
 impl<T, S> PartialEq for HashSet<T, S>
 where
-    T: Eq + Hash,
+    T: Ord + Hash,
     S: BuildHasher,
 {
     fn eq(&self, other: &Self) -> bool {
@@ -529,7 +529,7 @@ where
 
 impl<T, S> Eq for HashSet<T, S>
 where
-    T: Eq + Hash,
+    T: Ord + Hash,
     S: BuildHasher,
 {
 }
@@ -546,7 +546,7 @@ where
 
 impl<T, S> Extend<T> for &HashSet<T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Eq,
+    T: 'static + Sync + Send + Clone + Hash + Ord,
     S: BuildHasher,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
@@ -556,7 +556,7 @@ where
 
 impl<'a, T, S> Extend<&'a T> for &HashSet<T, S>
 where
-    T: 'static + Sync + Send + Copy + Hash + Eq,
+    T: 'static + Sync + Send + Copy + Hash + Ord,
     S: BuildHasher,
 {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
@@ -566,7 +566,7 @@ where
 
 impl<T, S> FromIterator<T> for HashSet<T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Eq,
+    T: 'static + Sync + Send + Clone + Hash + Ord,
     S: BuildHasher + Default,
 {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
@@ -578,7 +578,7 @@ where
 
 impl<'a, T, S> FromIterator<&'a T> for HashSet<T, S>
 where
-    T: 'static + Sync + Send + Copy + Hash + Eq,
+    T: 'static + Sync + Send + Copy + Hash + Ord,
     S: BuildHasher + Default,
 {
     fn from_iter<I: IntoIterator<Item = &'a T>>(iter: I) -> Self {
@@ -590,7 +590,7 @@ where
 
 impl<T, S> Clone for HashSet<T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Eq,
+    T: 'static + Sync + Send + Clone + Hash + Ord,
     S: BuildHasher + Clone,
 {
     fn clone(&self) -> HashSet<T, S> {

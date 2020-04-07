@@ -81,7 +81,7 @@ impl<K, V, S> HashMapRef<'_, K, V, S> {
 
 impl<K, V, S> HashMapRef<'_, K, V, S>
 where
-    K: Clone,
+    K: Clone + Ord,
 {
     /// Tries to reserve capacity for at least `additional` more elements to be inserted in the
     /// `HashMap`.
@@ -96,7 +96,7 @@ where
 
 impl<K, V, S> HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     S: BuildHasher,
 {
     /// Returns `true` if the map contains a value for the specified key.
@@ -105,7 +105,7 @@ where
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.contains_key(key, &self.guard)
     }
@@ -117,7 +117,7 @@ where
     pub fn get<'g, Q>(&'g self, key: &Q) -> Option<&'g V>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.get(key, &self.guard)
     }
@@ -129,7 +129,7 @@ where
     pub fn get_key_value<'g, Q>(&'g self, key: &Q) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.get_key_value(key, &self.guard)
     }
@@ -137,7 +137,7 @@ where
 
 impl<K, V, S> HashMapRef<'_, K, V, S>
 where
-    K: Clone,
+    K: Clone + Ord,
 {
     /// Clears the map, removing all key-value pairs.
     ///
@@ -149,7 +149,7 @@ where
 
 impl<K, V, S> HashMapRef<'_, K, V, S>
 where
-    K: 'static + Sync + Send + Clone + Hash + Eq,
+    K: 'static + Sync + Send + Clone + Hash + Ord,
     V: 'static + Sync + Send,
     S: BuildHasher,
 {
@@ -175,7 +175,7 @@ where
     pub fn compute_if_present<'g, Q, F>(&'g self, key: &Q, remapping_function: F) -> Option<&'g V>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
         F: FnOnce(&K, &V) -> Option<V>,
     {
         self.map
@@ -188,7 +188,7 @@ where
     pub fn remove<'g, Q>(&'g self, key: &Q) -> Option<&'g V>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.remove(key, &self.guard)
     }
@@ -200,7 +200,7 @@ where
     pub fn remove_entry<'g, Q>(&'g self, key: &Q) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.map.remove_entry(key, &self.guard)
     }
@@ -253,7 +253,7 @@ impl<K, V, S> Clone for HashMapRef<'_, K, V, S> {
 
 impl<K, V, S> PartialEq for HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     V: PartialEq,
     S: BuildHasher,
 {
@@ -264,7 +264,7 @@ where
 
 impl<K, V, S> PartialEq<HashMap<K, V, S>> for HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     V: PartialEq,
     S: BuildHasher,
 {
@@ -275,7 +275,7 @@ where
 
 impl<K, V, S> PartialEq<HashMapRef<'_, K, V, S>> for HashMap<K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     V: PartialEq,
     S: BuildHasher,
 {
@@ -286,7 +286,7 @@ where
 
 impl<K, V, S> Eq for HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq,
+    K: Hash + Ord,
     V: Eq,
     S: BuildHasher,
 {
@@ -294,8 +294,8 @@ where
 
 impl<K, Q, V, S> Index<&'_ Q> for HashMapRef<'_, K, V, S>
 where
-    K: Hash + Eq + Borrow<Q>,
-    Q: ?Sized + Hash + Eq,
+    K: Hash + Ord + Borrow<Q>,
+    Q: ?Sized + Hash + Ord,
     S: BuildHasher,
 {
     type Output = V;

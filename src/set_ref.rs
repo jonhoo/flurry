@@ -62,7 +62,7 @@ impl<T, S> HashSetRef<'_, T, S> {
 
 impl<T, S> HashSetRef<'_, T, S>
 where
-    T: Hash + Eq,
+    T: Hash + Ord,
     S: BuildHasher,
 {
     /// Returns `true` if the given value is an element of this set.
@@ -72,7 +72,7 @@ where
     pub fn contains<Q>(&self, value: &Q) -> bool
     where
         T: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.set.contains(value, &self.guard)
     }
@@ -83,7 +83,7 @@ where
     pub fn get<'g, Q>(&'g self, value: &Q) -> Option<&'g T>
     where
         T: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.set.get(value, &self.guard)
     }
@@ -112,7 +112,7 @@ where
 
 impl<T, S> HashSetRef<'_, T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Eq,
+    T: 'static + Sync + Send + Clone + Hash + Ord,
     S: BuildHasher,
 {
     /// Adds a value to the set.
@@ -128,7 +128,7 @@ where
     pub fn remove<Q>(&self, value: &Q) -> bool
     where
         T: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.set.remove(value, &self.guard)
     }
@@ -139,7 +139,7 @@ where
     pub fn take<'g, Q>(&'g self, value: &Q) -> Option<&'g T>
     where
         T: Borrow<Q>,
-        Q: ?Sized + Hash + Eq,
+        Q: ?Sized + Hash + Ord,
     {
         self.set.take(value, &self.guard)
     }
@@ -157,7 +157,7 @@ where
 
 impl<T, S> HashSetRef<'_, T, S>
 where
-    T: Clone,
+    T: Clone + Ord,
 {
     /// Clears the set, removing all elements.
     ///
@@ -201,7 +201,7 @@ impl<T, S> Clone for HashSetRef<'_, T, S> {
 
 impl<T, S> PartialEq for HashSetRef<'_, T, S>
 where
-    T: Hash + Eq,
+    T: Hash + Ord,
     S: BuildHasher,
 {
     fn eq(&self, other: &Self) -> bool {
@@ -211,7 +211,7 @@ where
 
 impl<T, S> PartialEq<HashSet<T, S>> for HashSetRef<'_, T, S>
 where
-    T: Hash + Eq,
+    T: Hash + Ord,
     S: BuildHasher,
 {
     fn eq(&self, other: &HashSet<T, S>) -> bool {
@@ -221,7 +221,7 @@ where
 
 impl<T, S> PartialEq<HashSetRef<'_, T, S>> for HashSet<T, S>
 where
-    T: Hash + Eq,
+    T: Hash + Ord,
     S: BuildHasher,
 {
     fn eq(&self, other: &HashSetRef<'_, T, S>) -> bool {
@@ -231,7 +231,7 @@ where
 
 impl<T, S> Eq for HashSetRef<'_, T, S>
 where
-    T: Hash + Eq,
+    T: Hash + Ord,
     S: BuildHasher,
 {
 }

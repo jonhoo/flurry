@@ -111,7 +111,7 @@ impl<K, V> Table<K, V> {
     ) -> Shared<'g, BinEntry<K, V>>
     where
         K: Borrow<Q>,
-        Q: ?Sized + Eq,
+        Q: ?Sized + Ord,
     {
         match *bin {
             BinEntry::Node(_) => {
@@ -154,15 +154,24 @@ impl<K, V> Table<K, V> {
                     let bin = unsafe { bin.deref() };
 
                     match *bin {
-                        BinEntry::Node(_) => break table.find(bin, hash, key, guard),
+                        BinEntry::Node(_) | BinEntry::Tree(_) => {
+                            break table.find(bin, hash, key, guard)
+                        }
                         BinEntry::Moved => {
                             // safety: same as above.
                             table = unsafe { table.next_table(guard).deref() };
                             continue;
                         }
+                        BinEntry::TreeNode(_) => unreachable!("`find` was called on a Moved entry pointing to a TreeNode, which cannot be the first entry in a bin"),
                     }
                 }
             }
+            BinEntry::TreeNode(_) => {
+                unreachable!(
+                    "`find` was called on a TreeNode, which cannot be the first entry in a bin"
+                );
+            }
+            BinEntry::Tree(_) => TreeBin::find(Shared::from(bin as *const _), hash, key, guard),
         }
     }
 
@@ -186,7 +195,7 @@ impl<K, V> Table<K, V> {
             match *bin_entry {
                 BinEntry::Moved => {}
                 BinEntry::Node(_) => {
-                    // safety: same as above + we own the bin - Node are not shared across the table
+                    // safety: same as above + we own the bin - Nodes are not shared across the table
                     let mut p = unsafe { bin.into_owned() };
                     loop {
                         // safety below:
@@ -210,6 +219,20 @@ impl<K, V> Table<K, V> {
                         p = unsafe { node.next.into_owned() };
                     }
                 }
+                BinEntry::Tree(_) => {
+                    // safety: same as for BinEntry::Node
+                    let p = unsafe { bin.into_owned() };
+                    let bin = if let BinEntry::Tree(bin) = *p.into_box() {
+                        bin
+                    } else {
+                        unreachable!();
+                    };
+                    // TreeBin::drop will take care of freeing the contained TreeNodes and their values
+                    drop(bin);
+                }
+                BinEntry::TreeNode(_) => unreachable!(
+                    "The head of a bin cannot be a TreeNode directly without BinEntry::Tree"
+                ),
             }
         }
     }
