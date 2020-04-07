@@ -3,7 +3,8 @@ use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
 use std::borrow::Borrow;
-use std::fmt::{self, Debug, Formatter};
+use std::error::Error;
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
 use std::sync::{
@@ -151,25 +152,70 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     build_hasher: S,
 }
 
-#[cfg(test)]
-#[test]
-#[should_panic]
-fn disallow_evil() {
-    let map: HashMap<_, _> = HashMap::default();
-    map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
+#[derive(Eq, PartialEq, Clone, Debug)]
+enum PutResult<'a, T> {
+    Inserted {
+        new: &'a T,
+    },
+    Replaced {
+        old: &'a T,
+        new: &'a T,
+    },
+    Exists {
+        current: &'a T,
+        not_inserted: Box<T>,
+    },
+}
 
-    let evil = crossbeam_epoch::Collector::new();
-    let evil = evil.register();
-    let guard = evil.pin();
-    let oops = map.get(&42, &guard);
+impl<'a, T> PutResult<'a, T> {
+    fn before(&self) -> Option<&'a T> {
+        match *self {
+            PutResult::Inserted { .. } => None,
+            PutResult::Replaced { old, .. } => Some(old),
+            PutResult::Exists { current, .. } => Some(current),
+        }
+    }
 
-    map.remove(&42, &crossbeam_epoch::pin());
-    // at this point, the default collector is allowed to free `"hello"`
-    // since no-one has the global epoch pinned as far as it is aware.
-    // `oops` is tied to the lifetime of a Guard that is not a part of
-    // the same epoch group, and so can now be dangling.
-    // but we can still access it!
-    assert_eq!(oops.unwrap(), "hello");
+    #[allow(dead_code)]
+    fn after(&self) -> Option<&'a T> {
+        match *self {
+            PutResult::Inserted { new } => Some(new),
+            PutResult::Replaced { new, .. } => Some(new),
+            PutResult::Exists { .. } => None,
+        }
+    }
+}
+
+/// The error type for the [`HashMap::try_insert`] method.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct TryInsertError<'a, V> {
+    /// A reference to the current value mapped to the key.
+    pub current: &'a V,
+    /// The value that [`HashMap::try_insert`] failed to insert.
+    pub not_inserted: V,
+}
+
+impl<'a, V> Display for TryInsertError<'a, V>
+where
+    V: Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Insert of \"{:?}\" failed as key was already present with value \"{:?}\"",
+            self.not_inserted, self.current
+        )
+    }
+}
+
+impl<'a, V> Error for TryInsertError<'a, V>
+where
+    V: Debug,
+{
+    #[inline]
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        None
+    }
 }
 
 // ===
@@ -1181,9 +1227,10 @@ where
         }
     }
 
-    /// Tries to reserve capacity for at least `additional` more elements to
-    /// be inserted in the `HashMap`. The collection may reserve more space to
-    /// avoid frequent reallocations.
+    /// Tries to reserve capacity for at least `additional` more elements to be inserted in the
+    /// `HashMap`.
+    ///
+    /// The collection may reserve more space to avoid frequent reallocations.
     ///
     /// # Examples
     ///
@@ -1551,8 +1598,7 @@ where
     /// If the map did not have this key present, [`None`] is returned.
     ///
     /// If the map did have this key present, the value is updated, and the old
-    /// value is returned. The key is not updated, though; this matters for
-    /// types that can be `==` without being identical. See the [std-collections
+    /// value is returned. The key is left unchanged. See the [std-collections
     /// documentation] for more.
     ///
     /// [`None`]: std::option::Option::None
@@ -1576,7 +1622,56 @@ where
     /// ```
     pub fn insert<'g>(&'g self, key: K, value: V, guard: &'g Guard) -> Option<&'g V> {
         self.check_guard(guard);
-        self.put(key, value, false, guard)
+        self.put(key, value, false, guard).before()
+    }
+
+    /// Inserts a key-value pair into the map unless the key already exists.
+    ///
+    /// If the map does not contain the key, the key-value pair is inserted
+    /// and this method returns `Ok`.
+    ///
+    /// If the map does contain the key, the map is left unchanged and this
+    /// method returns `Err`.
+    ///
+    /// [std-collections documentation]: https://doc.rust-lang.org/std/collections/index.html#insert-and-complex-keys
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::{HashMap, TryInsertError};
+    ///
+    /// let map = HashMap::new();
+    /// let mref = map.pin();
+    ///
+    /// mref.insert(37, "a");
+    /// assert_eq!(
+    ///     mref.try_insert(37, "b"),
+    ///     Err(TryInsertError { current: &"a", not_inserted: &"b"})
+    /// );
+    /// assert_eq!(mref.try_insert(42, "c"), Ok(&"c"));
+    /// assert_eq!(mref.get(&37), Some(&"a"));
+    /// assert_eq!(mref.get(&42), Some(&"c"));
+    /// ```
+    #[inline]
+    pub fn try_insert<'g>(
+        &'g self,
+        key: K,
+        value: V,
+        guard: &'g Guard,
+    ) -> Result<&'g V, TryInsertError<'g, V>> {
+        match self.put(key, value, true, guard) {
+            PutResult::Exists {
+                current,
+                not_inserted,
+            } => Err(TryInsertError {
+                current,
+                not_inserted: *not_inserted,
+            }),
+            PutResult::Inserted { new } => Ok(new),
+            PutResult::Replaced { .. } => {
+                unreachable!("no_replacement cannot result in PutResult::Replaced")
+            }
+        }
     }
 
     fn put<'g>(
@@ -1585,7 +1680,7 @@ where
         value: V,
         no_replacement: bool,
         guard: &'g Guard,
-    ) -> Option<&'g V> {
+    ) -> PutResult<'g, V> {
         let hash = self.hash(&key);
         let mut table = self.table.load(Ordering::SeqCst, guard);
         let mut bin_count;
@@ -1626,7 +1721,15 @@ where
                     Ok(_old_null_ptr) => {
                         self.add_count(1, Some(0), guard);
                         guard.flush();
-                        return None;
+                        // safety: we have not moved the node's value since we placed it into
+                        // its `Atomic` in the very beginning of the method, so the ref is still
+                        // valid. since the value is not currently marked as garbage, we know it
+                        // will not collected until at least one epoch passes, and since `value`
+                        // was produced under a guard the pins the current epoch, the returned
+                        // reference will remain valid for the guard's lifetime.
+                        return PutResult::Inserted {
+                            new: unsafe { value.deref() },
+                        };
                     }
                     Err(changed) => {
                         assert!(!changed.current.is_null());
@@ -1669,13 +1772,15 @@ where
                 {
                     // fast path if replacement is disallowed and first bin matches
                     let v = head.value.load(Ordering::SeqCst, guard);
-                    // because of `no_replacement`, we don't use the new value, so we need to clean it up
-                    // safety: we own value and did not share it
-                    let _ = unsafe { value.into_owned() };
-                    // safety: since the value is present now, and we've held a guard from the
-                    // beginning of the search, the value cannot be dropped until the next epoch,
-                    // which won't arrive until after we drop our guard.
-                    return Some(unsafe { v.deref() });
+                    // safety (for v): since the value is present now, and we've held a guard from
+                    // the beginning of the search, the value cannot be dropped until the next
+                    // epoch, which won't arrive until after we drop our guard.
+                    // safety (for value): since we never inserted the value in the tree, `value`
+                    // is the last remaining pointer to the initial value.
+                    return PutResult::Exists {
+                        current: unsafe { v.deref() },
+                        not_inserted: unsafe { value.into_owned().into_box() },
+                    };
                 }
                 BinEntry::Node(ref head) => {
                     // bin is non-empty, need to link into it, so we must take the lock
@@ -1718,6 +1823,7 @@ where
                                 // safety: we own value and did not share it
                                 let _ = unsafe { value.into_owned() };
                             } else {
+                                // update the value in the existing node
                                 let now_garbage = n.value.swap(value, Ordering::SeqCst, guard);
                                 // NOTE: now_garbage == current_value
 
@@ -1845,8 +1951,17 @@ where
             if bin_count >= TREEIFY_THRESHOLD {
                 self.treeify_bin(t, bini, guard);
             }
-            if old_val.is_some() {
-                return old_val;
+            if let Some(old_val) = old_val {
+                return PutResult::Replaced {
+                    old: old_val,
+                    // safety: we have not moved the node's value since we placed it into its
+                    // `Atomic` in the very beginning of the method, so the ref is still valid.
+                    // since the value is not currently marked as garbage, we know it will not
+                    // collected until at least one epoch passes, and since `value` was produced
+                    // under a guard the pins the current epoch, the returned reference will remain
+                    // valid for the guard's lifetime.
+                    new: unsafe { value.deref() },
+                };
             }
             break;
         }
@@ -1854,7 +1969,15 @@ where
         debug_assert!(old_val.is_none());
         self.add_count(1, Some(bin_count), guard);
         guard.flush();
-        None
+        PutResult::Inserted {
+            // safety: we have not moved the node's value since we placed it into its
+            // `Atomic` in the very beginning of the method, so the ref is still valid.
+            // since the value is not currently marked as garbage, we know it will not
+            // collected until at least one epoch passes, and since `value` was produced
+            // under a guard the pins the current epoch, the returned reference will remain
+            // valid for the guard's lifetime.
+            new: unsafe { value.deref() },
+        }
     }
 
     fn put_all<I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &Guard) {
@@ -2212,8 +2335,7 @@ where
         new_val
     }
 
-    /// Removes a key from the map, returning a reference to the value at the
-    /// key if the key was previously in the map.
+    /// Removes a key-value pair from the map, and returns the removed value (if any).
     ///
     /// The key may be any borrowed form of the map's key type, but
     /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
@@ -2575,6 +2697,9 @@ where
     ///
     /// In other words, remove all pairs `(k, v)` such that `f(&k,&v)` returns `false`.
     ///
+    /// This method always deletes any key/value pair that `f` returns `false` for, even if if the
+    /// value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
+    ///
     /// # Examples
     ///
     /// ```
@@ -2588,11 +2713,6 @@ where
     /// map.pin().retain_force(|&k, _| k % 2 == 0);
     /// assert_eq!(map.pin().len(), 4);
     /// ```
-    ///
-    /// # Notes
-    ///
-    /// This method always deletes any key/value pair that `f` returns `false` for,
-    /// even if if the value is updated concurrently. If you do not want that behavior, use [`HashMap::retain`].
     pub fn retain_force<F>(&self, mut f: F, guard: &Guard)
     where
         F: FnMut(&K, &V) -> bool,
@@ -3149,6 +3269,23 @@ fn replace_existing() {
 }
 
 #[test]
+fn no_replacement_return_val() {
+    // NOTE: this test also serves as a leak test for the injected value
+    let map = HashMap::<usize, String>::new();
+    {
+        let guard = epoch::pin();
+        map.insert(42, String::from("hello"), &guard);
+        assert_eq!(
+            map.put(42, String::from("world"), true, &guard),
+            PutResult::Exists {
+                current: &String::from("hello"),
+                not_inserted: Box::new(String::from("world")),
+            }
+        );
+    }
+}
+
+#[test]
 fn replace_existing_observed_value_matching() {
     let map = HashMap::<usize, usize>::new();
     {
@@ -3288,5 +3425,24 @@ mod tree_bins {
         // Access a value that should still be in the map
         let guard = &map.guard();
         assert_eq!(map.get(&9, guard), Some(&9));
+    }
+    #[test]
+    #[should_panic]
+    fn disallow_evil() {
+        let map: HashMap<_, _> = HashMap::default();
+        map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
+
+        let evil = crossbeam_epoch::Collector::new();
+        let evil = evil.register();
+        let guard = evil.pin();
+        let oops = map.get(&42, &guard);
+
+        map.remove(&42, &crossbeam_epoch::pin());
+        // at this point, the default collector is allowed to free `"hello"`
+        // since no-one has the global epoch pinned as far as it is aware.
+        // `oops` is tied to the lifetime of a Guard that is not a part of
+        // the same epoch group, and so can now be dangling.
+        // but we can still access it!
+        assert_eq!(oops.unwrap(), "hello");
     }
 }

@@ -2,14 +2,13 @@
 //!
 //! See `HashSet` for details.
 
+use crate::epoch::Guard;
+use crate::iter::Keys;
+use crate::HashMap;
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
 use std::iter::FromIterator;
-
-use crate::epoch::Guard;
-use crate::iter::Keys;
-use crate::HashMap;
 
 /// A concurrent hash set implemented as a `HashMap` where the value is `()`.
 ///
@@ -156,7 +155,7 @@ impl<T, S> HashSet<T, S> {
         self.map.guard()
     }
 
-    /// Returns the number of entries in the set.
+    /// Returns the number of elements in the set.
     ///
     /// # Examples
     ///
@@ -190,9 +189,9 @@ impl<T, S> HashSet<T, S> {
         self.len() == 0
     }
 
-    /// An iterator visiting all values in arbitrary order.
+    /// An iterator visiting all elements in arbitrary order.
     ///
-    /// The iterator element type is `(&'g K, &'g V)`.
+    /// The iterator element type is `&'g T`.
     ///
     /// See [`HashMap::keys`] for details.
     ///
@@ -220,7 +219,7 @@ where
     T: Hash + Ord,
     S: BuildHasher,
 {
-    /// Returns `true` if the set contains the specified value.
+    /// Returns `true` if the given value is an element of this set.
     ///
     /// The value may be any borrowed form of the set's value type, but
     /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
@@ -250,7 +249,7 @@ where
         self.map.contains_key(value, guard)
     }
 
-    /// Returns a reference to the value in the set, if any, that is equal to the given value.
+    /// Returns a reference to the element in the set, if any, that is equal to the given value.
     ///
     /// The value may be any borrowed form of the set's value type, but
     /// [`Hash`] and [`Ord`] on the borrowed form *must* match those for
@@ -275,6 +274,101 @@ where
         Q: ?Sized + Hash + Ord,
     {
         self.map.get_key_value(value, guard).map(|(k, _)| k)
+    }
+
+    /// Returns `true` if `self` has no elements in common with `other`.
+    ///
+    /// This is equivalent to checking for an empty intersection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use flurry::HashSet;
+    ///
+    /// let a = HashSet::from_iter(&[1, 2, 3]);
+    /// let b = HashSet::new();
+    ///
+    /// assert!(a.pin().is_disjoint(&b.pin()));
+    /// b.pin().insert(4);
+    /// assert!(a.pin().is_disjoint(&b.pin()));
+    /// b.pin().insert(1);
+    /// assert!(!a.pin().is_disjoint(&b.pin()));
+    ///
+    /// ```
+    pub fn is_disjoint(
+        &self,
+        other: &HashSet<T, S>,
+        our_guard: &Guard,
+        their_guard: &Guard,
+    ) -> bool {
+        for value in self.iter(our_guard) {
+            if other.contains(&value, their_guard) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Returns `true` if the set is a subset of another, i.e., `other` contains at least all the values in `self`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use flurry::HashSet;
+    ///
+    /// let sup = HashSet::from_iter(&[1, 2, 3]);
+    /// let set = HashSet::new();
+    ///
+    /// assert!(set.pin().is_subset(&sup.pin()));
+    /// set.pin().insert(2);
+    /// assert!(set.pin().is_subset(&sup.pin()));
+    /// set.pin().insert(4);
+    /// assert!(!set.pin().is_subset(&sup.pin()));
+    /// ```
+    pub fn is_subset(&self, other: &HashSet<T, S>, our_guard: &Guard, their_guard: &Guard) -> bool {
+        for value in self.iter(our_guard) {
+            if !other.contains(&value, their_guard) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Returns `true` if the set is a superset of another, i.e., `self` contains at least all the values in `other`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::iter::FromIterator;
+    /// use flurry::HashSet;
+    ///
+    /// let sub = HashSet::from_iter(&[1, 2]);
+    /// let set = HashSet::new();
+    ///
+    /// assert!(!set.pin().is_superset(&sub.pin()));
+    ///
+    /// set.pin().insert(0);
+    /// set.pin().insert(1);
+    /// assert!(!set.pin().is_superset(&sub.pin()));
+    ///
+    /// set.pin().insert(2);
+    /// assert!(set.pin().is_superset(&sub.pin()));
+    /// ```
+    pub fn is_superset(
+        &self,
+        other: &HashSet<T, S>,
+        our_guard: &Guard,
+        their_guard: &Guard,
+    ) -> bool {
+        other.is_subset(self, their_guard, our_guard)
+    }
+
+    pub(crate) fn guarded_eq(&self, other: &Self, our_guard: &Guard, their_guard: &Guard) -> bool {
+        self.map.guarded_eq(&other.map, our_guard, their_guard)
     }
 }
 
@@ -301,7 +395,7 @@ where
     /// assert_eq!(set.insert(2, &guard), false);
     /// assert!(set.contains(&2, &guard));
     /// ```
-    pub fn insert<'g>(&'g self, value: T, guard: &'g Guard) -> bool {
+    pub fn insert(&self, value: T, guard: &Guard) -> bool {
         let old = self.map.insert(value, (), guard);
         old.is_none()
     }
@@ -332,7 +426,7 @@ where
     /// assert!(!set.contains(&2, &guard));
     /// assert_eq!(set.remove(&2, &guard), false);
     /// ```
-    pub fn remove<'g, Q>(&'g self, value: &Q, guard: &'g Guard) -> bool
+    pub fn remove<Q>(&self, value: &Q, guard: &Guard) -> bool
     where
         T: Borrow<Q>,
         Q: ?Sized + Hash + Ord,
@@ -366,6 +460,60 @@ where
         Q: ?Sized + Hash + Ord,
     {
         self.map.remove_entry(value, guard).map(|(k, _)| k)
+    }
+
+    /// Retains only the elements specified by the predicate.
+    ///
+    /// In other words, remove all elements `e` such that `f(&e)` returns `false`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    ///
+    /// for i in 0..8 {
+    ///     set.pin().insert(i);
+    /// }
+    /// set.pin().retain(|&e| e % 2 == 0);
+    /// assert_eq!(set.pin().len(), 4);
+    /// ```
+    pub fn retain<F>(&self, mut f: F, guard: &Guard)
+    where
+        F: FnMut(&T) -> bool,
+    {
+        self.map.retain(|value, ()| f(value), guard)
+    }
+}
+
+impl<T, S> HashSet<T, S>
+where
+    T: Clone + Ord,
+{
+    /// Clears the set, removing all elements.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flurry::HashSet;
+    ///
+    /// let set = HashSet::new();
+    ///
+    /// set.pin().insert("a");
+    /// set.pin().clear();
+    /// assert!(set.pin().is_empty());
+    /// ```
+    pub fn clear(&self, guard: &Guard) {
+        self.map.clear(guard)
+    }
+
+    /// Tries to reserve capacity for at least `additional` more elements to
+    /// be inserted in the `HashSet`.
+    ///
+    /// The collection may reserve more space to avoid frequent reallocations.
+    pub fn reserve(&self, additional: usize, guard: &Guard) {
+        self.map.reserve(additional, guard)
     }
 }
 
