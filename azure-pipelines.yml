@@ -58,7 +58,7 @@ jobs:
      - script: cargo miri setup
        displayName: cargo miri setup
      - script: cargo miri test
-       displayName: cargo miri test
+       displayName: cargo miri test -- -Zmiri-ignore-leaks
  - job: asan
    dependsOn: deny
    displayName: "Run address sanitizer on test suite"
