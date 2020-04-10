@@ -371,7 +371,11 @@ impl<K, V> TreeBin<K, V> {
                         // not obtain new references to our thread handle. Also,
                         // we just swapped out that handle, so it is no longer
                         // reachable.
-                        let _ = unsafe { waiter.into_owned() };
+                        //
+                        // Now, we cannot safely drop this _immediately_, since
+                        // we may have woken up and reached here _while_ some
+                        // was trying to wake us up, so we defer_destroy instead.
+                        unsafe { guard.defer_destroy(waiter) };
                     }
                     return;
                 }
