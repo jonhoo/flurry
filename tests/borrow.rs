@@ -67,6 +67,7 @@ fn update() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn concurrent_insert() {
     let map = Arc::new(HashMap::<String, usize>::new());
     let keys = Arc::new((0..64).map(|i| i.to_string()).collect::<Vec<_>>());
@@ -97,6 +98,7 @@ fn concurrent_insert() {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn concurrent_remove() {
     let map = Arc::new(HashMap::<String, usize>::new());
     let keys = Arc::new((0..64).map(|i| i.to_string()).collect::<Vec<_>>());
