@@ -3538,6 +3538,7 @@ mod tree_bins {
     }
     #[test]
     #[should_panic]
+    #[cfg(not(miri))]
     fn disallow_evil() {
         let map: HashMap<_, _> = HashMap::default();
         map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
