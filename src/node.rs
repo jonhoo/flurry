@@ -364,6 +364,7 @@ impl<K, V> TreeBin<K, V> {
                         // `waiter` thread handle (reading threads only use it
                         // to notify us). Thus, having stored a valid value
                         // below, `waiter` is a valid pointer.
+                        //
                         // The reading thread that notifies us does so as its
                         // last action in `find` and then lets go of the
                         // reference immediately. _New_ reading threads already
@@ -372,9 +373,12 @@ impl<K, V> TreeBin<K, V> {
                         // we just swapped out that handle, so it is no longer
                         // reachable.
                         //
-                        // Now, we cannot safely drop this _immediately_, since
-                        // we may have woken up and reached here _while_ some
-                        // was trying to wake us up, so we defer_destroy instead.
+                        // We cannot safely drop the waiter immediately, because we may not have
+                        // parked after storing our thread handle in `waiter`. This can happen if
+                        // we noticed that there were no readers immediately after setting us as
+                        // the waiter, and then went directly into this branch. In that case, some
+                        // other thread may simultaneously have noticed that we wanted to be woken
+                        // up, and be trying to call `.unpark`. So, we `defer_destroy` instead.
                         unsafe { guard.defer_destroy(waiter) };
                     }
                     return;
