@@ -92,7 +92,7 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// The next table index (plus one) to split while resizing.
     transfer_index: AtomicIsize,
 
-    count: AtomicUsize,
+    count: AtomicIsize,
 
     /// Table initialization and resizing control.  When negative, the
     /// table is being initialized or resized: -1 for initialization,
@@ -298,7 +298,7 @@ impl<K, V, S> HashMap<K, V, S> {
             table: Atomic::null(),
             next_table: Atomic::null(),
             transfer_index: AtomicIsize::new(0),
-            count: AtomicUsize::new(0),
+            count: AtomicIsize::new(0),
             size_ctl: AtomicIsize::new(0),
             build_hasher: hash_builder,
             collector: epoch::default_collector().clone(),
@@ -392,7 +392,12 @@ impl<K, V, S> HashMap<K, V, S> {
     /// assert!(map.pin().len() == 2);
     /// ```
     pub fn len(&self) -> usize {
-        self.count.load(Ordering::Relaxed)
+        let n = self.count.load(Ordering::Relaxed);
+        if n < 0 {
+            0
+        } else {
+            n as usize
+        }
     }
 
     /// Returns `true` if the map is empty. Otherwise returns `false`.
@@ -1154,14 +1159,8 @@ where
 
         use std::cmp;
         let mut count = match n.cmp(&0) {
-            cmp::Ordering::Greater => {
-                let n = n as usize;
-                self.count.fetch_add(n, Ordering::SeqCst) + n
-            }
-            cmp::Ordering::Less => {
-                let n = n.abs() as usize;
-                self.count.fetch_sub(n, Ordering::SeqCst) - n
-            }
+            cmp::Ordering::Greater => self.count.fetch_add(n, Ordering::SeqCst) + n,
+            cmp::Ordering::Less => self.count.fetch_sub(n.abs(), Ordering::SeqCst) - n,
             cmp::Ordering::Equal => self.count.load(Ordering::SeqCst),
         };
 
