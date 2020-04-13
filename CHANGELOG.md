@@ -23,10 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Many more tests have been ported over.
 - Fixed several memory leaks.
 
-## [0.1.0] - 2020-02-04
+## 0.1.0 - 2020-02-04
 ### Added
 - First "real" release.
 
-[Unreleased]: https://github.com/jonhoo/inferno/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/jonhoo/inferno/compare/6cda7c8e7501b9b7453e7a2db269a994a99c0660...v0.1.0
-[0.3.0]: https://github.com/jonhoo/inferno/compare/v0.2.1...v0.3.0
+[Unreleased]: https://github.com/jonhoo/flurry/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jonhoo/flurry/compare/v0.2.1...v0.3.0
