@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [0.3.0] - 2020-04-13
+### Added
+- `HashMap::try_insert` (#74)
+- `HashSetRef` (#78)
+- Serialization support with `serde` (#79; behind a feature flag).
+
+### Changed
+- Changelog. Which will now (in theory) be updated with every release.
+- We now implement Java's "tree bin optimization" (#72).
+- Many more tests have been ported over.
+- Fixed several memory leaks.
+
 ## [0.1.0] - 2020-02-04
 ### Added
 - First "real" release.
