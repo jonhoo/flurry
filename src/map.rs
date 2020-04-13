@@ -2745,101 +2745,128 @@ where
             // safety: we loaded `bin` while the epoch was pinned by our
             // guard. if the bin was replaced since then, the old bin still
             // won't be dropped until after we release our guard.
-            if let BinEntry::Node(ref node) = unsafe { bin.deref() } {
-                let lock = node.lock.lock();
-                // check if `bin` is still the head
-                if tab.bin(index, guard) != bin {
-                    return;
-                }
-                let mut e = bin;
-                let mut head = Shared::null();
-                let mut tail = Shared::null();
-                while !e.is_null() {
-                    // safety: either `e` is `bin`, in which case it is
-                    // valid due to the above, or `e` was obtained from
-                    // a next pointer. Any next pointer obtained from
-                    // bin is valid at the time we look up bin in the
-                    // table, at which point the epoch is pinned by our
-                    // guard. Since we found the next pointer in a valid
-                    // map and it is not null (as checked above), the
-                    // node it points to was present (i.e. not removed)
-                    // from the map in the current epoch. Thus, because
-                    // the epoch cannot advance until we release our
-                    // guard, `e` is also valid if it was obtained from
-                    // a next pointer.
-                    let e_deref = unsafe { e.deref() }.as_node().unwrap();
-                    // NOTE: cloning the value uses a load with Ordering::Relaxed, but
-                    // write access is synchronized through the bin lock
-                    let new_tree_node = TreeNode::new(
-                        e_deref.hash,
-                        e_deref.key.clone(),
-                        e_deref.value.clone(),
-                        Atomic::null(),
-                        Atomic::null(),
+            match unsafe { bin.deref() } {
+                BinEntry::Node(ref node) => {
+                    let lock = node.lock.lock();
+                    // check if `bin` is still the head
+                    if tab.bin(index, guard) != bin {
+                        return;
+                    }
+                    let mut e = bin;
+                    let mut head = Shared::null();
+                    let mut tail = Shared::null();
+                    while !e.is_null() {
+                        // safety: either `e` is `bin`, in which case it is valid due to the above,
+                        // or `e` was obtained from a next pointer. Any next pointer obtained from
+                        // bin is valid at the time we look up bin in the table, at which point the
+                        // epoch is pinned by our guard. Since we found the next pointer in a valid
+                        // map and it is not null (as checked above), the node it points to was
+                        // present (i.e. not removed) from the map in the current epoch. Thus,
+                        // because the epoch cannot advance until we release our guard, `e` is also
+                        // valid if it was obtained from a next pointer.
+                        let e_deref = unsafe { e.deref() }.as_node().unwrap();
+                        // NOTE: cloning the value uses a load with Ordering::Relaxed, but
+                        // write access is synchronized through the bin lock
+                        let new_tree_node = TreeNode::new(
+                            e_deref.hash,
+                            e_deref.key.clone(),
+                            e_deref.value.clone(),
+                            Atomic::null(),
+                            Atomic::null(),
+                        );
+                        new_tree_node.prev.store(tail, Ordering::Relaxed);
+                        let new_tree_node =
+                            Owned::new(BinEntry::TreeNode(new_tree_node)).into_shared(guard);
+                        if tail.is_null() {
+                            // this was the first TreeNode, so it becomes the head
+                            head = new_tree_node;
+                        } else {
+                            // safety: if `tail` is not `null`, we have just created
+                            // it in the last iteration, thus the pointer is valid
+                            unsafe { tail.deref() }
+                                .as_tree_node()
+                                .unwrap()
+                                .node
+                                .next
+                                .store(new_tree_node, Ordering::Relaxed);
+                        }
+                        tail = new_tree_node;
+                        e = e_deref.next.load(Ordering::SeqCst, guard);
+                    }
+                    tab.store_bin(
+                        index,
+                        Owned::new(BinEntry::Tree(TreeBin::new(
+                            // safety: we have just created `head` and its `next`
+                            // nodes and have never shared them
+                            unsafe { head.into_owned() },
+                            guard,
+                        ))),
                     );
-                    new_tree_node.prev.store(tail, Ordering::Relaxed);
-                    let new_tree_node =
-                        Owned::new(BinEntry::TreeNode(new_tree_node)).into_shared(guard);
-                    if tail.is_null() {
-                        // this was the first TreeNode, so it becomes the head
-                        head = new_tree_node;
-                    } else {
-                        // safety: if `tail` is not `null`, we have just created
-                        // it in the last iteration, thus the pointer is valid
-                        unsafe { tail.deref() }
-                            .as_tree_node()
-                            .unwrap()
-                            .node
-                            .next
-                            .store(new_tree_node, Ordering::Relaxed);
+                    drop(lock);
+                    // make sure the old bin entries get dropped
+                    e = bin;
+                    while !e.is_null() {
+                        // safety: we just replaced the bin containing this BinEntry, making it
+                        // unreachable for other threads since subsequent loads will see the new
+                        // bin. Threads with existing references to `e` must have obtained them in
+                        // this or an earlier epoch, and this epoch is pinned by our guard. Thus,
+                        // `e` will only be dropped after these threads release their guard, at
+                        // which point they can no longer hold their reference to `e`.
+                        // The BinEntry pointers are valid to deref for the same reason as above.
+                        //
+                        // NOTE: we do not drop the value, since it gets moved to the new TreeNode
+                        unsafe {
+                            guard.defer_destroy(e);
+                            e = e
+                                .deref()
+                                .as_node()
+                                .unwrap()
+                                .next
+                                .load(Ordering::SeqCst, guard);
+                        }
                     }
-                    tail = new_tree_node;
-                    e = e_deref.next.load(Ordering::SeqCst, guard);
                 }
-                tab.store_bin(
-                    index,
-                    Owned::new(BinEntry::Tree(TreeBin::new(
-                        // safety: we have just created `head` and its `next`
-                        // nodes and have never shared them
-                        unsafe { head.into_owned() },
-                        guard,
-                    ))),
-                );
-                drop(lock);
-                // make sure the old bin entries get dropped
-                e = bin;
-                while !e.is_null() {
-                    // safety: we just replaced the bin containing this
-                    // BinEntry, making it unreachable for other threads
-                    // since subsequent loads will see the new bin.
-                    // Threads with existing references to `e` must have
-                    // obtained them in this or an earlier epoch, and
-                    // this epoch is pinned by our guard. Thus, `e` will
-                    // only be dropped after these threads release their
-                    // guard, at which point they can no longer hold
-                    // their reference to `e`.
-                    // The BinEntry pointers are valid to deref for the
-                    // same reason as above.
+                BinEntry::Moved | BinEntry::Tree(_) => {
+                    // The bin we wanted to treeify has changed under us. This is possible because
+                    // the call to `treeify_bin` does not happen inside the critical section of its
+                    // callers (while they are holding the lock). To see why, consider the
+                    // implications for the cases we match here:
                     //
-                    // NOTE: we do not drop the value, since it gets
-                    // moved to the new TreeNode
-                    unsafe {
-                        guard.defer_destroy(e);
-                        e = e
-                            .deref()
-                            .as_node()
-                            .unwrap()
-                            .next
-                            .load(Ordering::SeqCst, guard);
-                    }
+                    //   BinEntry::Moved:
+                    //     One thread inserts a new entry and passes the `TREEIFY_THRESHOLD`, but a
+                    //     different thread executes a move of that bin. If we _always_ forced
+                    //     treeification to happen after the insert while still holding the lock, the
+                    //     move would have to wait for the bin lock and would then move the treeified
+                    //     bin. It is very likely that the move will split the bin in question into two
+                    //     smaller bins, both below the threshold, and has to untreeify the bin again
+                    //     (since the bin we inserted to _just_ passed the threshold right before the
+                    //     move).
+                    //       If we instead try to treeify after the releasing the lock, and due to
+                    //     scheduling the move happens first, it is fine for us as the first thread to
+                    //     see the `Moved` when we re-check here and just not treeify the bin. If either
+                    //     of the two bins in the new table (after the bin is moved) is still large
+                    //     enough to be above the `TREEIFY_THRESHOLD`, it will still get treeified in
+                    //     the _new_ table with the next insert.
+                    //   BinEntry::Tree(_):
+                    //     In the same scenario of trying to treeify _outside_ of the critical section,
+                    //     if there is one insert passing the threshold there may then be another insert
+                    //     before the first insert actually gets to do the treeification (due to
+                    //     scheduling). This second insert might also get to treeifying the bin (it will
+                    //     try because it sees a regular bin and the number of elements in the bin is
+                    //     still above the threshold). When the first thread resumes and re-checks here,
+                    //     the bin is already treeified and so it is again fine to not treeify it here.
+                    //       Of course there is a tradeoff here where the second insert would already have
+                    //     happend into a tree bin if we forced the first thread to treeify while still
+                    //     holding the lock. However, the second thread would then also have to wait for
+                    //     the lock before executing its insert.
+                    //
+                    // With the above reasoning, we choose to minimize the time any thread holds the
+                    // lock and allow other threads to possibly mutate the bin we want to treeify
+                    // before we get to do just that. If we encounter such a situation, we don't
+                    // need to perform any action on the bin anymore, since either it has already
+                    // been treeified or it was moved to a new table.
                 }
-            } else {
-                match unsafe { bin.deref() } {
-                    BinEntry::Node(_) => unreachable!("Node is the regular `if` case"),
-                    BinEntry::Moved => unreachable!("treeifying a Moved entry"),
-                    BinEntry::Tree(_) => unreachable!("treeifying a Tree"),
-                    BinEntry::TreeNode(_) => unreachable!("treeifying a TreeBin"),
-                };
+                BinEntry::TreeNode(_) => unreachable!("TreeNode cannot be the head of a bin"),
             }
         }
     }
