@@ -147,6 +147,7 @@ fn stress_find_thread(env: Arc<Environment>) {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn stress_test() {
     let root = Arc::new(Environment::new());
     let mut threads = Vec::new();

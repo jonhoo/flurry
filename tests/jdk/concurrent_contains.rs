@@ -11,6 +11,7 @@ const ITERATIONS: usize = 256;
 const ROUNDS: usize = 32;
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn test_concurrent_contains_key() {
     let map = HashMap::new();
     let mut content = [0; NUM_ENTRIES];

@@ -206,7 +206,7 @@ fn compute_if_present_remove() {
 }
 
 #[test]
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 fn concurrent_insert() {
     let map = Arc::new(HashMap::<usize, usize>::new());
 
@@ -237,7 +237,7 @@ fn concurrent_insert() {
 }
 
 #[test]
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 fn concurrent_remove() {
     let map = Arc::new(HashMap::<usize, usize>::new());
 
@@ -278,7 +278,7 @@ fn concurrent_remove() {
 }
 
 #[test]
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 fn concurrent_compute_if_present() {
     let map = Arc::new(HashMap::<usize, usize>::new());
 
@@ -317,7 +317,7 @@ fn concurrent_compute_if_present() {
 }
 
 #[test]
-#[cfg(not(miri))]
+#[cfg_attr(miri, ignore)]
 fn concurrent_resize_and_get() {
     let map = Arc::new(HashMap::<usize, usize>::new());
     {

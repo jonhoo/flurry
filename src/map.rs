@@ -3383,7 +3383,7 @@ mod tree_bins {
     }
 
     #[test]
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     fn concurrent_tree_bin() {
         let map = HashMap::<usize, usize, _>::with_hasher(ZeroHashBuilder);
         // first, ensure that we have a tree bin
@@ -3538,7 +3538,7 @@ mod tree_bins {
     }
     #[test]
     #[should_panic]
-    #[cfg(not(miri))]
+    #[cfg_attr(miri, ignore)]
     fn disallow_evil() {
         let map: HashMap<_, _> = HashMap::default();
         map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
