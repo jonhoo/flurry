@@ -57,11 +57,7 @@ jobs:
            - miri
      - script: cargo miri setup
        displayName: cargo miri setup
-     # ignore leaks due to
-     # https://github.com/crossbeam-rs/crossbeam/issues/464
-     # which is
-     # https://github.com/rust-lang/miri/issues/940
-     - script: cargo miri -Zmiri-ignore-leaks test
+     - script: cargo miri test -- -Zmiri-ignore-leaks
        displayName: cargo miri test
  - job: asan
    dependsOn: deny

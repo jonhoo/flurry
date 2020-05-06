@@ -3,8 +3,17 @@ use flurry::*;
 use rand::prelude::*;
 use std::hash::Hash;
 
+#[cfg(not(miri))]
 const SIZE: usize = 50_000;
+#[cfg(miri)]
+const SIZE: usize = 12;
+
+// there must be more things absent than present!
+#[cfg(not(miri))]
 const ABSENT_SIZE: usize = 1 << 17;
+#[cfg(miri)]
+const ABSENT_SIZE: usize = 1 << 5;
+
 const ABSENT_MASK: usize = ABSENT_SIZE - 1;
 
 fn t1<K, V>(map: &HashMap<K, V>, keys: &[K], expect: usize)

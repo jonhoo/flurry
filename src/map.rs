@@ -7,10 +7,7 @@ use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
-use std::sync::{
-    atomic::{AtomicIsize, AtomicUsize, Ordering},
-    Once,
-};
+use std::sync::atomic::{AtomicIsize, Ordering};
 
 const ISIZE_BITS: usize = core::mem::size_of::<isize>() * 8;
 
@@ -62,8 +59,10 @@ const MAX_RESIZERS: isize = (1 << (ISIZE_BITS - RESIZE_STAMP_BITS)) - 1;
 /// The bit shift for recording size stamp in `size_ctl`.
 const RESIZE_STAMP_SHIFT: usize = ISIZE_BITS - RESIZE_STAMP_BITS;
 
-static NCPU_INITIALIZER: Once = Once::new();
-static NCPU: AtomicUsize = AtomicUsize::new(0);
+#[cfg(not(miri))]
+static NCPU_INITIALIZER: std::sync::Once = std::sync::Once::new();
+#[cfg(not(miri))]
+static NCPU: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 macro_rules! load_factor {
     ($n: expr) => {
@@ -3383,6 +3382,7 @@ mod tree_bins {
     }
 
     #[test]
+    #[cfg_attr(miri, ignore)]
     fn concurrent_tree_bin() {
         let map = HashMap::<usize, usize, _>::with_hasher(ZeroHashBuilder);
         // first, ensure that we have a tree bin
@@ -3537,6 +3537,7 @@ mod tree_bins {
     }
     #[test]
     #[should_panic]
+    #[cfg_attr(miri, ignore)]
     fn disallow_evil() {
         let map: HashMap<_, _> = HashMap::default();
         map.insert(42, String::from("hello"), &crossbeam_epoch::pin());

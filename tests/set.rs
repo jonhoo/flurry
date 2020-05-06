@@ -99,6 +99,7 @@ fn update() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn concurrent_insert() {
     let set = Arc::new(HashSet::<usize>::new());
 
@@ -128,6 +129,7 @@ fn concurrent_insert() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn concurrent_remove() {
     let set = Arc::new(HashSet::<usize>::new());
 

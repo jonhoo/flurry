@@ -25,6 +25,7 @@ fn insert(map: Arc<HashMap<KeyVal, KeyVal>>, k: KeyVal) {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn test_concurrent_insert<'g>() {
     test(insert);
 }

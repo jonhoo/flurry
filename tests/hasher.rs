@@ -23,7 +23,7 @@ impl BuildHasher for ZeroHashBuilder {
 }
 
 fn check<S: BuildHasher + Default>() {
-    let range = 0..1000;
+    let range = if cfg!(miri) { 0..16 } else { 0..1000 };
     let guard = epoch::pin();
     let map = HashMap::<i32, i32, S>::default();
     for i in range.clone() {
