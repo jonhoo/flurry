@@ -8,46 +8,44 @@ where
     V: Send + Sync + 'static,
     S: BuildHasher + Sync,
 {
-    // This is of limited use due to the `&mut self` parameter. See `par_extend_sync`
     fn par_extend<I>(&mut self, par_iter: I)
     where
         I: IntoParallelIterator<Item = (K, V)>,
     {
-        self.par_extend_sync(par_iter);
+        (&*self).par_extend(par_iter);
     }
 }
 
-impl<K, V, S> HashMap<K, V, S>
+impl<K, V, S> ParallelExtend<(K, V)> for &HashMap<K, V, S>
 where
     K: Clone + Hash + Ord + Send + Sync + 'static,
     V: Send + Sync + 'static,
     S: BuildHasher + Sync,
 {
-    // FIXME: Terrible name, just didn't want to shadow the rayon name
-    fn par_extend_sync<I>(&self, par_iter: I)
+    fn par_extend<I>(&mut self, par_iter: I)
     where
         I: IntoParallelIterator<Item = (K, V)>,
     {
-        par_iter.into_par_iter().for_each(|(k, v)| {
-            // Unfortunate that we need to create a guard for each insert operation
-            // Ideally we'd create a guard for each `rayon` worker thread instead
-            // Perhaps this could be done with a thread local?
-            let guard = self.guard();
-            self.insert(k, v, &guard);
-        });
+        par_iter.into_par_iter().for_each_init(
+            || self.guard(),
+            |guard, (k, v)| {
+                self.insert(k, v, &guard);
+            },
+        );
     }
 }
 
-impl<K, V> FromParallelIterator<(K, V)> for HashMap<K, V, crate::DefaultHashBuilder>
+impl<K, V, S> FromParallelIterator<(K, V)> for HashMap<K, V, S>
 where
     K: Clone + Hash + Ord + Send + Sync + 'static,
     V: Send + Sync + 'static,
+    S: BuildHasher + Default + Sync,
 {
     fn from_par_iter<I>(par_iter: I) -> Self
     where
         I: IntoParallelIterator<Item = (K, V)>,
     {
-        let mut created_map = HashMap::new();
+        let mut created_map = HashMap::with_hasher(S::default());
         created_map.par_extend(par_iter);
         created_map
     }
