@@ -41,7 +41,7 @@ use std::iter::FromIterator;
 /// }
 /// ```
 pub struct HashSet<T, S = crate::DefaultHashBuilder> {
-    map: HashMap<T, (), S>,
+    pub(crate) map: HashMap<T, (), S>,
 }
 
 impl<T> HashSet<T, crate::DefaultHashBuilder> {

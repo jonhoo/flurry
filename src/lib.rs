@@ -252,6 +252,9 @@ mod raw;
 mod set;
 mod set_ref;
 
+#[cfg(feature = "rayon")]
+mod rayon_impls;
+
 #[cfg(feature = "serde")]
 mod serde_impls;
 
