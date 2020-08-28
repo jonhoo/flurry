@@ -1815,11 +1815,14 @@ where
                             let current_value = unsafe { current_value.deref() };
 
                             if no_replacement {
-                                // the key is not absent, so don't update
-                                // because of `no_replacement`, we don't use the
-                                // new value, so we need to clean it up
+                                // the key is not absent, so don't update because of
+                                // `no_replacement`, we don't use the new value, so we need to clean
+                                // it up and return it back to the caller
                                 // safety: we own value and did not share it
-                                let _ = unsafe { value.into_owned() };
+                                return PutResult::Exists {
+                                    current: current_value,
+                                    not_inserted: unsafe { value.into_owned().into_box() },
+                                };
                             } else {
                                 // update the value in the existing node
                                 let now_garbage = n.value.swap(value, Ordering::SeqCst, guard);
@@ -1902,11 +1905,14 @@ where
                         // next epoch, which won't arrive until after we drop our guard.
                         let current_value = unsafe { current_value.deref() };
                         if no_replacement {
-                            // the key is not absent, so don't update
-                            // because of `no_replacement`, we don't use the
-                            // new value, so we need to clean it up
+                            // the key is not absent, so don't update because of
+                            // `no_replacement`, we don't use the new value, so we need to clean
+                            // it up and return it back to the caller
                             // safety: we own value and did not share it
-                            let _ = unsafe { value.into_owned() };
+                            return PutResult::Exists {
+                                current: current_value,
+                                not_inserted: unsafe { value.into_owned().into_box() },
+                            };
                         } else {
                             let now_garbage =
                                 tree_node.node.value.swap(value, Ordering::SeqCst, guard);
