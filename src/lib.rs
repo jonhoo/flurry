@@ -238,7 +238,7 @@
     missing_docs,
     missing_debug_implementations,
     unreachable_pub,
-    intra_doc_link_resolution_failure
+    broken_intra_doc_links
 )]
 #![warn(rust_2018_idioms)]
 #![allow(clippy::cognitive_complexity)]
