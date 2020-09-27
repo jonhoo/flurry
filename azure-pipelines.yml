@@ -55,10 +55,10 @@ jobs:
          rust: $(nightly)
          components:
            - miri
-     - script: cargo miri setup
-       displayName: cargo miri setup
-     - script: cargo miri test -- -Zmiri-ignore-leaks
+     - script: cargo miri test
        displayName: cargo miri test
+       env:
+         MIRIFLAGS: -Zmiri-ignore-leaks
  - job: asan
    dependsOn: deny
    displayName: "Run address sanitizer on test suite"
