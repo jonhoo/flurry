@@ -38,7 +38,6 @@ fn test_once(content: [usize; NUM_ENTRIES], map: Arc<HashMap<usize, usize>>) {
         let content = content.clone();
         let handle = thread::spawn(move || {
             let guard = map.guard();
-            let map = map.clone();
             for i in 0..NUM_ENTRIES * ROUNDS {
                 let key = content[i % content.len()];
                 assert!(map.contains_key(&key, &guard));

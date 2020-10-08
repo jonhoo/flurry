@@ -244,7 +244,7 @@
 #![allow(clippy::cognitive_complexity)]
 
 mod map;
-//mod map_ref;
+mod map_ref;
 mod node;
 mod raw;
 //mod set;
@@ -259,7 +259,7 @@ mod serde_impls;
 /// Iterator types.
 pub mod iter;
 pub use map::{HashMap, TryInsertError};
-//pub use map_ref::HashMapRef;
+pub use map_ref::HashMapRef;
 //pub use set::HashSet;
 //pub use set_ref::HashSetRef;
 
@@ -269,4 +269,4 @@ pub type DefaultHashBuilder = ahash::RandomState;
 /// Types needed to safely access shared data concurrently.
 mod ebr;
 pub use ebr::Guard;
-pub(crate) use ebr::{Atomic, AtomicExt, GuardRef, Shared, SharedExt};
+pub(crate) use ebr::{Atomic, AtomicExt, Shared, SharedExt};

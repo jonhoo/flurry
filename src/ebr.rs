@@ -56,12 +56,12 @@ impl<'shield, T> SharedExt for Shared<'shield, T> {
 ///
 /// For more information, please refer to the crate-level documentation.
 #[derive(Clone)]
-pub struct Guard<'collector, S> {
-    pub(crate) shield: S,
+pub struct Guard<'collector, SH> {
+    pub(crate) shield: SH,
     pub(crate) collector: &'collector Collector,
 }
 
-impl<'c, S> std::fmt::Debug for Guard<'c, S> {
+impl<'c, SH> std::fmt::Debug for Guard<'c, SH> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Guard")
             .field("collector", &(self.collector as *const _))
@@ -69,31 +69,31 @@ impl<'c, S> std::fmt::Debug for Guard<'c, S> {
     }
 }
 
-impl<'collector, S> Deref for Guard<'collector, S>
+impl<'collector, SH> Deref for Guard<'collector, SH>
 where
-    S: Shield<'collector>,
+    SH: Shield<'collector>,
 {
-    type Target = S;
+    type Target = SH;
 
     fn deref(&self) -> &Self::Target {
         &self.shield
     }
 }
 
-impl<'collector, S> DerefMut for Guard<'collector, S>
+impl<'collector, SH> DerefMut for Guard<'collector, SH>
 where
-    S: Shield<'collector>,
+    SH: Shield<'collector>,
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.shield
     }
 }
 
-impl<'collector, S> Guard<'collector, S>
+impl<'collector, SH> Guard<'collector, SH>
 where
-    S: Shield<'collector>,
+    SH: Shield<'collector>,
 {
-    pub(crate) fn new(shield: S, collector: &'collector Collector) -> Self {
+    pub(crate) fn new(shield: SH, collector: &'collector Collector) -> Self {
         Self { shield, collector }
     }
 
@@ -104,27 +104,5 @@ where
     pub(crate) unsafe fn defer_destroy<T: 'collector>(&self, shared: Shared<'_, T>) {
         let ptr = shared.as_ptr();
         self.retire(move || drop(Box::from_raw(ptr)));
-    }
-}
-
-pub(crate) enum GuardRef<'g, 'collector, S>
-where
-    S: Shield<'collector>,
-{
-    Owned(Guard<'collector, S>),
-    Ref(&'g Guard<'collector, S>),
-}
-
-impl<'g, 'collector, S> Deref for GuardRef<'g, 'collector, S>
-where
-    S: Shield<'collector>,
-{
-    type Target = Guard<'collector, S>;
-
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        match *self {
-            GuardRef::Owned(ref guard) | GuardRef::Ref(&ref guard) => guard,
-        }
     }
 }
