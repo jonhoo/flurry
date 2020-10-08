@@ -281,6 +281,33 @@ fn drop_value() {
 }
 
 #[test]
+fn clone_map_empty() {
+    let map = HashMap::<&'static str, u32>::new();
+    let map = map.pin();
+    let cloned_map = map.clone();
+    assert_eq!(map.len(), cloned_map.len());
+    assert_eq!(&map, &cloned_map);
+    assert_eq!(cloned_map.len(), 0);
+}
+
+#[test]
+// Test that same values exists in both maps (original and cloned)
+fn clone_map_filled() {
+    let map_ref = HashMap::<&'static str, u32>::new();
+    let map_ref = map_ref.pin();
+    map_ref.insert("FooKey", 0);
+    map_ref.insert("BarKey", 10);
+    let cloned_map_ref = map_ref.clone();
+    assert_eq!(map_ref.len(), cloned_map_ref.len());
+    assert_eq!(&map_ref, &cloned_map_ref);
+
+    // test that both maps are equal,
+    // because the ref and the cloned ref, point to the same map
+    map_ref.insert("NewItem", 100);
+    assert_eq!(&map_ref, &cloned_map_ref);
+}
+
+#[test]
 fn default() {
     let map: HashMap<usize, usize> = Default::default();
     let map = map.pin();

@@ -249,6 +249,18 @@ where
     }
 }
 
+impl<'m, SH, K, V, S> Clone for HashMapRef<'m, SH, K, V, S>
+where
+    SH: Shield<'m>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            map: &self.map,
+            guard: self.guard.clone(),
+        }
+    }
+}
+
 impl<'m1, 'm2, SH, SH2, K, V, S> PartialEq<HashMapRef<'m2, SH2, K, V, S>>
     for HashMapRef<'m1, SH, K, V, S>
 where
