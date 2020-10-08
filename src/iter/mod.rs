@@ -1,25 +1,39 @@
 mod traverser;
 pub(crate) use traverser::NodeIter;
 
-use crossbeam_epoch::Guard;
+use crate::ebr::Guard;
 use std::sync::atomic::Ordering;
 
 /// An iterator over a map's entries.
 ///
 /// See [`HashMap::iter`](crate::HashMap::iter) for details.
-#[derive(Debug)]
-pub struct Iter<'g, K, V> {
-    pub(crate) node_iter: NodeIter<'g, K, V>,
-    pub(crate) guard: &'g Guard,
+pub struct Iter<'m, 'g, K, V, SH> {
+    pub(crate) node_iter: NodeIter<'m, 'g, K, V, SH>,
+    pub(crate) guard: &'g Guard<'m, SH>,
 }
 
-impl<'g, K, V> Iterator for Iter<'g, K, V> {
+impl<'m, 'g, K, V, SH> std::fmt::Debug for Iter<'m, 'g, K, V, SH>
+where
+    K: std::fmt::Debug,
+    V: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Iter")
+            .field("node_iter", &self.node_iter)
+            .finish()
+    }
+}
+
+impl<'m, 'g, K, V, SH> Iterator for Iter<'m, 'g, K, V, SH>
+where
+    SH: flize::Shield<'m>,
+{
     type Item = (&'g K, &'g V);
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node_iter.next()?;
-        let value = node.value.load(Ordering::SeqCst, self.guard);
+        let value = node.value.load(Ordering::SeqCst, &self.guard.shield);
         // safety: flurry does not drop or move until after guard drop
-        let value = unsafe { value.deref() };
+        let value = unsafe { value.as_ref_unchecked() };
         Some((&node.key, &value))
     }
 }
@@ -28,11 +42,14 @@ impl<'g, K, V> Iterator for Iter<'g, K, V> {
 ///
 /// See [`HashMap::keys`](crate::HashMap::keys) for details.
 #[derive(Debug)]
-pub struct Keys<'g, K, V> {
-    pub(crate) node_iter: NodeIter<'g, K, V>,
+pub struct Keys<'m, 'g, K, V, SH> {
+    pub(crate) node_iter: NodeIter<'m, 'g, K, V, SH>,
 }
 
-impl<'g, K, V> Iterator for Keys<'g, K, V> {
+impl<'m, 'g, K, V, SH> Iterator for Keys<'m, 'g, K, V, SH>
+where
+    SH: flize::Shield<'m>,
+{
     type Item = &'g K;
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node_iter.next()?;
@@ -43,19 +60,33 @@ impl<'g, K, V> Iterator for Keys<'g, K, V> {
 /// An iterator over a map's values.
 ///
 /// See [`HashMap::values`](crate::HashMap::values) for details.
-#[derive(Debug)]
-pub struct Values<'g, K, V> {
-    pub(crate) node_iter: NodeIter<'g, K, V>,
-    pub(crate) guard: &'g Guard,
+pub struct Values<'m, 'g, K, V, SH> {
+    pub(crate) node_iter: NodeIter<'m, 'g, K, V, SH>,
+    pub(crate) guard: &'g Guard<'m, SH>,
 }
 
-impl<'g, K, V> Iterator for Values<'g, K, V> {
+impl<'m, 'g, K, V, SH> std::fmt::Debug for Values<'m, 'g, K, V, SH>
+where
+    K: std::fmt::Debug,
+    V: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Values")
+            .field("node_iter", &self.node_iter)
+            .finish()
+    }
+}
+
+impl<'m, 'g, K, V, SH> Iterator for Values<'m, 'g, K, V, SH>
+where
+    SH: flize::Shield<'m>,
+{
     type Item = &'g V;
     fn next(&mut self) -> Option<Self::Item> {
         let node = self.node_iter.next()?;
-        let value = node.value.load(Ordering::SeqCst, self.guard);
+        let value = node.value.load(Ordering::SeqCst, &self.guard.shield);
         // safety: flurry does not drop or move until after guard drop
-        let value = unsafe { value.deref() };
+        let value = unsafe { value.as_ref_unchecked() };
         Some(value)
     }
 }
@@ -63,7 +94,7 @@ impl<'g, K, V> Iterator for Values<'g, K, V> {
 #[cfg(test)]
 mod tests {
     use crate::HashMap;
-    use crossbeam_epoch as epoch;
+    use flize::Shield;
     use std::collections::HashSet;
     use std::iter::FromIterator;
 
@@ -71,11 +102,10 @@ mod tests {
     fn iter() {
         let map = HashMap::<usize, usize>::new();
 
-        let guard = epoch::pin();
+        let guard = map.guard();
         map.insert(1, 42, &guard);
         map.insert(2, 84, &guard);
 
-        let guard = epoch::pin();
         assert_eq!(
             map.iter(&guard).collect::<HashSet<(&usize, &usize)>>(),
             HashSet::from_iter(vec![(&1, &42), (&2, &84)])
@@ -86,11 +116,10 @@ mod tests {
     fn keys() {
         let map = HashMap::<usize, usize>::new();
 
-        let guard = epoch::pin();
+        let guard = map.guard();
         map.insert(1, 42, &guard);
         map.insert(2, 84, &guard);
 
-        let guard = epoch::pin();
         assert_eq!(
             map.keys(&guard).collect::<HashSet<&usize>>(),
             HashSet::from_iter(vec![&1, &2])
@@ -101,7 +130,7 @@ mod tests {
     fn values() {
         let map = HashMap::<usize, usize>::new();
 
-        let mut guard = epoch::pin();
+        let mut guard = map.guard();
         map.insert(1, 42, &guard);
         map.insert(2, 84, &guard);
         guard.repin();

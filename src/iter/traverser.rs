@@ -1,10 +1,9 @@
+use crate::ebr::{Guard, Shared};
 use crate::node::{BinEntry, Node, TreeNode};
 use crate::raw::Table;
-use crossbeam_epoch::{Guard, Shared};
 use std::sync::atomic::Ordering;
 
-#[derive(Debug)]
-pub(crate) struct NodeIter<'g, K, V> {
+pub(crate) struct NodeIter<'m, 'g, K, V, SH> {
     /// Current table; update if resized
     table: Option<&'g Table<K, V>>,
 
@@ -26,17 +25,39 @@ pub(crate) struct NodeIter<'g, K, V> {
     /// Initial table size
     base_size: usize,
 
-    guard: &'g Guard,
+    guard: &'g Guard<'m, SH>,
 }
 
-impl<'g, K, V> NodeIter<'g, K, V> {
-    pub(crate) fn new(table: Shared<'g, Table<K, V>>, guard: &'g Guard) -> Self {
+impl<'m, 'g, K, V, SH> std::fmt::Debug for NodeIter<'m, 'g, K, V, SH>
+where
+    K: std::fmt::Debug,
+    V: std::fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Iter")
+            .field("table", &self.table)
+            .field("stack", &self.stack)
+            .field("spare", &self.spare)
+            .field("prev", &self.prev)
+            .field("index", &self.index)
+            .field("base_index", &self.base_index)
+            .field("base_limit", &self.base_limit)
+            .field("base_size", &self.base_size)
+            .finish()
+    }
+}
+
+impl<'m, 'g, K, V, SH> NodeIter<'m, 'g, K, V, SH>
+where
+    SH: flize::Shield<'m>,
+{
+    pub(crate) fn new(table: Shared<'g, Table<K, V>>, guard: &'g Guard<'m, SH>) -> Self {
         let (table, len) = if table.is_null() {
             (None, 0)
         } else {
             // safety: flurry guarantees that a table read under a guard is never dropped or moved
             // until after that guard is dropped.
-            let table = unsafe { table.deref() };
+            let table = unsafe { table.as_ref_unchecked() };
             (Some(table), table.len())
         };
 
@@ -109,19 +130,22 @@ impl<'g, K, V> NodeIter<'g, K, V> {
     }
 }
 
-impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
+impl<'m, 'g, K, V, SH> Iterator for NodeIter<'m, 'g, K, V, SH>
+where
+    SH: flize::Shield<'m>,
+{
     type Item = &'g Node<K, V>;
     fn next(&mut self) -> Option<Self::Item> {
         let mut e = None;
         if let Some(prev) = self.prev {
-            let next = prev.next.load(Ordering::SeqCst, self.guard);
+            let next = prev.next.load(Ordering::SeqCst, &self.guard.shield);
             if !next.is_null() {
                 // we have to check if we are iterating over a regular bin or a
                 // TreeBin. the Java code gets away without this due to
                 // inheritance (everything is a node), but we have to explicitly
                 // check
                 // safety: flurry does not drop or move until after guard drop
-                match unsafe { next.deref() } {
+                match unsafe { next.as_ref_unchecked() } {
                     BinEntry::Node(node) => {
                         e = Some(node);
                     }
@@ -155,12 +179,12 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
             let bin = t.bin(i, self.guard);
             if !bin.is_null() {
                 // safety: flurry does not drop or move until after guard drop
-                let bin = unsafe { bin.deref() };
+                let bin = unsafe { bin.as_ref_unchecked() };
                 match bin {
                     BinEntry::Moved => {
                         // recurse down into the target table
                         // safety: same argument as for following Moved in Table::find
-                        self.table = Some(unsafe { t.next_table(self.guard).deref() });
+                        self.table = Some(unsafe { t.next_table(self.guard).as_ref_unchecked() });
                         self.prev = None;
                         // make sure we can get back "up" to where we're at
                         self.push_state(t, i, n);
@@ -181,7 +205,7 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
                             // Structurally, TreeNodes always point to TreeNodes, so this is sound.
                             &unsafe {
                                 TreeNode::get_tree_node(
-                                    tree_bin.first.load(Ordering::SeqCst, self.guard),
+                                    tree_bin.first.load(Ordering::SeqCst, &self.guard.shield),
                                 )
                             }
                             .node,
@@ -217,44 +241,55 @@ struct TableStack<'g, K, V> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ebr::{Atomic, Shared, SharedExt};
     use crate::raw::Table;
-    use crossbeam_epoch::{self as epoch, Atomic, Owned};
     use parking_lot::Mutex;
 
     #[test]
     fn iter_new() {
-        let guard = epoch::pin();
-        let iter = NodeIter::<usize, usize>::new(Shared::null(), &guard);
+        let collector = flize::Collector::new();
+        let guard = Guard {
+            shield: collector.thin_shield(),
+            collector: &collector,
+        };
+        let iter = NodeIter::<usize, usize, _>::new(Shared::null(), &guard);
         assert_eq!(iter.count(), 0);
     }
 
     #[test]
     fn iter_empty() {
-        let table = Owned::new(Table::<usize, usize>::new(16));
-        let guard = epoch::pin();
-        let table = table.into_shared(&guard);
+        let table = Shared::boxed(Table::<usize, usize>::new(16));
+        let collector = flize::Collector::new();
+        let guard = Guard {
+            shield: collector.thin_shield(),
+            collector: &collector,
+        };
         let iter = NodeIter::new(table, &guard);
         assert_eq!(iter.count(), 0);
 
         // safety: nothing holds on to references into the table any more
-        let mut t = unsafe { table.into_owned() };
+        let mut t = table.into_box();
         t.drop_bins();
     }
 
     #[test]
     fn iter_simple() {
-        let mut bins = vec![Atomic::null(); 16];
-        bins[8] = Atomic::new(BinEntry::Node(Node {
+        let mut bins = Vec::with_capacity(16);
+        (0..16).for_each(|_| bins.push(Atomic::null()));
+        bins[8] = Atomic::new(Shared::boxed(BinEntry::Node(Node {
             hash: 0,
             key: 0usize,
-            value: Atomic::new(0usize),
+            value: Atomic::new(Shared::boxed(0usize)),
             next: Atomic::null(),
             lock: Mutex::new(()),
-        }));
+        })));
 
-        let table = Owned::new(Table::from(bins));
-        let guard = epoch::pin();
-        let table = table.into_shared(&guard);
+        let table = Shared::boxed(Table::from(bins));
+        let collector = flize::Collector::new();
+        let guard = Guard {
+            shield: collector.thin_shield(),
+            collector: &collector,
+        };
         {
             let mut iter = NodeIter::new(table, &guard);
             let e = iter.next().unwrap();
@@ -263,23 +298,28 @@ mod tests {
         }
 
         // safety: nothing holds on to references into the table any more
-        let mut t = unsafe { table.into_owned() };
+        let mut t = table.into_box();
         t.drop_bins();
     }
 
     #[test]
     fn iter_fw() {
         // construct the forwarded-to table
-        let mut deep_bins = vec![Atomic::null(); 16];
-        deep_bins[8] = Atomic::new(BinEntry::Node(Node {
+        let mut deep_bins = Vec::with_capacity(16);
+        (0..16).for_each(|_| deep_bins.push(Atomic::null()));
+        deep_bins[8] = Atomic::new(Shared::boxed(BinEntry::Node(Node {
             hash: 0,
             key: 0usize,
-            value: Atomic::new(0usize),
+            value: Atomic::new(Shared::boxed(0usize)),
             next: Atomic::null(),
             lock: Mutex::new(()),
-        }));
-        let guard = epoch::pin();
-        let deep_table = Owned::new(Table::from(deep_bins)).into_shared(&guard);
+        })));
+        let collector = flize::Collector::new();
+        let guard = Guard {
+            shield: collector.thin_shield(),
+            collector: &collector,
+        };
+        let deep_table = Shared::boxed(Table::from(deep_bins));
 
         // construct the forwarded-from table
         let mut bins = vec![Shared::null(); 16];
@@ -293,7 +333,7 @@ mod tests {
         for i in 0..bins.len() {
             table.store_bin(i, bins[i]);
         }
-        let table = Owned::new(table).into_shared(&guard);
+        let table = Shared::boxed(table);
         {
             let mut iter = NodeIter::new(table, &guard);
             let e = iter.next().unwrap();
@@ -302,9 +342,9 @@ mod tests {
         }
 
         // safety: nothing holds on to references into the table any more
-        let mut t = unsafe { table.into_owned() };
+        let mut t = table.into_box();
         t.drop_bins();
         // no one besides this test case uses deep_table
-        unsafe { deep_table.into_owned() }.drop_bins();
+        deep_table.into_box().drop_bins();
     }
 }
