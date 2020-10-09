@@ -261,10 +261,10 @@ where
     }
 }
 
-impl<'m1, 'm2, SH, SH2, K, V, S> PartialEq<HashMapRef<'m2, SH2, K, V, S>>
-    for HashMapRef<'m1, SH, K, V, S>
+impl<'m1, 'm2, SH1, SH2, K, V, S> PartialEq<HashMapRef<'m2, SH2, K, V, S>>
+    for HashMapRef<'m1, SH1, K, V, S>
 where
-    SH: Shield<'m1>,
+    SH1: Shield<'m1>,
     SH2: Shield<'m2>,
     K: Hash + Ord,
     V: PartialEq,

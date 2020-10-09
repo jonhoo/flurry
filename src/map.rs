@@ -1258,11 +1258,10 @@ where
     ///
     /// Reserving does not panic in flurry. If the new size is invalid, no
     /// reallocation takes place.
-    pub fn reserve<'m, 'g>(
-        &'m self,
-        additional: usize,
-        guard: &'g Guard<'m, impl flize::Shield<'m>>,
-    ) {
+    pub fn reserve<'m, SH>(&'m self, additional: usize, guard: &Guard<'m, SH>)
+    where
+        SH: flize::Shield<'m>,
+    {
         self.check_guard(guard);
         let absolute = self.len() + additional;
         self.try_presize(absolute, guard);
@@ -1493,7 +1492,10 @@ where
     /// map.pin().clear();
     /// assert!(map.pin().is_empty());
     /// ```
-    pub fn clear<'m, 'g>(&'m self, guard: &'g Guard<'m, impl flize::Shield<'m>>) {
+    pub fn clear<'m, SH>(&'m self, guard: &Guard<'m, SH>)
+    where
+        SH: flize::Shield<'m>,
+    {
         // Negative number of deletions
         let mut delta = 0;
         let mut idx = 0usize;
@@ -2744,9 +2746,10 @@ where
     /// If `f` returns `false` for a given key/value pair, but the value for that pair is concurrently
     /// modified before the removal takes place, the entry will not be removed.
     /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
-    pub fn retain<'m, 'g, F>(&'m self, mut f: F, guard: &'g Guard<'m, impl flize::Shield<'m>>)
+    pub fn retain<'m, 'g, F, SH>(&'m self, mut f: F, guard: &'g Guard<'m, SH>)
     where
         F: FnMut(&K, &V) -> bool,
+        SH: flize::Shield<'m>,
     {
         self.check_guard(guard);
         // removed selected keys

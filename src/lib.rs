@@ -247,8 +247,8 @@ mod map;
 mod map_ref;
 mod node;
 mod raw;
-//mod set;
-//mod set_ref;
+mod set;
+mod set_ref;
 
 #[cfg(feature = "rayon")]
 mod rayon_impls;
@@ -260,8 +260,8 @@ mod serde_impls;
 pub mod iter;
 pub use map::{HashMap, TryInsertError};
 pub use map_ref::HashMapRef;
-//pub use set::HashSet;
-//pub use set_ref::HashSetRef;
+pub use set::HashSet;
+pub use set_ref::HashSetRef;
 
 /// Default hasher for [`HashMap`].
 pub type DefaultHashBuilder = ahash::RandomState;
