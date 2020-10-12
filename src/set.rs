@@ -295,9 +295,9 @@ where
     /// let b = HashSet::new();
     ///
     /// assert!(a.is_disjoint(&b));
-    /// b.insert(4);
+    /// b.insert(4, &b.guard());
     /// assert!(a.is_disjoint(&b));
-    /// b.insert(1);
+    /// b.insert(1, &b.guard());
     /// assert!(!a.is_disjoint(&b));
     /// ```
     pub fn is_disjoint(&self, other: &HashSet<T, S>) -> bool {
@@ -332,9 +332,9 @@ where
     /// let set = HashSet::new();
     ///
     /// assert!(set.is_subset(&sup));
-    /// set.insert(2);
+    /// set.insert(2, &set.guard());
     /// assert!(set.is_subset(&sup));
-    /// set.insert(4);
+    /// set.insert(4, &set.guard());
     /// assert!(!set.is_subset(&sup));
     /// ```
     pub fn is_subset(&self, other: &HashSet<T, S>) -> bool {
@@ -370,11 +370,11 @@ where
     ///
     /// assert!(!set.is_superset(&sub));
     ///
-    /// set.insert(0);
-    /// set.insert(1);
+    /// set.insert(0, &set.guard());
+    /// set.insert(1, &set.guard());
     /// assert!(!set.is_superset(&sub));
     ///
-    /// set.insert(2);
+    /// set.insert(2, &set.guard());
     /// assert!(set.is_superset(&sub));
     /// ```
     pub fn is_superset(&self, other: &HashSet<T, S>) -> bool {

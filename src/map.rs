@@ -113,16 +113,14 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     // so:
     /// ```rust,no_run
     /// # use flurry::HashMap;
-    /// # use crossbeam_epoch;
     /// let map: HashMap<_, _> = HashMap::default();
-    /// map.insert(42, String::from("hello"), &crossbeam_epoch::pin());
+    /// map.insert(42, String::from("hello"), &map.guard());
     ///
-    /// let evil = crossbeam_epoch::Collector::new();
-    /// let evil = evil.register();
-    /// let guard = evil.pin();
+    /// let evil: HashMap<usize, usize> = HashMap::default();
+    /// let guard = evil.guard();
     /// let oops = map.get(&42, &guard);
     ///
-    /// map.remove(&42, &crossbeam_epoch::pin());
+    /// map.remove(&42, &map.guard());
     /// // at this point, the default collector is allowed to free `"hello"`
     /// // since no-one has the global epoch pinned as far as it is aware.
     /// // `oops` is tied to the lifetime of a Guard that is not a part of
