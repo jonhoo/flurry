@@ -373,7 +373,7 @@ where
 
 impl<K, V> TreeBin<K, V> {
     /// Acquires write lock for tree restucturing.
-    fn lock_root<'g>(&self, guard: &Guard<'g, impl flize::Shield<'g>>) {
+    fn lock_root<'m, 'g>(&'g self, guard: &'g Guard<'m, impl flize::Shield<'m>>) {
         if self
             .lock_state
             .compare_and_swap(0, WRITER, Ordering::SeqCst)
@@ -390,7 +390,7 @@ impl<K, V> TreeBin<K, V> {
     }
 
     /// Possibly blocks awaiting root lock.
-    fn contended_lock<'c>(&self, guard: &Guard<'c, impl flize::Shield<'c>>) {
+    fn contended_lock<'m, 'g>(&'g self, guard: &'g Guard<'m, impl flize::Shield<'m>>) {
         let mut waiting = false;
         let mut state: i64;
         loop {
