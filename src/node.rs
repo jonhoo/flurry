@@ -373,7 +373,10 @@ where
 
 impl<K, V> TreeBin<K, V> {
     /// Acquires write lock for tree restucturing.
-    fn lock_root<'m, 'g>(&'g self, guard: &'g Guard<'m, impl flize::Shield<'m>>) {
+    fn lock_root<'m, 'g, SH>(&'g self, guard: &'g Guard<'m, SH>)
+    where
+        SH: flize::Shield<'m>,
+    {
         if self
             .lock_state
             .compare_and_swap(0, WRITER, Ordering::SeqCst)
@@ -390,7 +393,10 @@ impl<K, V> TreeBin<K, V> {
     }
 
     /// Possibly blocks awaiting root lock.
-    fn contended_lock<'m, 'g>(&'g self, guard: &'g Guard<'m, impl flize::Shield<'m>>) {
+    fn contended_lock<'m, 'g, SH>(&'g self, guard: &'g Guard<'m, SH>)
+    where
+        SH: flize::Shield<'m>,
+    {
         let mut waiting = false;
         let mut state: i64;
         loop {
@@ -1036,12 +1042,13 @@ impl<K, V> TreeBin<K, V> {
     /// The pointers to the tree nodes must be valid and the caller must be the single owner
     /// of the tree nodes. If the nodes' values are to be dropped, there must be no outstanding
     /// references to these values in other threads and it must be impossible to obtain them.
-    pub(crate) unsafe fn drop_tree_nodes<'m, 'g>(
+    pub(crate) unsafe fn drop_tree_nodes<'m, 'g, SH>(
         from: Shared<'g, BinEntry<K, V>>,
         drop_values: bool,
-        shield: &'g impl flize::Shield<'m>,
+        shield: &'g SH,
     ) where
         'm: 'g,
+        SH: flize::Shield<'m>,
     {
         let mut p = from;
         while !p.is_null() {

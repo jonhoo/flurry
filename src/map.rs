@@ -74,9 +74,8 @@ macro_rules! load_factor {
 /// A concurrent hash table.
 ///
 /// Flurry uses [`Guards`] to control the lifetime of the resources that get stored and
-/// extracted from the map. [`Guards`] are acquired through the [`epoch::pin`], [`HashMap::pin`]
-/// and [`HashMap::guard`] functions. For more information, see the [notes in the crate-level
-/// documentation].
+/// extracted from the map. [`Guards`] are acquired through the [`HashMap::guard`] function.
+/// For more information, see the [notes in the crate-level documentation].
 ///
 /// [notes in the crate-level documentation]: index.html#a-note-on-guard-and-memory-use
 /// [`Guards`]: index.html#a-note-on-guard-and-memory-use
@@ -121,8 +120,8 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// let oops = map.get(&42, &guard);
     ///
     /// map.remove(&42, &map.guard());
-    /// // at this point, the default collector is allowed to free `"hello"`
-    /// // since no-one has the global epoch pinned as far as it is aware.
+    /// // at this point, the collector of `evil` is allowed to free `"hello"`
+    /// // since no-one has its current epoch pinned as far as it is aware.
     /// // `oops` is tied to the lifetime of a Guard that is not a part of
     /// // the same epoch group, and so can now be dangling.
     /// // but we can still access it!
@@ -130,19 +129,14 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// ```
     ///
     /// We avoid that by checking that every external guard that is passed in is associated with
-    /// the `Collector` that was specified when the map was created (which may be the global
-    /// collector).
+    /// the `Collector` from this map.
     ///
-    /// Note also that the fact that this can be a global collector is what necessitates the
-    /// `'static` bounds on `K` and `V`. Since deallocation can be deferred arbitrarily, it is not
-    /// okay for us to take a `K` or `V` with a limited lifetime, since we may drop it far after
-    /// that lifetime has passed.
-    ///
-    /// One possibility is to never use the global allocator, and instead _always_ create and use
-    /// our own `Collector`. If we did that, then we could accept non-`'static` keys and values since
-    /// the destruction of the collector would ensure that that all deferred destructors are run.
-    /// It would, sadly, mean that we don't get to share a collector with other things that use
-    /// `crossbeam-epoch` though. For more on this (and a cool optimization), see:
+    /// Note also that this is what necessitates the `'static` bounds on `K` and `V`. Since
+    /// deallocation can be deferred arbitrarily, it is not okay for us to take a `K` or `V` with a
+    /// limited lifetime, since we may drop it far after that lifetime has passed.
+    // TODO: We always create and use our own `Collector`. This may allow us to accept non-`'static` keys and
+    // values, since the destruction of the collector ensures that all deferred destructors are run.
+    /// For more on this (and a cool optimization), see:
     /// https://github.com/crossbeam-rs/crossbeam/blob/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-skiplist/src/base.rs#L308-L319
     collector: flize::Collector,
 
@@ -337,25 +331,24 @@ impl<K, V, S> HashMap<K, V, S> {
           See https://github.com/jonhoo/flurry/pull/49#issuecomment-580514518.
     */
     /*
-    /// Associate a custom [`epoch::Collector`] with this map.
+    /// Associate a custom [`flize::Collector`] with this map.
     ///
-    /// By default, the global collector is used. With this method you can use a different
-    /// collector instead. This may be desireable if you want more control over when and how memory
+    /// This may be desireable if you want more control over when and how memory
     /// reclamation happens.
     ///
     /// Note that _all_ `Guard` references provided to access the returned map _must_ be
     /// constructed using guards produced by `collector`. You can use [`HashMap::register`] to get
-    /// a thread-local handle to the collector that then lets you construct an [`epoch::Guard`].
+    /// a thread-local handle to the collector.
     pub fn with_collector(mut self, collector: epoch::Collector) -> Self {
         self.collector = collector;
         self
     }
 
-    /// Allocate a thread-local handle to the [`epoch::Collector`] associated with this map.
+    /// Allocate a thread-local handle to the [`flize::Collector`] associated with this map.
     ///
     /// You can use the returned handle to produce [`epoch::Guard`] references.
-    pub fn register(&self) -> epoch::LocalHandle {
-        self.collector.register()
+    pub fn register(&self) -> flize::Local {
+        self.collector.local()
     }
     */
 
@@ -412,7 +405,10 @@ impl<K, V, S> HashMap<K, V, S> {
 
     #[cfg(test)]
     /// Returns the capacity of the map.
-    fn capacity<'g>(&'g self, guard: &Guard<'g, impl flize::Shield<'g>>) -> usize {
+    fn capacity<'g, SH>(&'g self, guard: &Guard<'g, SH>) -> usize
+    where
+        SH: flize::Shield<'g>,
+    {
         self.check_guard(guard);
         let table = self.table.load(Ordering::Relaxed, &guard.shield);
 
@@ -520,7 +516,7 @@ impl<K, V, S> HashMap<K, V, S> {
 
         // safety: we are creating this map, so no other thread can access it,
         // while we are initializing it.
-        let guard = unsafe { flize::unprotected() };
+        let shield = unsafe { flize::unprotected() };
 
         let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
             MAXIMUM_CAPACITY
@@ -534,7 +530,7 @@ impl<K, V, S> HashMap<K, V, S> {
 
         // sanity check that the map has indeed not been set up already
         assert_eq!(self.size_ctl.load(Ordering::SeqCst), 0);
-        assert!(self.table.load(Ordering::SeqCst, guard).is_null());
+        assert!(self.table.load(Ordering::SeqCst, shield).is_null());
 
         // the table has not yet been initialized, so we can just create it
         // with as many bins as were requested
@@ -567,7 +563,10 @@ where
     K: Clone + Ord,
 {
     /// Tries to presize table to accommodate the given number of elements.
-    fn try_presize<'m, 'g>(&'m self, size: usize, guard: &'g Guard<'m, impl flize::Shield<'m>>) {
+    fn try_presize<'m, 'g, SH>(&'m self, size: usize, guard: &'g Guard<'m, SH>)
+    where
+        SH: flize::Shield<'m>,
+    {
         let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
             MAXIMUM_CAPACITY
         } else {
@@ -679,12 +678,14 @@ where
     // NOTE: transfer requires that K and V are Send + Sync if it will actually transfer anything.
     // If K/V aren't Send + Sync, the map must be empty, and therefore calling tansfer is fine.
     #[inline(never)]
-    fn transfer<'m, 'g>(
+    fn transfer<'m, 'g, SH>(
         &'m self,
         table: Shared<'g, Table<K, V>>,
         mut next_table: Shared<'g, Table<K, V>>,
-        guard: &'g Guard<'m, impl flize::Shield<'m>>,
-    ) {
+        guard: &'g Guard<'m, SH>,
+    ) where
+        SH: flize::Shield<'m>,
+    {
         // safety: table was read while `guard` was held. the code that drops table only drops it
         // after it is no longer reachable, and any outstanding references are no longer active.
         // this references is still active (marked by the guard), so the target of the references
@@ -1364,14 +1365,11 @@ where
     /// assert_eq!(mref.contains_key(&1), true);
     /// assert_eq!(mref.contains_key(&2), false);
     /// ```
-    pub fn contains_key<'m, 'g, Q>(
-        &'m self,
-        key: &Q,
-        guard: &'g Guard<'m, impl flize::Shield<'m>>,
-    ) -> bool
+    pub fn contains_key<'m, 'g, Q, SH>(&'m self, key: &Q, guard: &'g Guard<'m, SH>) -> bool
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Ord,
+        SH: flize::Shield<'m>,
     {
         self.check_guard(guard);
         self.get(key, &guard).is_some()
@@ -1428,14 +1426,15 @@ where
     /// [`Ord`]: std::cmp::Ord
     /// [`Hash`]: std::hash::Hash
     #[inline]
-    pub fn get_key_value<'m, 'g, Q>(
+    pub fn get_key_value<'m, 'g, Q, SH>(
         &'m self,
         key: &Q,
-        guard: &'g Guard<'m, impl flize::Shield<'m>>,
+        guard: &'g Guard<'m, SH>,
     ) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Ord,
+        SH: flize::Shield<'m>,
     {
         self.check_guard(guard);
         let node = self.get_node(key, guard)?;
@@ -1693,12 +1692,15 @@ where
     /// assert_eq!(mref.get(&42), Some(&"c"));
     /// ```
     #[inline]
-    pub fn try_insert<'m, 'g>(
+    pub fn try_insert<'m, 'g, SH>(
         &'m self,
         key: K,
         value: V,
-        guard: &'g Guard<'m, impl flize::Shield<'m>>,
-    ) -> Result<&'g V, TryInsertError<'g, V>> {
+        guard: &'g Guard<'m, SH>,
+    ) -> Result<&'g V, TryInsertError<'g, V>>
+    where
+        SH: flize::Shield<'m>,
+    {
         match self.put(key, value, true, guard) {
             PutResult::Exists {
                 current,
@@ -2447,14 +2449,15 @@ where
     /// assert_eq!(map.remove_entry(&1, &guard), Some((&1, &"a")));
     /// assert_eq!(map.remove(&1, &guard), None);
     /// ```
-    pub fn remove_entry<'m, 'g, Q>(
+    pub fn remove_entry<'m, 'g, Q, SH>(
         &'m self,
         key: &Q,
-        guard: &'g Guard<'m, impl flize::Shield<'m>>,
+        guard: &'g Guard<'m, SH>,
     ) -> Option<(&'g K, &'g V)>
     where
         K: Borrow<Q>,
         Q: ?Sized + Hash + Ord,
+        SH: flize::Shield<'m>,
     {
         self.check_guard(guard);
         self.replace_node(key, None, None, guard)
@@ -2780,9 +2783,10 @@ where
     /// map.pin().retain_force(|&k, _| k % 2 == 0);
     /// assert_eq!(map.pin().len(), 4);
     /// ```
-    pub fn retain_force<'m, 'g, F>(&'m self, mut f: F, guard: &'g Guard<'m, impl flize::Shield<'m>>)
+    pub fn retain_force<'m, 'g, F, SH>(&'m self, mut f: F, guard: &'g Guard<'m, SH>)
     where
         F: FnMut(&K, &V) -> bool,
+        SH: flize::Shield<'m>,
     {
         self.check_guard(guard);
         // removed selected keys
@@ -3020,17 +3024,18 @@ where
 
 impl<K, V, S> Drop for HashMap<K, V, S> {
     fn drop(&mut self) {
-        // safety: we have &mut self _and_ all references we have returned are bound to the
-        // lifetime of their borrow of self, so there cannot be any outstanding references to
-        // anything in the map.
+        // safety: we have &mut self _and_ all references we have returned are bound to the lifetime
+        // of the guard they were obtained with, which in turn holds a reference to this map's
+        // collector. This makes it impossible for the guard to outlive the map, so there cannot be
+        // any outstanding references to anything in the map.
         //
-        // NOTE: we _could_ relax the bounds in all the methods that return `&'g ...` to not also
-        // bound `&self` by `'g`, but if we did that, we would need to use a regular `epoch::Guard`
-        // here rather than an unprotected one.
-        let guard = unsafe { flize::unprotected() };
+        // NOTE: we _could_ relax the bounds in all the methods that return references to not have
+        // this bound, but if we did that, we would need to use a regular `Shield` here rather than
+        // an unprotected one.
+        let shield = unsafe { flize::unprotected() };
 
-        assert!(self.next_table.load(Ordering::SeqCst, guard).is_null());
-        let table = self.table.swap(Shared::null(), Ordering::SeqCst, guard);
+        assert!(self.next_table.load(Ordering::SeqCst, shield).is_null());
+        let table = self.table.swap(Shared::null(), Ordering::SeqCst, shield);
         if table.is_null() {
             // table was never allocated!
             return;

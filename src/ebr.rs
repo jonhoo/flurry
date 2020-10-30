@@ -5,16 +5,10 @@ pub(crate) type Atomic<T> = flize::Atomic<T>;
 pub(crate) type Shared<'shield, T> = flize::Shared<'shield, T>;
 
 pub(crate) trait AtomicExt {
-    // fn clone<'c, S: Shield<'c>>(&self, shield: &S) -> Self;
     fn dbg(&self) -> String;
 }
 
 impl<T> AtomicExt for Atomic<T> {
-    // fn clone<'c, S: Shield<'c>>(&self, shield: &S) -> Self {
-    //     use std::sync::atomic::Ordering;
-    //     Atomic::new(self.load(Ordering::Relaxed, shield))
-    // }
-
     fn dbg(&self) -> String {
         use std::sync::atomic::Ordering;
         // safety: the loaded pointer is not dereferenced
@@ -49,7 +43,7 @@ impl<'shield, T> SharedExt for Shared<'shield, T> {
     }
 }
 
-/// A guard that allows accessing a [`HashMap`](flurry::HashMap).
+/// A guard that allows accessing a [`HashMap`](crate::HashMap).
 /// Any reference to a contained element retrieved from a map with a guard is tied to that guard's
 /// lifetime. This is because the guard's existence will prevent the referenced element from being
 /// destroyed if it is removed from the map for as long as the guard is around.
@@ -61,7 +55,7 @@ pub struct Guard<'collector, SH> {
     pub(crate) collector: &'collector Collector,
 }
 
-impl<'c, SH> std::fmt::Debug for Guard<'c, SH> {
+impl<'collector, SH> std::fmt::Debug for Guard<'collector, SH> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Guard")
             .field("collector", &(self.collector as *const _))

@@ -32,7 +32,7 @@ pub(crate) struct Table<K, V> {
     //     next_table is still valid.
     //
     //   - The above is true until a subsequent resize ends, at which point `map::HashMap.table´ is
-    //     set to another new table != next_table and next_table is `epoch::Guard::defer_destroy`ed
+    //     set to another new table != next_table and next_table is `ebr::Guard::defer_destroy`ed
     //     (again, see `map::HashMap::transfer`). At this point, next_table is not referenced by the
     //     map anymore. However, the guard g used to load _this_ table is still pinning the epoch at
     //     the time of the call to `defer_destroy`. Thus, next_table remains valid for at least the
@@ -268,10 +268,11 @@ impl<K, V> Table<K, V> {
 
 impl<K, V> Drop for Table<K, V> {
     fn drop(&mut self) {
-        // safety: we have &mut self _and_ all references we have returned are bound to the
-        // lifetime of their borrow of self, so there cannot be any outstanding references to
-        // anything in the map.
-        let guard = unsafe { flize::unprotected() };
+        // safety: we have &mut self _and_ all references we have returned are bound to the lifetime
+        // of the guard they were obtained with, which in turn holds a reference to this map's
+        // collector. This makes it impossible for the guard to outlive the map, so there cannot be
+        // any outstanding references to anything in the map.
+        let shield = unsafe { flize::unprotected() };
 
         // since BinEntry::Nodes are either dropped by drop_bins or transferred to a new table,
         // all bins are empty or contain a Shared pointing to shared the BinEntry::Moved (if
@@ -281,7 +282,7 @@ impl<K, V> Drop for Table<K, V> {
         // when testing, we check the above invariant. in production, we assume it to be true
         if cfg!(debug_assertions) {
             for bin in bins.iter() {
-                let bin = bin.load(Ordering::SeqCst, guard);
+                let bin = bin.load(Ordering::SeqCst, shield);
                 if bin.is_null() {
                     continue;
                 } else {
@@ -303,7 +304,7 @@ impl<K, V> Drop for Table<K, V> {
         // we need to drop the shared forwarding node (since it is heap allocated).
         // Note that this needs to happen _independently_ of whether or not there was
         // a previous call to drop_bins.
-        let moved = self.moved.swap(Shared::null(), Ordering::SeqCst, guard);
+        let moved = self.moved.swap(Shared::null(), Ordering::SeqCst, shield);
         assert!(
             !moved.is_null(),
             "self.moved is initialized together with the table"
