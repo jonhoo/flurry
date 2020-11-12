@@ -1,8 +1,9 @@
 use crate::node::*;
-use crate::{Atomic, AtomicExt, Guard, Shared, SharedExt};
+use crate::{Atomic, Guard, Shared, SharedExt};
 use std::borrow::Borrow;
 use std::sync::atomic::Ordering;
 
+#[derive(Debug)]
 pub(crate) struct Table<K, V> {
     bins: Box<[Atomic<BinEntry<K, V>>]>,
 
@@ -45,24 +46,6 @@ pub(crate) struct Table<K, V> {
     // Since finishing a resize is the only time a table is `defer_destroy`ed, the above covers
     // all cases.
     next_table: Atomic<Table<K, V>>,
-}
-
-impl<K, V> std::fmt::Debug for Table<K, V>
-where
-    K: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let bins_dbg: Vec<String> = self
-            .bins
-            .iter()
-            .map(|atomic_ptr| atomic_ptr.dbg())
-            .collect();
-        f.debug_struct("Table")
-            .field("bins", &bins_dbg)
-            .field("moved", &self.moved.dbg())
-            .field("next_table", &self.next_table.dbg())
-            .finish()
-    }
 }
 
 impl<K, V> From<Vec<Atomic<BinEntry<K, V>>>> for Table<K, V> {

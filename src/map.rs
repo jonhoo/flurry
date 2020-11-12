@@ -3011,7 +3011,7 @@ where
 {
 }
 
-impl<K, V, S> fmt::Debug for HashMap<K, V, S>
+impl<K, V, S> Debug for HashMap<K, V, S>
 where
     K: Debug,
     V: Debug,

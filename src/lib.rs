@@ -269,4 +269,4 @@ pub type DefaultHashBuilder = ahash::RandomState;
 /// Types needed to safely access shared data concurrently.
 mod ebr;
 pub use ebr::Guard;
-pub(crate) use ebr::{Atomic, AtomicExt, Shared, SharedExt};
+pub(crate) use ebr::{Atomic, Shared, SharedExt};

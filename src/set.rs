@@ -582,7 +582,7 @@ where
 {
 }
 
-impl<T, S> fmt::Debug for HashSet<T, S>
+impl<T, S> Debug for HashSet<T, S>
 where
     T: Debug,
 {

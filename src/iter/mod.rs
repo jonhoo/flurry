@@ -7,21 +7,10 @@ use std::sync::atomic::Ordering;
 /// An iterator over a map's entries.
 ///
 /// See [`HashMap::iter`](crate::HashMap::iter) for details.
+#[derive(Debug)]
 pub struct Iter<'m, 'g, K, V, SH> {
     pub(crate) node_iter: NodeIter<'m, 'g, K, V, SH>,
     pub(crate) guard: &'g Guard<'m, SH>,
-}
-
-impl<'m, 'g, K, V, SH> std::fmt::Debug for Iter<'m, 'g, K, V, SH>
-where
-    K: std::fmt::Debug,
-    V: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Iter")
-            .field("node_iter", &self.node_iter)
-            .finish()
-    }
 }
 
 impl<'m, 'g, K, V, SH> Iterator for Iter<'m, 'g, K, V, SH>
@@ -60,21 +49,10 @@ where
 /// An iterator over a map's values.
 ///
 /// See [`HashMap::values`](crate::HashMap::values) for details.
+#[derive(Debug)]
 pub struct Values<'m, 'g, K, V, SH> {
     pub(crate) node_iter: NodeIter<'m, 'g, K, V, SH>,
     pub(crate) guard: &'g Guard<'m, SH>,
-}
-
-impl<'m, 'g, K, V, SH> std::fmt::Debug for Values<'m, 'g, K, V, SH>
-where
-    K: std::fmt::Debug,
-    V: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Values")
-            .field("node_iter", &self.node_iter)
-            .finish()
-    }
 }
 
 impl<'m, 'g, K, V, SH> Iterator for Values<'m, 'g, K, V, SH>

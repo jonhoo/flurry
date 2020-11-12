@@ -1,5 +1,5 @@
 use crate::raw::Table;
-use crate::{Atomic, AtomicExt, Guard, Shared, SharedExt};
+use crate::{Atomic, Guard, Shared, SharedExt};
 use core::sync::atomic::{spin_loop_hint, AtomicBool, AtomicI64, Ordering};
 use parking_lot::Mutex;
 use std::borrow::Borrow;
@@ -60,27 +60,13 @@ impl<K, V> BinEntry<K, V> {
 }
 
 /// Key-value entry.
+#[derive(Debug)]
 pub(crate) struct Node<K, V> {
     pub(crate) hash: u64,
     pub(crate) key: K,
     pub(crate) value: Atomic<V>,
     pub(crate) next: Atomic<BinEntry<K, V>>,
     pub(crate) lock: Mutex<()>,
-}
-
-impl<K, V> std::fmt::Debug for Node<K, V>
-where
-    K: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Node")
-            .field("hash", &self.hash)
-            .field("key", &self.key)
-            .field("value", &self.value.dbg())
-            .field("next", &self.next.dbg())
-            .field("lock", &self.lock)
-            .finish()
-    }
 }
 
 impl<K, V> Node<K, V> {
@@ -106,6 +92,7 @@ impl<K, V> Node<K, V> {
 /* ------------------------ TreeNodes ------------------------ */
 
 /// Nodes for use in TreeBins.
+#[derive(Debug)]
 pub(crate) struct TreeNode<K, V> {
     // Node properties
     pub(crate) node: Node<K, V>,
@@ -116,22 +103,6 @@ pub(crate) struct TreeNode<K, V> {
     pub(crate) right: Atomic<BinEntry<K, V>>,
     pub(crate) prev: Atomic<BinEntry<K, V>>, // needed to unlink `next` upon deletion
     pub(crate) red: AtomicBool,
-}
-
-impl<K, V> std::fmt::Debug for TreeNode<K, V>
-where
-    K: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TreeNode")
-            .field("node", &self.node)
-            .field("parent", &self.parent.dbg())
-            .field("left", &self.left.dbg())
-            .field("right", &self.right.dbg())
-            .field("prev", &self.prev.dbg())
-            .field("red", &self.red)
-            .finish()
-    }
 }
 
 impl<K, V> TreeNode<K, V> {
@@ -253,27 +224,13 @@ enum Dir {
 /// maintain a parasitic read-write lock forcing writers (who hold the bin lock)
 /// to wait for readers (who do not) to complete before tree restructuring
 /// operations.
+#[derive(Debug)]
 pub(crate) struct TreeBin<K, V> {
     pub(crate) root: Atomic<BinEntry<K, V>>,
     pub(crate) first: Atomic<BinEntry<K, V>>,
     pub(crate) waiter: Atomic<Thread>,
     pub(crate) lock: parking_lot::Mutex<()>,
     pub(crate) lock_state: AtomicI64,
-}
-
-impl<K, V> std::fmt::Debug for TreeBin<K, V>
-where
-    K: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TreeBin")
-            .field("root", &self.root.dbg())
-            .field("first", &self.first.dbg())
-            .field("waiter", &self.waiter.dbg())
-            .field("lock", &self.lock)
-            .field("lock_state", &self.lock_state)
-            .finish()
-    }
 }
 
 impl<K, V> TreeBin<K, V>

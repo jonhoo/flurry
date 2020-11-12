@@ -25,7 +25,8 @@ num_cpus = "1.12.0"
 rayon = {version = "1.3", optional = true}
 serde = {version = "1.0.105", optional = true}
 [dependencies.flize]
-version = "4.2.0"
+git = "https://github.com/xacrimon/flize/"
+branch = "master"
 
 [dependencies.ahash]
 version = "0.3.2"

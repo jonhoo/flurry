@@ -4,19 +4,6 @@ use std::ops::{Deref, DerefMut};
 pub(crate) type Atomic<T> = flize::Atomic<T>;
 pub(crate) type Shared<'shield, T> = flize::Shared<'shield, T>;
 
-pub(crate) trait AtomicExt {
-    fn dbg(&self) -> String;
-}
-
-impl<T> AtomicExt for Atomic<T> {
-    fn dbg(&self) -> String {
-        use std::sync::atomic::Ordering;
-        // safety: the loaded pointer is not dereferenced
-        self.load(Ordering::Relaxed, unsafe { flize::unprotected() })
-            .dbg()
-    }
-}
-
 pub(crate) trait SharedExt {
     type Of;
     fn boxed(value: Self::Of) -> Self;
@@ -49,18 +36,10 @@ impl<'shield, T> SharedExt for Shared<'shield, T> {
 /// destroyed if it is removed from the map for as long as the guard is around.
 ///
 /// For more information, please refer to the crate-level documentation.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Guard<'collector, SH> {
     pub(crate) shield: SH,
     pub(crate) collector: &'collector Collector,
-}
-
-impl<'collector, SH> std::fmt::Debug for Guard<'collector, SH> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Guard")
-            .field("collector", &(self.collector as *const _))
-            .finish()
-    }
 }
 
 impl<'collector, SH> Deref for Guard<'collector, SH>

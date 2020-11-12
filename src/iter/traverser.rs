@@ -3,6 +3,7 @@ use crate::node::{BinEntry, Node, TreeNode};
 use crate::raw::Table;
 use std::sync::atomic::Ordering;
 
+#[derive(Debug)]
 pub(crate) struct NodeIter<'m, 'g, K, V, SH> {
     /// Current table; update if resized
     table: Option<&'g Table<K, V>>,
@@ -26,25 +27,6 @@ pub(crate) struct NodeIter<'m, 'g, K, V, SH> {
     base_size: usize,
 
     guard: &'g Guard<'m, SH>,
-}
-
-impl<'m, 'g, K, V, SH> std::fmt::Debug for NodeIter<'m, 'g, K, V, SH>
-where
-    K: std::fmt::Debug,
-    V: std::fmt::Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Iter")
-            .field("table", &self.table)
-            .field("stack", &self.stack)
-            .field("spare", &self.spare)
-            .field("prev", &self.prev)
-            .field("index", &self.index)
-            .field("base_index", &self.base_index)
-            .field("base_limit", &self.base_limit)
-            .field("base_size", &self.base_size)
-            .finish()
-    }
 }
 
 impl<'m, 'g, K, V, SH> NodeIter<'m, 'g, K, V, SH>
