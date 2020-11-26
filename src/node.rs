@@ -787,9 +787,9 @@ impl<K, V> TreeBin<K, V> {
         #[allow(unused_unsafe)]
         unsafe {
             if drop_value {
-                &guard.defer_destroy(p_deref.node.value.load(Ordering::Relaxed, &guard.shield));
+                guard.defer_destroy(p_deref.node.value.load(Ordering::Relaxed, &guard.shield));
             }
-            &guard.defer_destroy(p);
+            guard.defer_destroy(p);
         }
 
         if cfg!(debug_assertions) {
