@@ -1038,7 +1038,7 @@ impl<K, V> TreeNode<K, V> {
     /// Additionally, it must point to an instance of BinEntry that is actually a
     /// TreeNode.
     #[inline]
-    pub(crate) unsafe fn get_tree_node<'g>(bin: Shared<'g, BinEntry<K, V>>) -> &'g TreeNode<K, V> {
+    pub(crate) unsafe fn get_tree_node(bin: Shared<'_, BinEntry<K, V>>) -> &TreeNode<K, V> {
         bin.as_ref_unchecked().as_tree_node().unwrap()
     }
 }

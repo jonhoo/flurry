@@ -631,7 +631,7 @@ where
 {
     fn from_iter<I: IntoIterator<Item = &'a T>>(iter: I) -> Self {
         Self {
-            map: HashMap::from_iter(iter.into_iter().map(|&v| (v, ()))),
+            map: iter.into_iter().map(|&v| (v, ())).collect(),
         }
     }
 }
