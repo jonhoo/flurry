@@ -24,7 +24,7 @@ parking_lot = "0.10"
 num_cpus = "1.12.0"
 rayon = {version = "1.3", optional = true}
 serde = {version = "1.0.105", optional = true}
-flize = "4.2.2"
+flize = {git = "https://github.com/xacrimon/flize", branch = "acrimon/dgl"}
 
 [dependencies.ahash]
 version = "0.3.2"
