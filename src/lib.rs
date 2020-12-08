@@ -9,16 +9,16 @@
 //! # A note on `Guard` and memory use
 //!
 //! You may have noticed that many of the access methods on this map take a reference to an
-//! [`epoch::Guard`]. The exact details of this are beyond the scope of this documentation (for
-//! that, see [`crossbeam::epoch`]), but some of the implications bear repeating here. You obtain a
-//! `Guard` using [`epoch::pin`], and you can use references to the same guard to make multiple API
-//! calls if you wish. Whenever you get a reference to something stored in the map, that reference
-//! is tied to the lifetime of the `Guard` that you provided. This is because each `Guard` prevents
-//! the destruction of any item associated with it. Whenever something is read under a `Guard`,
-//! that something stays around for _at least_ as long as the `Guard` does. The map delays
-//! deallocating values until it safe to do so, and in order to amortize the cost of the necessary
-//! bookkeeping it may delay even further until there's a _batch_ of items that need to be
-//! deallocated.
+//! [`ebr::Guard`]. The exact details of this are beyond the scope of this documentation (for
+//! that, see [`flize`] or [`crossbeam::epoch`]), but some of the implications bear repeating here.
+//! You obtain a `Guard` using [`HashMap::guard`], and you can use references to the same guard to
+//! make multiple API calls if you wish. Whenever you get a reference to something stored in the
+//! map, that reference is tied to the lifetime of the `Guard` that you provided. This is because
+//! each `Guard` prevents the destruction of any item associated with it. Whenever something is
+//! read under a `Guard`, that something stays around for _at least_ as long as the `Guard` does.
+//! The map delays deallocating values until it safe to do so, and in order to amortize the cost
+//! of the necessary bookkeeping it may delay even further until there's a _batch_ of items that
+//! need to be deallocated.
 //!
 //! Notice that there is a trade-off here. Creating and dropping a `Guard` is not free, since it
 //! also needs to interact with said bookkeeping. But if you keep one around for a long time, you
@@ -242,8 +242,6 @@
 )]
 #![warn(rust_2018_idioms)]
 #![allow(clippy::cognitive_complexity)]
-use crossbeam_epoch::Guard;
-use std::ops::Deref;
 
 mod map;
 mod map_ref;
@@ -260,7 +258,6 @@ mod serde_impls;
 
 /// Iterator types.
 pub mod iter;
-
 pub use map::{HashMap, TryInsertError};
 pub use map_ref::HashMapRef;
 pub use set::HashSet;
@@ -270,22 +267,6 @@ pub use set_ref::HashSetRef;
 pub type DefaultHashBuilder = ahash::RandomState;
 
 /// Types needed to safely access shared data concurrently.
-pub mod epoch {
-    pub use crossbeam_epoch::{pin, Guard};
-}
-
-pub(crate) enum GuardRef<'g> {
-    Owned(Guard),
-    Ref(&'g Guard),
-}
-
-impl Deref for GuardRef<'_> {
-    type Target = Guard;
-
-    #[inline]
-    fn deref(&self) -> &Guard {
-        match *self {
-            GuardRef::Owned(ref guard) | GuardRef::Ref(&ref guard) => guard,
-        }
-    }
-}
+mod ebr;
+pub use ebr::Guard;
+pub(crate) use ebr::{Atomic, Shared, SharedExt};

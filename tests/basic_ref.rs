@@ -1,16 +1,10 @@
-use crossbeam_epoch as epoch;
 use flurry::*;
 use std::sync::Arc;
 
 #[test]
 fn pin() {
-    let _map = HashMap::<usize, usize>::new().pin();
-}
-
-#[test]
-fn with_guard() {
-    let guard = epoch::pin();
-    let _map = HashMap::<usize, usize>::new().with_guard(&guard);
+    let map = HashMap::<usize, usize>::new();
+    let _pin = map.pin();
 }
 
 #[test]
@@ -341,11 +335,11 @@ fn from_iter_ref() {
     entries.sort();
 
     let map: HashMap<usize, usize> = HashMap::from_iter(entries.clone().into_iter());
-    let map = map.pin();
-    let mut collected: Vec<(&usize, &usize)> = map.iter().collect();
+    let map_ref = map.pin();
+    let mut collected: Vec<(&usize, &usize)> = map_ref.iter().collect();
     collected.sort();
 
-    assert_eq!(entries, entries)
+    assert_eq!(collected, entries);
 }
 
 #[test]
@@ -386,12 +380,12 @@ fn retain_all_true() {
 #[test]
 fn retain_some() {
     let map: HashMap<u32, u32> = (0..10).map(|x| (x, x)).collect();
-    let map = map.pin();
+    let map_ref = map.pin();
     let expected_map: HashMap<u32, u32> = (5..10).map(|x| (x, x)).collect();
-    let expected_map = expected_map.pin();
-    map.retain(|_, v| *v >= 5);
-    assert_eq!(map.len(), 5);
-    assert_eq!(map, expected_map);
+    let expected_map_ref = expected_map.pin();
+    map_ref.retain(|_, v| *v >= 5);
+    assert_eq!(map_ref.len(), 5);
+    assert_eq!(map_ref, expected_map_ref);
 }
 
 #[test]

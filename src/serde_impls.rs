@@ -13,10 +13,11 @@ struct HashMapVisitor<K, V, S> {
     hash_builder_marker: PhantomData<S>,
 }
 
-impl<K, V, S> Serialize for HashMapRef<'_, K, V, S>
+impl<'map, SH, K, V, S> Serialize for HashMapRef<'map, SH, K, V, S>
 where
     K: Serialize,
     V: Serialize,
+    SH: flize::Shield<'map>,
 {
     fn serialize<Sr>(&self, serializer: Sr) -> Result<Sr::Ok, Sr::Error>
     where
@@ -83,11 +84,12 @@ where
             Some(n) => HashMap::with_capacity_and_hasher(n, S::default()),
             None => HashMap::with_hasher(S::default()),
         };
-        let guard = map.guard();
-
-        while let Some((key, value)) = access.next_entry()? {
-            if let Some(_old_value) = map.insert(key, value, &guard) {
-                unreachable!("Serialized map held two values with the same key");
+        {
+            let guard = map.guard();
+            while let Some((key, value)) = access.next_entry()? {
+                if let Some(_old_value) = map.insert(key, value, &guard) {
+                    unreachable!("Serialized map held two values with the same key");
+                }
             }
         }
 
@@ -95,9 +97,10 @@ where
     }
 }
 
-impl<T, S> Serialize for HashSetRef<'_, T, S>
+impl<'set, SH, T, S> Serialize for HashSetRef<'set, SH, T, S>
 where
     T: Serialize,
+    SH: flize::Shield<'set>,
 {
     fn serialize<Sr>(&self, serilizer: Sr) -> Result<Sr::Ok, Sr::Error>
     where
@@ -162,12 +165,12 @@ where
         A: SeqAccess<'de>,
     {
         let set = HashSet::default();
-        let guard = set.guard();
-
-        while let Some(value) = access.next_element()? {
-            let _ = set.insert(value, &guard);
+        {
+            let guard = set.guard();
+            while let Some(value) = access.next_element()? {
+                let _ = set.insert(value, &guard);
+            }
         }
-
         Ok(set)
     }
 }

@@ -15,7 +15,7 @@
  */
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use flurry::{epoch, HashMap};
+use flurry::HashMap;
 use rayon;
 use rayon::prelude::*;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ const ITER: u64 = 32 * 1024;
 fn task_insert_flurry_u64_u64_guard_every_it() -> HashMap<u64, u64> {
     let map = HashMap::with_capacity(ITER as usize);
     (0..ITER).into_par_iter().for_each(|i| {
-        let guard = epoch::pin();
+        let guard = map.guard();
         map.insert(i, i + 7, &guard);
     });
     map
@@ -62,8 +62,8 @@ fn task_insert_flurry_u64_u64_guard_once(threads: usize) -> HashMap<u64, u64> {
         for t in 1..=(threads as u64) {
             let m = map.clone();
             s.spawn(move |_| {
+                let guard = m.guard();
                 let start = t * inc;
-                let guard = epoch::pin();
                 for i in start..(start + inc) {
                     m.insert(i, i + 7, &guard);
                 }
@@ -97,7 +97,7 @@ fn insert_flurry_u64_u64_guard_once(c: &mut Criterion) {
 
 fn task_get_flurry_u64_u64_guard_every_it(map: &HashMap<u64, u64>) {
     (0..ITER).into_par_iter().for_each(|i| {
-        let guard = epoch::pin();
+        let guard = map.guard();
         assert_eq!(*map.get(&i, &guard).unwrap(), i + 7);
     });
 }
@@ -134,7 +134,7 @@ fn task_get_flurry_u64_u64_guard_once(threads: usize, map: Arc<HashMap<u64, u64>
             let m = map.clone();
             s.spawn(move |_| {
                 let start = t * inc;
-                let guard = epoch::pin();
+                let guard = m.guard();
                 for i in start..(start + inc) {
                     if let Some(&v) = m.get(&i, &guard) {
                         assert_eq!(v, i + 7);

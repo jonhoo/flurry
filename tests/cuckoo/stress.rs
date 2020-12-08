@@ -61,7 +61,8 @@ impl Environment {
 
 fn stress_insert_thread(env: Arc<Environment>) {
     let mut rng = rand::thread_rng();
-    let guard = epoch::pin();
+    let guard1 = env.table1.guard();
+    let guard2 = env.table2.guard();
     while !env.finished.load(Ordering::SeqCst) {
         let idx = env.ind_dist.sample(&mut rng);
         let in_use = env.in_use.lock();
@@ -69,13 +70,17 @@ fn stress_insert_thread(env: Arc<Environment>) {
             let key = env.keys[idx];
             let val1 = env.val_dist1.sample(&mut rng);
             let val2 = env.val_dist2.sample(&mut rng);
-            let res1 = if !env.table1.contains_key(&key, &guard) {
-                env.table1.insert(key, val1, &guard).map_or(true, |_| false)
+            let res1 = if !env.table1.contains_key(&key, &guard1) {
+                env.table1
+                    .insert(key, val1, &guard1)
+                    .map_or(true, |_| false)
             } else {
                 false
             };
-            let res2 = if !env.table2.contains_key(&key, &guard) {
-                env.table2.insert(key, val2, &guard).map_or(true, |_| false)
+            let res2 = if !env.table2.contains_key(&key, &guard2) {
+                env.table2
+                    .insert(key, val2, &guard2)
+                    .map_or(true, |_| false)
             } else {
                 false
             };
@@ -83,8 +88,8 @@ fn stress_insert_thread(env: Arc<Environment>) {
             assert_ne!(res1, (*in_table)[idx]);
             assert_ne!(res2, (*in_table)[idx]);
             if res1 {
-                assert_eq!(Some(&val1), env.table1.get(&key, &guard));
-                assert_eq!(Some(&val2), env.table2.get(&key, &guard));
+                assert_eq!(Some(&val1), env.table1.get(&key, &guard1));
+                assert_eq!(Some(&val2), env.table2.get(&key, &guard2));
                 let mut vals1 = env.vals1.lock();
                 let mut vals2 = env.vals2.lock();
                 (*vals1)[idx] = val1;
@@ -98,20 +103,21 @@ fn stress_insert_thread(env: Arc<Environment>) {
 
 fn stress_delete_thread(env: Arc<Environment>) {
     let mut rng = rand::thread_rng();
-    let guard = epoch::pin();
+    let guard1 = env.table1.guard();
+    let guard2 = env.table2.guard();
     while !env.finished.load(Ordering::SeqCst) {
         let idx = env.ind_dist.sample(&mut rng);
         let in_use = env.in_use.lock();
         if (*in_use)[idx].compare_and_swap(false, true, Ordering::SeqCst) {
             let key = env.keys[idx];
-            let res1 = env.table1.remove(&key, &guard).map_or(false, |_| true);
-            let res2 = env.table2.remove(&key, &guard).map_or(false, |_| true);
+            let res1 = env.table1.remove(&key, &guard1).map_or(false, |_| true);
+            let res2 = env.table2.remove(&key, &guard2).map_or(false, |_| true);
             let mut in_table = env.in_table.lock();
             assert_eq!(res1, (*in_table)[idx]);
             assert_eq!(res2, (*in_table)[idx]);
             if res1 {
-                assert!(env.table1.get(&key, &guard).is_none());
-                assert!(env.table2.get(&key, &guard).is_none());
+                assert!(env.table1.get(&key, &guard1).is_none());
+                assert!(env.table2.get(&key, &guard2).is_none());
                 (*in_table)[idx] = false;
             }
             (*in_use)[idx].swap(false, Ordering::SeqCst);
@@ -121,7 +127,8 @@ fn stress_delete_thread(env: Arc<Environment>) {
 
 fn stress_find_thread(env: Arc<Environment>) {
     let mut rng = rand::thread_rng();
-    let guard = epoch::pin();
+    let guard1 = env.table1.guard();
+    let guard2 = env.table2.guard();
     while !env.finished.load(Ordering::SeqCst) {
         let idx = env.ind_dist.sample(&mut rng);
         let in_use = env.in_use.lock();
@@ -131,12 +138,12 @@ fn stress_find_thread(env: Arc<Environment>) {
             let val1 = (*env.vals1.lock())[idx];
             let val2 = (*env.vals2.lock())[idx];
 
-            let value = env.table1.get(&key, &guard);
+            let value = env.table1.get(&key, &guard1);
             if value.is_some() {
                 assert_eq!(&val1, value.unwrap());
                 assert!((*in_table)[idx]);
             }
-            let value = env.table2.get(&key, &guard);
+            let value = env.table2.get(&key, &guard2);
             if value.is_some() {
                 assert_eq!(&val2, value.unwrap());
                 assert!((*in_table)[idx]);
