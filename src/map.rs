@@ -195,8 +195,8 @@ pub struct TryInsertError<'a, V> {
 }
 
 impl<'a, V> Display for TryInsertError<'a, V>
-    where
-        V: Debug,
+where
+    V: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
@@ -208,8 +208,8 @@ impl<'a, V> Display for TryInsertError<'a, V>
 }
 
 impl<'a, V> Error for TryInsertError<'a, V>
-    where
-        V: Debug,
+where
+    V: Debug,
 {
     #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
@@ -266,8 +266,8 @@ impl<K, V> HashMap<K, V, crate::DefaultHashBuilder> {
 }
 
 impl<K, V, S> Default for HashMap<K, V, S>
-    where
-        S: Default,
+where
+    S: Default,
 {
     fn default() -> Self {
         Self::with_hasher(S::default())
@@ -482,7 +482,11 @@ impl<K, V, S> HashMap<K, V, S> {
                 continue;
             }
 
-            if self.size_ctl.compare_exchange(sc, -1, Ordering::SeqCst, Ordering::Relaxed) == Ok(sc) {
+            if self
+                .size_ctl
+                .compare_exchange(sc, -1, Ordering::SeqCst, Ordering::Relaxed)
+                == Ok(sc)
+            {
                 // we get to do it!
                 let mut table = self.table.load(Ordering::SeqCst, guard);
 
@@ -556,8 +560,8 @@ impl<K, V, S> HashMap<K, V, S> {
 // ===
 
 impl<K, V, S> HashMap<K, V, S>
-    where
-        K: Clone + Ord,
+where
+    K: Clone + Ord,
 {
     /// Tries to presize table to accommodate the given number of elements.
     fn try_presize(&self, size: usize, guard: &Guard) {
@@ -656,10 +660,12 @@ impl<K, V, S> HashMap<K, V, S>
                 // and since our size_control field needs to be negative
                 // to indicate a resize this needs to be addressed
 
-                if self
-                    .size_ctl
-                    .compare_exchange(size_ctl, rs + 2, Ordering::SeqCst, Ordering::Relaxed)
-                    == Ok(size_ctl)
+                if self.size_ctl.compare_exchange(
+                    size_ctl,
+                    rs + 2,
+                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                ) == Ok(size_ctl)
                 {
                     // someone else already started to resize the table
                     // TODO: can we `self.help_transfer`?
@@ -725,10 +731,12 @@ impl<K, V, S> HashMap<K, V, S>
                 } else {
                     0
                 };
-                if self
-                    .transfer_index
-                    .compare_exchange(next_index, next_bound, Ordering::SeqCst, Ordering::Relaxed)
-                    == Ok(next_index)
+                if self.transfer_index.compare_exchange(
+                    next_index,
+                    next_bound,
+                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                ) == Ok(next_index)
                 {
                     bound = next_bound;
                     i = next_index;
@@ -777,7 +785,11 @@ impl<K, V, S> HashMap<K, V, S>
                 }
 
                 let sc = self.size_ctl.load(Ordering::SeqCst);
-                if self.size_ctl.compare_exchange(sc, sc - 1, Ordering::SeqCst, Ordering::Relaxed) == Ok(sc) {
+                if self
+                    .size_ctl
+                    .compare_exchange(sc, sc - 1, Ordering::SeqCst, Ordering::Relaxed)
+                    == Ok(sc)
+                {
                     if (sc - 2) != Self::resize_stamp(n) << RESIZE_STAMP_SHIFT {
                         return;
                     }
@@ -913,7 +925,7 @@ impl<K, V, S> HashMap<K, V, S>
                             node.value.clone(),
                             Atomic::from(*link),
                         )))
-                            .into_shared(guard);
+                        .into_shared(guard);
 
                         p = node.next.load(Ordering::SeqCst, guard);
                     }
@@ -1045,7 +1057,7 @@ impl<K, V, S> HashMap<K, V, S>
                             unsafe { low.into_owned() },
                             guard,
                         )))
-                            .into_shared(guard)
+                        .into_shared(guard)
                     } else {
                         // if not, we can re-use the old bin here, since it will
                         // be swapped for a Moved entry while we are still
@@ -1071,7 +1083,7 @@ impl<K, V, S> HashMap<K, V, S>
                             unsafe { high.into_owned() },
                             guard,
                         )))
-                            .into_shared(guard)
+                        .into_shared(guard)
                     } else {
                         reused_bin = true;
                         // since we also don't use the created low nodes here,
@@ -1145,7 +1157,11 @@ impl<K, V, S> HashMap<K, V, S>
                 break;
             }
 
-            if self.size_ctl.compare_exchange(sc, sc + 1, Ordering::SeqCst, Ordering::Relaxed) == Ok(sc) {
+            if self
+                .size_ctl
+                .compare_exchange(sc, sc + 1, Ordering::SeqCst, Ordering::Relaxed)
+                == Ok(sc)
+            {
                 self.transfer(table, next_table, guard);
                 break;
             }
@@ -1210,10 +1226,20 @@ impl<K, V, S> HashMap<K, V, S>
                 }
 
                 // try to join!
-                if self.size_ctl.compare_exchange(sc, sc + 1, Ordering::SeqCst, Ordering::Relaxed) == Ok(sc) {
+                if self
+                    .size_ctl
+                    .compare_exchange(sc, sc + 1, Ordering::SeqCst, Ordering::Relaxed)
+                    == Ok(sc)
+                {
                     self.transfer(table, nt, guard);
                 }
-            } else if self.size_ctl.compare_exchange(sc, rs + 2, Ordering::SeqCst, Ordering::Relaxed) == Ok(sc) {
+            } else if self.size_ctl.compare_exchange(
+                sc,
+                rs + 2,
+                Ordering::SeqCst,
+                Ordering::Relaxed,
+            ) == Ok(sc)
+            {
                 // a resize is needed, but has not yet started
                 // TODO: figure out why this is rs + 2, not just rs
                 // NOTE: this also applies to `try_presize`
@@ -1257,9 +1283,9 @@ impl<K, V, S> HashMap<K, V, S>
 // ===
 
 impl<K, V, S> HashMap<K, V, S>
-    where
-        K: Hash + Ord,
-        S: BuildHasher,
+where
+    K: Hash + Ord,
+    S: BuildHasher,
 {
     #[inline]
     fn hash<Q: ?Sized + Hash>(&self, key: &Q) -> u64 {
@@ -1269,9 +1295,9 @@ impl<K, V, S> HashMap<K, V, S>
     }
 
     fn get_node<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g Node<K, V>>
-        where
-            K: Borrow<Q>,
-            Q: ?Sized + Hash + Ord,
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Ord,
     {
         let table = self.table.load(Ordering::SeqCst, guard);
         if table.is_null() {
@@ -1345,9 +1371,9 @@ impl<K, V, S> HashMap<K, V, S>
     /// assert_eq!(mref.contains_key(&2), false);
     /// ```
     pub fn contains_key<Q>(&self, key: &Q, guard: &Guard) -> bool
-        where
-            K: Borrow<Q>,
-            Q: ?Sized + Hash + Ord,
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Ord,
     {
         self.check_guard(guard);
         self.get(key, &guard).is_some()
@@ -1377,9 +1403,9 @@ impl<K, V, S> HashMap<K, V, S>
     /// ```
     #[inline]
     pub fn get<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
-        where
-            K: Borrow<Q>,
-            Q: ?Sized + Hash + Ord,
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Ord,
     {
         self.check_guard(guard);
         let node = self.get_node(key, guard)?;
@@ -1404,9 +1430,9 @@ impl<K, V, S> HashMap<K, V, S>
     /// [`Hash`]: std::hash::Hash
     #[inline]
     pub fn get_key_value<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<(&'g K, &'g V)>
-        where
-            K: Borrow<Q>,
-            Q: ?Sized + Hash + Ord,
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Ord,
     {
         self.check_guard(guard);
         let node = self.get_node(key, guard)?;
@@ -1420,8 +1446,8 @@ impl<K, V, S> HashMap<K, V, S>
     }
 
     pub(crate) fn guarded_eq(&self, other: &Self, our_guard: &Guard, their_guard: &Guard) -> bool
-        where
-            V: PartialEq,
+    where
+        V: PartialEq,
     {
         if self.len() != other.len() {
             return false;
@@ -1438,8 +1464,8 @@ impl<K, V, S> HashMap<K, V, S>
 // ===
 
 impl<K, V, S> HashMap<K, V, S>
-    where
-        K: Clone + Ord,
+where
+    K: Clone + Ord,
 {
     /// Clears the map, removing all key-value pairs.
     ///
@@ -1586,10 +1612,10 @@ impl<K, V, S> HashMap<K, V, S>
 // ===
 
 impl<K, V, S> HashMap<K, V, S>
-    where
-        K: 'static + Sync + Send + Clone + Hash + Ord,
-        V: 'static + Sync + Send,
-        S: BuildHasher,
+where
+    K: 'static + Sync + Send + Clone + Hash + Ord,
+    V: 'static + Sync + Send,
+    S: BuildHasher,
 {
     /// Inserts a key-value pair into the map.
     ///
@@ -1766,20 +1792,20 @@ impl<K, V, S> HashMap<K, V, S>
                     continue;
                 }
                 BinEntry::Node(ref head)
-                if no_replacement && head.hash == hash && head.key == key =>
-                    {
-                        // fast path if replacement is disallowed and first bin matches
-                        let v = head.value.load(Ordering::SeqCst, guard);
-                        // safety (for v): since the value is present now, and we've held a guard from
-                        // the beginning of the search, the value cannot be dropped until the next
-                        // epoch, which won't arrive until after we drop our guard.
-                        // safety (for value): since we never inserted the value in the tree, `value`
-                        // is the last remaining pointer to the initial value.
-                        return PutResult::Exists {
-                            current: unsafe { v.deref() },
-                            not_inserted: unsafe { value.into_owned().into_box() },
-                        };
-                    }
+                    if no_replacement && head.hash == hash && head.key == key =>
+                {
+                    // fast path if replacement is disallowed and first bin matches
+                    let v = head.value.load(Ordering::SeqCst, guard);
+                    // safety (for v): since the value is present now, and we've held a guard from
+                    // the beginning of the search, the value cannot be dropped until the next
+                    // epoch, which won't arrive until after we drop our guard.
+                    // safety (for value): since we never inserted the value in the tree, `value`
+                    // is the last remaining pointer to the initial value.
+                    return PutResult::Exists {
+                        current: unsafe { v.deref() },
+                        not_inserted: unsafe { value.into_owned().into_box() },
+                    };
+                }
                 BinEntry::Node(ref head) => {
                     // bin is non-empty, need to link into it, so we must take the lock
                     let head_lock = head.lock.lock();
@@ -1984,7 +2010,7 @@ impl<K, V, S> HashMap<K, V, S>
         }
     }
 
-    fn put_all<I: Iterator<Item=(K, V)>>(&self, iter: I, guard: &Guard) {
+    fn put_all<I: Iterator<Item = (K, V)>>(&self, iter: I, guard: &Guard) {
         for (key, value) in iter {
             self.put(key, value, false, guard);
         }
@@ -2017,10 +2043,10 @@ impl<K, V, S> HashMap<K, V, S>
         remapping_function: F,
         guard: &'g Guard,
     ) -> Option<&'g V>
-        where
-            K: Borrow<Q>,
-            Q: ?Sized + Hash + Ord,
-            F: FnOnce(&K, &V) -> Option<V>,
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Ord,
+        F: FnOnce(&K, &V) -> Option<V>,
     {
         self.check_guard(guard);
         let hash = self.hash(&key);
@@ -2359,9 +2385,9 @@ impl<K, V, S> HashMap<K, V, S>
     /// assert_eq!(map.pin().remove(&1), None);
     /// ```
     pub fn remove<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<&'g V>
-        where
-            K: Borrow<Q>,
-            Q: ?Sized + Hash + Ord,
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Ord,
     {
         // NOTE: _technically_, this method shouldn't require the thread-safety bounds, but a) that
         // would require special-casing replace_node for when new_value.is_none(), and b) it's sort
@@ -2392,9 +2418,9 @@ impl<K, V, S> HashMap<K, V, S>
     /// assert_eq!(map.remove(&1, &guard), None);
     /// ```
     pub fn remove_entry<'g, Q>(&'g self, key: &Q, guard: &'g Guard) -> Option<(&'g K, &'g V)>
-        where
-            K: Borrow<Q>,
-            Q: ?Sized + Hash + Ord,
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Ord,
     {
         self.check_guard(guard);
         self.replace_node(key, None, None, guard)
@@ -2424,9 +2450,9 @@ impl<K, V, S> HashMap<K, V, S>
         observed_value: Option<Shared<'g, V>>,
         guard: &'g Guard,
     ) -> Option<(&'g K, &'g V)>
-        where
-            K: Borrow<Q>,
-            Q: ?Sized + Hash + Ord,
+    where
+        K: Borrow<Q>,
+        Q: ?Sized + Hash + Ord,
     {
         let hash = self.hash(key);
 
@@ -2684,8 +2710,8 @@ impl<K, V, S> HashMap<K, V, S>
     /// modified before the removal takes place, the entry will not be removed.
     /// If you want the removal to happen even in the case of concurrent modification, use [`HashMap::retain_force`].
     pub fn retain<F>(&self, mut f: F, guard: &Guard)
-        where
-            F: FnMut(&K, &V) -> bool,
+    where
+        F: FnMut(&K, &V) -> bool,
     {
         self.check_guard(guard);
         // removed selected keys
@@ -2718,8 +2744,8 @@ impl<K, V, S> HashMap<K, V, S>
     /// assert_eq!(map.pin().len(), 4);
     /// ```
     pub fn retain_force<F>(&self, mut f: F, guard: &Guard)
-        where
-            F: FnMut(&K, &V) -> bool,
+    where
+        F: FnMut(&K, &V) -> bool,
     {
         self.check_guard(guard);
         // removed selected keys
@@ -2732,8 +2758,8 @@ impl<K, V, S> HashMap<K, V, S>
 }
 
 impl<K, V, S> HashMap<K, V, S>
-    where
-        K: Clone + Ord,
+where
+    K: Clone + Ord,
 {
     /// Replaces all linked nodes in the bin at the given index unless the table
     /// is too small, in which case a resize is initiated instead.
@@ -2900,7 +2926,7 @@ impl<K, V, S> HashMap<K, V, S>
                 q_deref.node.key.clone(),
                 q_deref.node.value.clone(),
             )))
-                .into_shared(guard);
+            .into_shared(guard);
             if tail.is_null() {
                 head = new_node;
             } else {
@@ -2921,10 +2947,10 @@ impl<K, V, S> HashMap<K, V, S>
 }
 
 impl<K, V, S> PartialEq for HashMap<K, V, S>
-    where
-        K: Ord + Hash,
-        V: PartialEq,
-        S: BuildHasher,
+where
+    K: Ord + Hash,
+    V: PartialEq,
+    S: BuildHasher,
 {
     fn eq(&self, other: &Self) -> bool {
         if self.len() != other.len() {
@@ -2935,16 +2961,17 @@ impl<K, V, S> PartialEq for HashMap<K, V, S>
 }
 
 impl<K, V, S> Eq for HashMap<K, V, S>
-    where
-        K: Ord + Hash,
-        V: Eq,
-        S: BuildHasher,
-{}
+where
+    K: Ord + Hash,
+    V: Eq,
+    S: BuildHasher,
+{
+}
 
 impl<K, V, S> fmt::Debug for HashMap<K, V, S>
-    where
-        K: Debug,
-        V: Debug,
+where
+    K: Debug,
+    V: Debug,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let guard = self.collector.register().pin();
@@ -2977,12 +3004,12 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
 }
 
 impl<K, V, S> Extend<(K, V)> for &HashMap<K, V, S>
-    where
-        K: 'static + Sync + Send + Clone + Hash + Ord,
-        V: 'static + Sync + Send,
-        S: BuildHasher,
+where
+    K: 'static + Sync + Send + Clone + Hash + Ord,
+    V: 'static + Sync + Send,
+    S: BuildHasher,
 {
-    fn extend<T: IntoIterator<Item=(K, V)>>(&mut self, iter: T) {
+    fn extend<T: IntoIterator<Item = (K, V)>>(&mut self, iter: T) {
         // from `hashbrown::HashMap::extend`:
         // Keys may be already present or show multiple times in the iterator.
         // Reserve the entire hint lower bound if the map is empty.
@@ -3002,23 +3029,23 @@ impl<K, V, S> Extend<(K, V)> for &HashMap<K, V, S>
 }
 
 impl<'a, K, V, S> Extend<(&'a K, &'a V)> for &HashMap<K, V, S>
-    where
-        K: 'static + Sync + Send + Copy + Hash + Ord,
-        V: 'static + Sync + Send + Copy,
-        S: BuildHasher,
+where
+    K: 'static + Sync + Send + Copy + Hash + Ord,
+    V: 'static + Sync + Send + Copy,
+    S: BuildHasher,
 {
-    fn extend<T: IntoIterator<Item=(&'a K, &'a V)>>(&mut self, iter: T) {
+    fn extend<T: IntoIterator<Item = (&'a K, &'a V)>>(&mut self, iter: T) {
         self.extend(iter.into_iter().map(|(&key, &value)| (key, value)));
     }
 }
 
 impl<K, V, S> FromIterator<(K, V)> for HashMap<K, V, S>
-    where
-        K: 'static + Sync + Send + Clone + Hash + Ord,
-        V: 'static + Sync + Send,
-        S: BuildHasher + Default,
+where
+    K: 'static + Sync + Send + Clone + Hash + Ord,
+    V: 'static + Sync + Send,
+    S: BuildHasher + Default,
 {
-    fn from_iter<T: IntoIterator<Item=(K, V)>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         let mut iter = iter.into_iter();
 
         if let Some((key, value)) = iter.next() {
@@ -3039,32 +3066,32 @@ impl<K, V, S> FromIterator<(K, V)> for HashMap<K, V, S>
 }
 
 impl<'a, K, V, S> FromIterator<(&'a K, &'a V)> for HashMap<K, V, S>
-    where
-        K: 'static + Sync + Send + Copy + Hash + Ord,
-        V: 'static + Sync + Send + Copy,
-        S: BuildHasher + Default,
+where
+    K: 'static + Sync + Send + Copy + Hash + Ord,
+    V: 'static + Sync + Send + Copy,
+    S: BuildHasher + Default,
 {
-    fn from_iter<T: IntoIterator<Item=(&'a K, &'a V)>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = (&'a K, &'a V)>>(iter: T) -> Self {
         Self::from_iter(iter.into_iter().map(|(&k, &v)| (k, v)))
     }
 }
 
 impl<'a, K, V, S> FromIterator<&'a (K, V)> for HashMap<K, V, S>
-    where
-        K: 'static + Sync + Send + Copy + Hash + Ord,
-        V: 'static + Sync + Send + Copy,
-        S: BuildHasher + Default,
+where
+    K: 'static + Sync + Send + Copy + Hash + Ord,
+    V: 'static + Sync + Send + Copy,
+    S: BuildHasher + Default,
 {
-    fn from_iter<T: IntoIterator<Item=&'a (K, V)>>(iter: T) -> Self {
+    fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
         Self::from_iter(iter.into_iter().map(|&(k, v)| (k, v)))
     }
 }
 
 impl<K, V, S> Clone for HashMap<K, V, S>
-    where
-        K: 'static + Sync + Send + Clone + Hash + Ord,
-        V: 'static + Sync + Send + Clone,
-        S: BuildHasher + Clone,
+where
+    K: 'static + Sync + Send + Clone + Hash + Ord,
+    V: 'static + Sync + Send + Clone,
+    S: BuildHasher + Clone,
 {
     fn clone(&self) -> HashMap<K, V, S> {
         let cloned_map = Self::with_capacity_and_hasher(self.len(), self.build_hasher.clone());
@@ -3490,8 +3517,8 @@ mod tree_bins {
     }
 
     fn test_tree_bin_remove<F>(f: F)
-        where
-            F: Fn(usize, &HashMap<usize, usize, ZeroHashBuilder>, &Guard),
+    where
+        F: Fn(usize, &HashMap<usize, usize, ZeroHashBuilder>, &Guard),
     {
         let map = HashMap::<usize, usize, _>::with_hasher(ZeroHashBuilder);
         {
