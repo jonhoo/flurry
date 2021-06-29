@@ -332,7 +332,7 @@ impl<K, V> TreeBin<K, V> {
         if self
             .lock_state
             .compare_exchange(0, WRITER, Ordering::SeqCst, Ordering::Relaxed)
-            != Ok(0)
+            .is_err()
         {
             // the current lock state is non-zero, which means the lock is contended
             self.contended_lock(guard);
@@ -352,12 +352,10 @@ impl<K, V> TreeBin<K, V> {
             state = self.lock_state.load(Ordering::Acquire);
             if state & !WAITER == 0 {
                 // there are no writing or reading threads
-                if self.lock_state.compare_exchange(
-                    state,
-                    WRITER,
-                    Ordering::SeqCst,
-                    Ordering::Relaxed,
-                ) == Ok(state)
+                if self
+                    .lock_state
+                    .compare_exchange(state, WRITER, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
                 {
                     // we won the race for the lock and get to return from blocking
                     if waiting {
@@ -388,12 +386,10 @@ impl<K, V> TreeBin<K, V> {
             } else if state & WAITER == 0 {
                 // we have not indicated yet that we are waiting, so we need to
                 // do that now
-                if self.lock_state.compare_exchange(
-                    state,
-                    state | WAITER,
-                    Ordering::SeqCst,
-                    Ordering::Relaxed,
-                ) == Ok(state)
+                if self
+                    .lock_state
+                    .compare_exchange(state, state | WAITER, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
                 {
                     waiting = true;
                     let current_thread = Owned::new(current());
@@ -458,12 +454,10 @@ impl<K, V> TreeBin<K, V> {
                     return element;
                 }
                 element = element_deref.node.next.load(Ordering::SeqCst, guard);
-            } else if bin_deref.lock_state.compare_exchange(
-                s,
-                s + READER,
-                Ordering::SeqCst,
-                Ordering::Relaxed,
-            ) == Ok(s)
+            } else if bin_deref
+                .lock_state
+                .compare_exchange(s, s + READER, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
             {
                 // the current lock state indicates no waiter or writer and we
                 // acquired a read lock

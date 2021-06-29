@@ -485,7 +485,7 @@ impl<K, V, S> HashMap<K, V, S> {
             if self
                 .size_ctl
                 .compare_exchange(sc, -1, Ordering::SeqCst, Ordering::Relaxed)
-                == Ok(sc)
+                .is_ok()
             {
                 // we get to do it!
                 let mut table = self.table.load(Ordering::SeqCst, guard);
@@ -660,12 +660,10 @@ where
                 // and since our size_control field needs to be negative
                 // to indicate a resize this needs to be addressed
 
-                if self.size_ctl.compare_exchange(
-                    size_ctl,
-                    rs + 2,
-                    Ordering::SeqCst,
-                    Ordering::Relaxed,
-                ) == Ok(size_ctl)
+                if self
+                    .size_ctl
+                    .compare_exchange(size_ctl, rs + 2, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
                 {
                     // someone else already started to resize the table
                     // TODO: can we `self.help_transfer`?
@@ -731,12 +729,10 @@ where
                 } else {
                     0
                 };
-                if self.transfer_index.compare_exchange(
-                    next_index,
-                    next_bound,
-                    Ordering::SeqCst,
-                    Ordering::Relaxed,
-                ) == Ok(next_index)
+                if self
+                    .transfer_index
+                    .compare_exchange(next_index, next_bound, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
                 {
                     bound = next_bound;
                     i = next_index;
@@ -788,7 +784,7 @@ where
                 if self
                     .size_ctl
                     .compare_exchange(sc, sc - 1, Ordering::SeqCst, Ordering::Relaxed)
-                    == Ok(sc)
+                    .is_ok()
                 {
                     if (sc - 2) != Self::resize_stamp(n) << RESIZE_STAMP_SHIFT {
                         return;
@@ -1160,7 +1156,7 @@ where
             if self
                 .size_ctl
                 .compare_exchange(sc, sc + 1, Ordering::SeqCst, Ordering::Relaxed)
-                == Ok(sc)
+                .is_ok()
             {
                 self.transfer(table, next_table, guard);
                 break;
@@ -1229,16 +1225,14 @@ where
                 if self
                     .size_ctl
                     .compare_exchange(sc, sc + 1, Ordering::SeqCst, Ordering::Relaxed)
-                    == Ok(sc)
+                    .is_ok()
                 {
                     self.transfer(table, nt, guard);
                 }
-            } else if self.size_ctl.compare_exchange(
-                sc,
-                rs + 2,
-                Ordering::SeqCst,
-                Ordering::Relaxed,
-            ) == Ok(sc)
+            } else if self
+                .size_ctl
+                .compare_exchange(sc, rs + 2, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
             {
                 // a resize is needed, but has not yet started
                 // TODO: figure out why this is rs + 2, not just rs
