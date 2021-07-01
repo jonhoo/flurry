@@ -482,7 +482,11 @@ impl<K, V, S> HashMap<K, V, S> {
                 continue;
             }
 
-            if self.size_ctl.compare_and_swap(sc, -1, Ordering::SeqCst) == sc {
+            if self
+                .size_ctl
+                .compare_exchange(sc, -1, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+            {
                 // we get to do it!
                 let mut table = self.table.load(Ordering::SeqCst, guard);
 
@@ -599,8 +603,8 @@ where
                 // try to aquire the initialization "lock" to indicate that we are initializing the table.
                 if self
                     .size_ctl
-                    .compare_and_swap(size_ctl, -1, Ordering::SeqCst)
-                    != size_ctl
+                    .compare_exchange(size_ctl, -1, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_err()
                 {
                     // somebody else is already initializing the table (or has already finished).
                     continue;
@@ -658,8 +662,8 @@ where
 
                 if self
                     .size_ctl
-                    .compare_and_swap(size_ctl, rs + 2, Ordering::SeqCst)
-                    == size_ctl
+                    .compare_exchange(size_ctl, rs + 2, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
                 {
                     // someone else already started to resize the table
                     // TODO: can we `self.help_transfer`?
@@ -727,8 +731,8 @@ where
                 };
                 if self
                     .transfer_index
-                    .compare_and_swap(next_index, next_bound, Ordering::SeqCst)
-                    == next_index
+                    .compare_exchange(next_index, next_bound, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
                 {
                     bound = next_bound;
                     i = next_index;
@@ -777,7 +781,11 @@ where
                 }
 
                 let sc = self.size_ctl.load(Ordering::SeqCst);
-                if self.size_ctl.compare_and_swap(sc, sc - 1, Ordering::SeqCst) == sc {
+                if self
+                    .size_ctl
+                    .compare_exchange(sc, sc - 1, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
+                {
                     if (sc - 2) != Self::resize_stamp(n) << RESIZE_STAMP_SHIFT {
                         return;
                     }
@@ -1145,7 +1153,11 @@ where
                 break;
             }
 
-            if self.size_ctl.compare_and_swap(sc, sc + 1, Ordering::SeqCst) == sc {
+            if self
+                .size_ctl
+                .compare_exchange(sc, sc + 1, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+            {
                 self.transfer(table, next_table, guard);
                 break;
             }
@@ -1210,10 +1222,18 @@ where
                 }
 
                 // try to join!
-                if self.size_ctl.compare_and_swap(sc, sc + 1, Ordering::SeqCst) == sc {
+                if self
+                    .size_ctl
+                    .compare_exchange(sc, sc + 1, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
+                {
                     self.transfer(table, nt, guard);
                 }
-            } else if self.size_ctl.compare_and_swap(sc, rs + 2, Ordering::SeqCst) == sc {
+            } else if self
+                .size_ctl
+                .compare_exchange(sc, rs + 2, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+            {
                 // a resize is needed, but has not yet started
                 // TODO: figure out why this is rs + 2, not just rs
                 // NOTE: this also applies to `try_presize`
@@ -3373,13 +3393,16 @@ mod tree_bins {
 
     #[derive(Default)]
     struct ZeroHasher;
+
     struct ZeroHashBuilder;
+
     impl Hasher for ZeroHasher {
         fn finish(&self) -> u64 {
             0
         }
         fn write(&mut self, _: &[u8]) {}
     }
+
     impl BuildHasher for ZeroHashBuilder {
         type Hasher = ZeroHasher;
         fn build_hasher(&self) -> ZeroHasher {
@@ -3541,6 +3564,7 @@ mod tree_bins {
         let guard = &map.guard();
         assert_eq!(map.get(&9, guard), Some(&9));
     }
+
     #[test]
     #[should_panic]
     #[cfg_attr(miri, ignore)]
