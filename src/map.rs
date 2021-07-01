@@ -604,7 +604,7 @@ where
                 if self
                     .size_ctl
                     .compare_exchange(size_ctl, -1, Ordering::SeqCst, Ordering::Relaxed)
-                    != Ok(size_ctl)
+                    .is_err()
                 {
                     // somebody else is already initializing the table (or has already finished).
                     continue;
@@ -2939,7 +2939,6 @@ where
         head
     }
 }
-
 impl<K, V, S> PartialEq for HashMap<K, V, S>
 where
     K: Ord + Hash,
@@ -3138,7 +3137,6 @@ fn capacity() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn reserve() {
         let map = HashMap::<usize, usize>::new();
