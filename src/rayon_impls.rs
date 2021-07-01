@@ -45,7 +45,7 @@ where
         par_iter.into_par_iter().for_each_init(
             || self.guard(),
             |guard, (k, v)| {
-                self.insert(k, v, &guard);
+                self.insert(k, v, guard);
             },
         );
     }
