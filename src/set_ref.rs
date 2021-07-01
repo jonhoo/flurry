@@ -22,15 +22,15 @@ impl<T, S> HashSet<T, S> {
     pub fn pin(&self) -> HashSetRef<'_, T, S> {
         HashSetRef {
             guard: GuardRef::Owned(self.guard()),
-            set: &self,
+            set: self,
         }
     }
 
     /// Get a reference to this set with the given guard.
     pub fn with_guard<'g>(&'g self, guard: &'g Guard) -> HashSetRef<'g, T, S> {
         HashSetRef {
-            set: &self,
             guard: GuardRef::Ref(guard),
+            set: self,
         }
     }
 }
@@ -215,7 +215,7 @@ where
     S: BuildHasher,
 {
     fn eq(&self, other: &HashSet<T, S>) -> bool {
-        self.set.guarded_eq(&other, &self.guard, &other.guard())
+        self.set.guarded_eq(other, &self.guard, &other.guard())
     }
 }
 
@@ -225,7 +225,7 @@ where
     S: BuildHasher,
 {
     fn eq(&self, other: &HashSetRef<'_, T, S>) -> bool {
-        self.guarded_eq(&other.set, &self.guard(), &other.guard)
+        self.guarded_eq(other.set, &self.guard(), &other.guard)
     }
 }
 

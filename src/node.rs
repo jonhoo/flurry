@@ -191,7 +191,7 @@ impl<K, V> TreeNode<K, V> {
             }
 
             // Otherwise, we compare keys to find the next child to look at.
-            p = match p_key.borrow().cmp(&key) {
+            p = match p_key.borrow().cmp(key) {
                 std::cmp::Ordering::Greater => p_left,
                 std::cmp::Ordering::Less => p_right,
                 std::cmp::Ordering::Equal => {
@@ -278,7 +278,7 @@ where
                 // to descend the tree through this successor.
                 let xp = p;
                 let dir;
-                p = match p_hash.cmp(&hash).then(p_key.cmp(&key)) {
+                p = match p_hash.cmp(&hash).then(p_key.cmp(key)) {
                     std::cmp::Ordering::Greater => {
                         dir = Dir::Left;
                         &p_deref.left
@@ -996,7 +996,7 @@ impl<K, V> TreeNode<K, V> {
     /// Additionally, it must point to an instance of BinEntry that is actually a
     /// TreeNode.
     #[inline]
-    pub(crate) unsafe fn get_tree_node<'g>(bin: Shared<'g, BinEntry<K, V>>) -> &'g TreeNode<K, V> {
+    pub(crate) unsafe fn get_tree_node(bin: Shared<'_, BinEntry<K, V>>) -> &'_ TreeNode<K, V> {
         bin.deref().as_tree_node().unwrap()
     }
 }
@@ -1297,7 +1297,6 @@ impl<K, V> TreeNode<K, V> {
                     treenode!(x_parent).red.store(false, Ordering::Relaxed);
                     root = Self::rotate_left(root, x_parent, guard);
                 }
-                x = root;
             } else {
                 // symmetric
                 if !x_parent_left.is_null() && treenode!(x_parent_left).red.load(Ordering::Relaxed)
@@ -1359,8 +1358,8 @@ impl<K, V> TreeNode<K, V> {
                     treenode!(x_parent).red.store(false, Ordering::Relaxed);
                     root = Self::rotate_right(root, x_parent, guard);
                 }
-                x = root;
             }
+            x = root;
         }
     }
     /// Checks invariants recursively for the tree of Nodes rootet at t.

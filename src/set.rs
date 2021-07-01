@@ -303,7 +303,7 @@ where
         their_guard: &Guard,
     ) -> bool {
         for value in self.iter(our_guard) {
-            if other.contains(&value, their_guard) {
+            if other.contains(value, their_guard) {
                 return false;
             }
         }
@@ -330,7 +330,7 @@ where
     /// ```
     pub fn is_subset(&self, other: &HashSet<T, S>, our_guard: &Guard, their_guard: &Guard) -> bool {
         for value in self.iter(our_guard) {
-            if !other.contains(&value, their_guard) {
+            if !other.contains(value, their_guard) {
                 return false;
             }
         }
@@ -571,7 +571,7 @@ where
 {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self {
-            map: HashMap::from_iter(iter.into_iter().map(|v| (v, ()))),
+            map: iter.into_iter().map(|v| (v, ())).collect(),
         }
     }
 }
@@ -583,7 +583,7 @@ where
 {
     fn from_iter<I: IntoIterator<Item = &'a T>>(iter: I) -> Self {
         Self {
-            map: HashMap::from_iter(iter.into_iter().map(|&v| (v, ()))),
+            map: iter.into_iter().map(|&v| (v, ())).collect(),
         }
     }
 }

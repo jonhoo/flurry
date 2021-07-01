@@ -20,7 +20,7 @@ impl<'g, K, V> Iterator for Iter<'g, K, V> {
         let value = node.value.load(Ordering::SeqCst, self.guard);
         // safety: flurry does not drop or move until after guard drop
         let value = unsafe { value.deref() };
-        Some((&node.key, &value))
+        Some((&node.key, value))
     }
 }
 

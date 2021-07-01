@@ -531,7 +531,7 @@ impl<K, V, S> HashMap<K, V, S> {
 
         // sanity check that the map has indeed not been set up already
         assert_eq!(self.size_ctl.load(Ordering::SeqCst), 0);
-        assert!(self.table.load(Ordering::SeqCst, &guard).is_null());
+        assert!(self.table.load(Ordering::SeqCst, guard).is_null());
 
         // the table has not yet been initialized, so we can just create it
         // with as many bins as were requested
@@ -581,7 +581,7 @@ where
                 break;
             }
 
-            let table = self.table.load(Ordering::SeqCst, &guard);
+            let table = self.table.load(Ordering::SeqCst, guard);
 
             // The current capacity == the number of bins in the current table
             let current_capactity = if table.is_null() {
@@ -626,7 +626,7 @@ where
                 let new_table = Owned::new(Table::new(new_capacity)).into_shared(guard);
 
                 // store the new table to `self.table`
-                let old_table = self.table.swap(new_table, Ordering::SeqCst, &guard);
+                let old_table = self.table.swap(new_table, Ordering::SeqCst, guard);
 
                 // old_table should be `null`, since we don't ever initialize a table with 0 bins
                 // and this branch only happens if table has not yet been initialized or it's length is 0.
@@ -651,7 +651,7 @@ where
                 // Or it was larger than the `MAXIMUM_CAPACITY` of the map and we refuse
                 // to resize to an invalid capacity
                 break;
-            } else if table == self.table.load(Ordering::SeqCst, &guard) {
+            } else if table == self.table.load(Ordering::SeqCst, guard) {
                 // The table is initialized, try to resize it to the requested capacity
 
                 let rs: isize = Self::resize_stamp(current_capactity) << RESIZE_STAMP_SHIFT;
@@ -667,7 +667,7 @@ where
                 {
                     // someone else already started to resize the table
                     // TODO: can we `self.help_transfer`?
-                    self.transfer(table, Shared::null(), &guard);
+                    self.transfer(table, Shared::null(), guard);
                 }
             }
         }
@@ -1370,7 +1370,7 @@ where
         Q: ?Sized + Hash + Ord,
     {
         self.check_guard(guard);
-        self.get(key, &guard).is_some()
+        self.get(key, guard).is_some()
     }
 
     /// Returns a reference to the value corresponding to the key.
@@ -3049,8 +3049,8 @@ where
             let (lower, _) = iter.size_hint();
             let map = HashMap::with_capacity_and_hasher(lower.saturating_add(1), S::default());
 
-            map.put(key, value, false, &guard);
-            map.put_all(iter, &guard);
+            map.put(key, value, false, guard);
+            map.put_all(iter, guard);
             map
         } else {
             Self::default()
@@ -3065,7 +3065,7 @@ where
     S: BuildHasher + Default,
 {
     fn from_iter<T: IntoIterator<Item = (&'a K, &'a V)>>(iter: T) -> Self {
-        Self::from_iter(iter.into_iter().map(|(&k, &v)| (k, v)))
+        iter.into_iter().map(|(&k, &v)| (k, v)).collect()
     }
 }
 
@@ -3076,7 +3076,7 @@ where
     S: BuildHasher + Default,
 {
     fn from_iter<T: IntoIterator<Item = &'a (K, V)>>(iter: T) -> Self {
-        Self::from_iter(iter.into_iter().map(|&(k, v)| (k, v)))
+        iter.into_iter().map(|&(k, v)| (k, v)).collect()
     }
 }
 

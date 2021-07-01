@@ -23,15 +23,15 @@ impl<K, V, S> HashMap<K, V, S> {
     pub fn pin(&self) -> HashMapRef<'_, K, V, S> {
         HashMapRef {
             guard: GuardRef::Owned(self.guard()),
-            map: &self,
+            map: self,
         }
     }
 
     /// Get a reference to this map with the given guard.
     pub fn with_guard<'g>(&'g self, guard: &'g Guard) -> HashMapRef<'g, K, V, S> {
         HashMapRef {
-            map: &self,
             guard: GuardRef::Ref(guard),
+            map: self,
         }
     }
 }
@@ -258,7 +258,7 @@ where
     S: BuildHasher,
 {
     fn eq(&self, other: &Self) -> bool {
-        self.map.guarded_eq(&other.map, &self.guard, &other.guard)
+        self.map.guarded_eq(other.map, &self.guard, &other.guard)
     }
 }
 
@@ -269,7 +269,7 @@ where
     S: BuildHasher,
 {
     fn eq(&self, other: &HashMap<K, V, S>) -> bool {
-        self.map.guarded_eq(&other, &self.guard, &other.guard())
+        self.map.guarded_eq(other, &self.guard, &other.guard())
     }
 }
 
@@ -280,7 +280,7 @@ where
     S: BuildHasher,
 {
     fn eq(&self, other: &HashMapRef<'_, K, V, S>) -> bool {
-        self.guarded_eq(&other.map, &self.guard(), &other.guard)
+        self.guarded_eq(other.map, &self.guard(), &other.guard)
     }
 }
 
