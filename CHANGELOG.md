@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 ### Changed
+- Bumped `parking_lot` to `0.11`
+- Bumped `ahash` to `0.4`
 
 ### Removed
 
