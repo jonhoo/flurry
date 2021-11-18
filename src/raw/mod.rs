@@ -81,9 +81,10 @@ impl<K, V> Table<K, V> {
             t if t.is_null() => {
                 // if a no next table is yet associated with this table,
                 // create one and store it in `self.next_table`
-                match self.next_table.compare_and_set(
+                match self.next_table.compare_exchange(
                     Shared::null(),
                     for_table,
+                    Ordering::SeqCst,
                     Ordering::SeqCst,
                     guard,
                 ) {
@@ -311,12 +312,12 @@ impl<K, V> Table<K, V> {
         guard: &'g Guard,
     ) -> Result<
         Shared<'g, BinEntry<K, V>>,
-        crossbeam_epoch::CompareAndSetError<'g, BinEntry<K, V>, P>,
+        crossbeam_epoch::CompareExchangeError<'g, BinEntry<K, V>, P>,
     >
     where
         P: Pointer<BinEntry<K, V>>,
     {
-        self.bins[i].compare_and_set(current, new, Ordering::AcqRel, guard)
+        self.bins[i].compare_exchange(current, new, Ordering::AcqRel, Ordering::Acquire, guard)
     }
 
     #[inline]
