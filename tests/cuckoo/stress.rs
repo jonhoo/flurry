@@ -65,7 +65,10 @@ fn stress_insert_thread(env: Arc<Environment>) {
     while !env.finished.load(Ordering::SeqCst) {
         let idx = env.ind_dist.sample(&mut rng);
         let in_use = env.in_use.lock();
-        if (*in_use)[idx].compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        if (*in_use)[idx]
+            .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
             let key = env.keys[idx];
             let val1 = env.val_dist1.sample(&mut rng);
             let val2 = env.val_dist2.sample(&mut rng);
@@ -102,7 +105,10 @@ fn stress_delete_thread(env: Arc<Environment>) {
     while !env.finished.load(Ordering::SeqCst) {
         let idx = env.ind_dist.sample(&mut rng);
         let in_use = env.in_use.lock();
-        if (*in_use)[idx].compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        if (*in_use)[idx]
+            .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
             let key = env.keys[idx];
             let res1 = env.table1.remove(&key, &guard).map_or(false, |_| true);
             let res2 = env.table2.remove(&key, &guard).map_or(false, |_| true);
@@ -125,7 +131,10 @@ fn stress_find_thread(env: Arc<Environment>) {
     while !env.finished.load(Ordering::SeqCst) {
         let idx = env.ind_dist.sample(&mut rng);
         let in_use = env.in_use.lock();
-        if (*in_use)[idx].compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+        if (*in_use)[idx]
+            .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
             let key = env.keys[idx];
             let in_table = env.in_table.lock();
             let val1 = (*env.vals1.lock())[idx];
