@@ -1,103 +1,103 @@
 jobs:
- - template: default.yml@templates
-   parameters:
-     minrust: 1.49.0 # std::hint::spin_loop
- - job: deny
-   displayName: "Disallowed attributes"
-   pool:
-     vmImage: ubuntu-latest
-   steps:
-     # Work around https://github.com/microsoft/azure-pipelines-tasks/issues/12179
-     - bash: |
-         sudo rm -r /usr/share/rust/.cargo/bin
-       displayName: Remove .cargo/bin so we can restore it from cache
-     - task: Cache@2
-       inputs:
-         key: cargo-deny | $(Agent.OS)
-         path: /usr/share/rust/.cargo/bin
-         cacheHitVar: CACHE_RESTORED
-     - bash: |
-         find -D exec /usr/share/rust/.cargo/bin ! -name 'cargo-deny' -type f -exec rm {} +
-       displayName: Only rely on cached cargo-deny
-       condition: eq(variables.CACHE_RESTORED, 'true')
-     - template: install-rust.yml@templates
-       parameters:
-         rust: stable
-     - script: cargo install cargo-deny
-       displayName: install cargo-deny
-       condition: ne(variables.CACHE_RESTORED, 'true')
-     - script: cargo deny check
-       displayName: cargo deny
- - job: canary
-   displayName: "Warning screening"
-   dependsOn: deny
-   pool:
-     vmImage: ubuntu-latest
-   steps:
-     - template: install-rust.yml@templates
-       parameters:
-         rust: beta
-         components:
-           - clippy
-     - bash: cargo clippy --all-features -- -D warnings
-       displayName: cargo clippy -- -D warnings
- - job: miri
-   displayName: "Run miri on test suite"
-   dependsOn: deny
-   pool:
-     vmImage: ubuntu-latest
-   steps:
-     - bash: |
-         echo '##vso[task.setvariable variable=nightly]nightly-'$(curl -s https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/miri)
-       displayName: "Determine latest miri nightly"
-     - template: install-rust.yml@templates
-       parameters:
-         rust: $(nightly)
-         components:
-           - miri
-     - script: cargo miri test
-       displayName: cargo miri test
-       env:
-         MIRIFLAGS: -Zmiri-ignore-leaks
- - job: asan
-   dependsOn: deny
-   displayName: "Run address sanitizer on test suite"
-   pool:
-     vmImage: ubuntu-latest
-   steps:
-     - template: install-rust.yml@templates
-       parameters:
-         rust: nightly
-     - bash: |
-           sudo ln -s /usr/bin/llvm-symbolizer-6.0 /usr/bin/llvm-symbolizer
-       displayName: Enable debug symbols
-     # only --lib --tests b/c of https://github.com/rust-lang/rust/issues/53945
-     - script: |
-           env ASAN_OPTIONS="detect_odr_violation=0" RUSTFLAGS="-Z sanitizer=address" cargo test --lib --tests --all-features --target x86_64-unknown-linux-gnu
-       displayName: cargo -Z sanitizer=address test
- - job: lsan
-   dependsOn: deny
-   displayName: "Run leak sanitizer on test suite"
-   pool:
-     vmImage: ubuntu-latest
-   steps:
-     - template: install-rust.yml@templates
-       parameters:
-         rust: nightly
-     - bash: |
-           sudo ln -s /usr/bin/llvm-symbolizer-6.0 /usr/bin/llvm-symbolizer
-           sed -i '/\[features\]/i [profile.dev]' Cargo.toml
-           sed -i '/profile.dev/a opt-level = 1' Cargo.toml
-           cat Cargo.toml
-       displayName: Enable debug symbols
-     - script: |
-           env RUSTFLAGS="-Z sanitizer=leak" cargo test --all-features --target x86_64-unknown-linux-gnu
-       displayName: cargo -Z sanitizer=leak test
- - template: coverage.yml@templates
-   parameters:
-     token: $(CODECOV_TOKEN_SECRET)
-     nightly: true
-     doctests: true
+  - template: default.yml@templates
+    parameters:
+      minrust: 1.56.0 # std::hint::spin_loop
+  - job: deny
+    displayName: "Disallowed attributes"
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      # Work around https://github.com/microsoft/azure-pipelines-tasks/issues/12179
+      - bash: |
+          sudo rm -r /usr/share/rust/.cargo/bin
+        displayName: Remove .cargo/bin so we can restore it from cache
+      - task: Cache@2
+        inputs:
+          key: cargo-deny | $(Agent.OS)
+          path: /usr/share/rust/.cargo/bin
+          cacheHitVar: CACHE_RESTORED
+      - bash: |
+          find -D exec /usr/share/rust/.cargo/bin ! -name 'cargo-deny' -type f -exec rm {} +
+        displayName: Only rely on cached cargo-deny
+        condition: eq(variables.CACHE_RESTORED, 'true')
+      - template: install-rust.yml@templates
+        parameters:
+          rust: stable
+      - script: cargo install cargo-deny
+        displayName: install cargo-deny
+        condition: ne(variables.CACHE_RESTORED, 'true')
+      - script: cargo deny check
+        displayName: cargo deny
+  - job: canary
+    displayName: "Warning screening"
+    dependsOn: deny
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - template: install-rust.yml@templates
+        parameters:
+          rust: beta
+          components:
+            - clippy
+      - bash: cargo clippy --all-features -- -D warnings
+        displayName: cargo clippy -- -D warnings
+  - job: miri
+    displayName: "Run miri on test suite"
+    dependsOn: deny
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - bash: |
+          echo '##vso[task.setvariable variable=nightly]nightly-'$(curl -s https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/miri)
+        displayName: "Determine latest miri nightly"
+      - template: install-rust.yml@templates
+        parameters:
+          rust: $(nightly)
+          components:
+            - miri
+      - script: cargo miri test
+        displayName: cargo miri test
+        env:
+          MIRIFLAGS: -Zmiri-ignore-leaks
+  - job: asan
+    dependsOn: deny
+    displayName: "Run address sanitizer on test suite"
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - template: install-rust.yml@templates
+        parameters:
+          rust: nightly
+      - bash: |
+          sudo ln -s /usr/bin/llvm-symbolizer-6.0 /usr/bin/llvm-symbolizer
+        displayName: Enable debug symbols
+      # only --lib --tests b/c of https://github.com/rust-lang/rust/issues/53945
+      - script: |
+          env ASAN_OPTIONS="detect_odr_violation=0" RUSTFLAGS="-Z sanitizer=address" cargo test --lib --tests --all-features --target x86_64-unknown-linux-gnu
+        displayName: cargo -Z sanitizer=address test
+  - job: lsan
+    dependsOn: deny
+    displayName: "Run leak sanitizer on test suite"
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+      - template: install-rust.yml@templates
+        parameters:
+          rust: nightly
+      - bash: |
+          sudo ln -s /usr/bin/llvm-symbolizer-6.0 /usr/bin/llvm-symbolizer
+          sed -i '/\[features\]/i [profile.dev]' Cargo.toml
+          sed -i '/profile.dev/a opt-level = 1' Cargo.toml
+          cat Cargo.toml
+        displayName: Enable debug symbols
+      - script: |
+          env RUSTFLAGS="-Z sanitizer=leak" cargo test --all-features --target x86_64-unknown-linux-gnu
+        displayName: cargo -Z sanitizer=leak test
+  - template: coverage.yml@templates
+    parameters:
+      token: $(CODECOV_TOKEN_SECRET)
+      nightly: true
+      doctests: true
 
 resources:
   repositories:
