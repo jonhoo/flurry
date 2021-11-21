@@ -85,7 +85,7 @@ impl<K, V> Table<K, V> {
                     Shared::null(),
                     for_table,
                     Ordering::SeqCst,
-                    Ordering::SeqCst,
+                    Ordering::Relaxed,
                     guard,
                 ) {
                     Ok(_) => {}
@@ -317,7 +317,7 @@ impl<K, V> Table<K, V> {
     where
         P: Pointer<BinEntry<K, V>>,
     {
-        self.bins[i].compare_exchange(current, new, Ordering::AcqRel, Ordering::Acquire, guard)
+        self.bins[i].compare_exchange(current, new, Ordering::AcqRel, Ordering::Relaxed, guard)
     }
 
     #[inline]

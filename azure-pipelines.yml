@@ -1,7 +1,7 @@
 jobs:
   - template: default.yml@templates
     parameters:
-      minrust: 1.56.0 # std::hint::spin_loop
+      minrust: 1.49.0 # std::hint::spin_loop
   - job: deny
     displayName: "Disallowed attributes"
     pool:

@@ -2,7 +2,7 @@
 name = "flurry"
 version = "0.3.1"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
-edition = "2021"
+edition = "2018"
 license = "MIT OR Apache-2.0"
 
 readme = "README.md"
@@ -18,9 +18,6 @@ exclude = ["/jsr166/**"]
 azure-devops = { project = "jonhoo/jonhoo", pipeline = "flurry", build = "15" }
 codecov = { repository = "jonhoo/flurry", branch = "master", service = "github" }
 maintenance = { status = "experimental" }
-
-[features]
-#sanitize = ['crossbeam-epoch/sanitize']
 
 [dependencies]
 crossbeam-epoch = "0.9"

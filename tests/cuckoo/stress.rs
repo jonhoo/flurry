@@ -66,7 +66,7 @@ fn stress_insert_thread(env: Arc<Environment>) {
         let idx = env.ind_dist.sample(&mut rng);
         let in_use = env.in_use.lock();
         if (*in_use)[idx]
-            .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
             .is_ok()
         {
             let key = env.keys[idx];
@@ -106,7 +106,7 @@ fn stress_delete_thread(env: Arc<Environment>) {
         let idx = env.ind_dist.sample(&mut rng);
         let in_use = env.in_use.lock();
         if (*in_use)[idx]
-            .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
             let key = env.keys[idx];
@@ -132,7 +132,7 @@ fn stress_find_thread(env: Arc<Environment>) {
         let idx = env.ind_dist.sample(&mut rng);
         let in_use = env.in_use.lock();
         if (*in_use)[idx]
-            .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
             .is_ok()
         {
             let key = env.keys[idx];
