@@ -98,7 +98,6 @@ jobs:
      token: $(CODECOV_TOKEN_SECRET)
      nightly: true
      doctests: true
->>>>>>> 996790ca184a7fecbd4bfb032ca0455b4e7e6ed2
 
 resources:
   repositories:
