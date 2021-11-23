@@ -2,12 +2,14 @@ use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
+use rand::seq::SliceRandom;
+use rand::SeedableRng;
 use std::borrow::Borrow;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::iter::FromIterator;
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
 const ISIZE_BITS: usize = core::mem::size_of::<isize>() * 8;
 
@@ -100,6 +102,10 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// creation, or 0 for default. After initialization, holds the
     /// next element count value upon which to resize the table.
     size_ctl: AtomicIsize,
+
+    counter_cells: Atomic<Vec<AtomicIsize>>,
+
+    cells_busy: AtomicBool,
 
     /// Collector that all `Guard` references used for operations on this map must be tied to. It
     /// is important that they all assocate with the _same_ `Collector`, otherwise you end up with
@@ -299,6 +305,8 @@ impl<K, V, S> HashMap<K, V, S> {
             transfer_index: AtomicIsize::new(0),
             count: AtomicIsize::new(0),
             size_ctl: AtomicIsize::new(0),
+            counter_cells: Atomic::new(vec![AtomicIsize::new(0), AtomicIsize::new(0)]),
+            cells_busy: AtomicBool::default(),
             build_hasher: hash_builder,
             collector: epoch::default_collector().clone(),
         }
@@ -1166,14 +1174,33 @@ where
     }
 
     fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard) {
-        // TODO: implement the Java CounterCell business here
+        let mut count = self.count.load(Ordering::SeqCst);
+        if self
+            .count
+            .compare_exchange(count, count + n, Ordering::SeqCst, Ordering::Relaxed)
+            .is_err()
+        {
+            // safety: this dereference is safe because counter_cells is never null.
+            let counter_cells = unsafe { self.counter_cells.load(Ordering::SeqCst, guard).deref() };
+            let cs = counter_cells
+                .choose(&mut rand::rngs::SmallRng::from_entropy())
+                .unwrap();
+            let cv = cs.load(Ordering::SeqCst);
+            if cs
+                .compare_exchange(cv, cv + n, Ordering::SeqCst, Ordering::Relaxed)
+                .is_err()
+            {
+                self.full_add_count(n, guard);
+                return;
+            }
 
-        use std::cmp;
-        let mut count = match n.cmp(&0) {
-            cmp::Ordering::Greater => self.count.fetch_add(n, Ordering::SeqCst) + n,
-            cmp::Ordering::Less => self.count.fetch_sub(n.abs(), Ordering::SeqCst) - n,
-            cmp::Ordering::Equal => self.count.load(Ordering::SeqCst),
-        };
+            if let Some(rh) = resize_hint {
+                if rh <= 1 {
+                    return;
+                }
+            }
+            count = self.sum_count(guard);
+        }
 
         // if resize_hint is None, it means the caller does not want us to consider a resize.
         // if it is Some(n), the caller saw n entries in a bin
@@ -1241,8 +1268,55 @@ where
             }
 
             // another resize may be needed!
-            count = self.count.load(Ordering::SeqCst);
+            count = self.sum_count(guard);
         }
+    }
+
+    fn full_add_count(&self, n: isize, guard: &Guard) {
+        loop {
+            // safety: this dereference is safe because counter_cells is never null.
+            let counter_cells = unsafe { self.counter_cells.load(Ordering::SeqCst, guard).deref() };
+            let cs = counter_cells
+                .choose(&mut rand::rngs::SmallRng::from_entropy())
+                .unwrap();
+            let cv = cs.load(Ordering::SeqCst);
+            if cs
+                .compare_exchange(cv, cv + n, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+            {
+                // we've picked a random counter cell and incremented its count.
+                break;
+            }
+            if self
+                .cells_busy
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+            {
+                // the selected counter cell had contention so we should increase the number of counter cells
+                unsafe { self.counter_cells.load(Ordering::SeqCst, guard).deref_mut() }
+                    .resize_with((n << 1) as usize, AtomicIsize::default);
+                self.cells_busy.store(false, Ordering::SeqCst);
+                continue;
+            }
+
+            // Fall back on using count
+            let c = self.count.load(Ordering::SeqCst);
+            if self
+                .count
+                .compare_exchange(c, c + n, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+            {
+                break;
+            }
+        }
+    }
+
+    fn sum_count(&self, guard: &Guard) -> isize {
+        // safety: this dereference is safe because counter_cells is never null.
+        unsafe { self.counter_cells.load(Ordering::SeqCst, guard).deref() }
+            .iter()
+            .map(|cs| cs.load(Ordering::SeqCst))
+            .sum()
     }
 
     /// Tries to reserve capacity for at least `additional` more elements to be inserted in the
