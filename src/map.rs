@@ -1293,6 +1293,8 @@ where
                 .is_ok()
             {
                 // the selected counter cell had contention so we should increase the number of counter cells
+                // safety: only one thread can access this branch at a time so deref_mut should be safe.
+                // although i'm not sure, will update this safety message after someone confirms.
                 unsafe { self.counter_cells.load(Ordering::SeqCst, guard).deref_mut() }
                     .resize_with((n << 1) as usize, AtomicIsize::default);
                 self.cells_busy.store(false, Ordering::SeqCst);
