@@ -1362,7 +1362,20 @@ where
                     let now_garbage =
                         self.counter_cells
                             .swap(Owned::new(new_cells), Ordering::SeqCst, guard);
-                    drop(now_garbage);
+                    // safety: need to guarantee that now_garbage is no longer
+                    // reachable. more specifically, no thread that executes _after_
+                    // this line can ever get a reference to now_garbage.
+                    //
+                    // here are the possible cases:
+                    //
+                    //  - another thread already has a reference to now_garbage.
+                    //    they must have read it before the call to swap.
+                    //    because of this, that thread must be pinned to an epoch <=
+                    //    the epoch of our guard. since the garbage is placed in our
+                    //    epoch, it won't be freed until the _next_ epoch, at which
+                    //    point, that thread must have dropped its guard, and with it,
+                    //    any reference to `counter_cells`.
+                    unsafe { guard.defer_destroy(now_garbage) };
 
                     self.cells_busy.store(false, Ordering::SeqCst);
                     collide = false;
