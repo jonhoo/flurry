@@ -305,7 +305,7 @@ impl<K, V, S> HashMap<K, V, S> {
             transfer_index: AtomicIsize::new(0),
             count: AtomicIsize::new(0),
             size_ctl: AtomicIsize::new(0),
-            counter_cells: Atomic::new(vec![AtomicIsize::new(0), AtomicIsize::new(0)]),
+            counter_cells: Atomic::null(),
             cells_busy: AtomicBool::default(),
             build_hasher: hash_builder,
             collector: epoch::default_collector().clone(),
@@ -399,12 +399,31 @@ impl<K, V, S> HashMap<K, V, S> {
     /// assert!(map.pin().len() == 2);
     /// ```
     pub fn len(&self) -> usize {
-        let n = self.count.load(Ordering::Relaxed);
+        let n = self.sum_count();
         if n < 0 {
             0
         } else {
             n as usize
         }
+    }
+
+    fn sum_count(&self) -> isize {
+        let guard = &self.guard();
+        let cs = self.counter_cells.load(Ordering::SeqCst, guard);
+        if cs.is_null() {
+            return self.count.load(Ordering::SeqCst);
+        }
+
+        // safety: the counter cells pointer is valid because when we experience
+        // contention the counter cells are initialized and will not be deallocated
+        // until the hashmap is deallocated. counter cells are never used if contention
+        // doesn't atleast happen once.
+        let count: isize = unsafe { cs.deref() }
+            .iter()
+            .map(|cs| cs.load(Ordering::SeqCst))
+            .sum();
+
+        self.count.load(Ordering::SeqCst) + count
     }
 
     /// Returns `true` if the map is empty. Otherwise returns `false`.
@@ -1180,17 +1199,26 @@ where
             .compare_exchange(count, count + n, Ordering::SeqCst, Ordering::Relaxed)
             .is_err()
         {
-            // safety: this dereference is safe because counter_cells is never null.
-            let counter_cells = unsafe { self.counter_cells.load(Ordering::SeqCst, guard).deref() };
-            let cs = counter_cells
+            let cs = self.counter_cells.load(Ordering::SeqCst, guard);
+            if cs.is_null() {
+                self.full_add_count(n, true, guard);
+                return;
+            }
+
+            // safety: the counter cells pointer is valid because when we experience
+            // contention the counter cells are initialized and will not be deallocated
+            // until the hashmap is deallocated. counter cells are never used if contention
+            // doesn't atleast happen once.
+            let cs = unsafe { cs.deref() };
+            let c = cs
                 .choose(&mut rand::rngs::SmallRng::from_entropy())
                 .unwrap();
-            let cv = cs.load(Ordering::SeqCst);
-            if cs
+            let cv = c.load(Ordering::SeqCst);
+            let uncontended = c
                 .compare_exchange(cv, cv + n, Ordering::SeqCst, Ordering::Relaxed)
-                .is_err()
-            {
-                self.full_add_count(n, guard);
+                .is_ok();
+            if !uncontended {
+                self.full_add_count(n, uncontended, guard);
                 return;
             }
 
@@ -1199,7 +1227,7 @@ where
                     return;
                 }
             }
-            count = self.sum_count(guard);
+            count = self.sum_count();
         }
 
         // if resize_hint is None, it means the caller does not want us to consider a resize.
@@ -1268,57 +1296,103 @@ where
             }
 
             // another resize may be needed!
-            count = self.sum_count(guard);
+            count = self.count.load(Ordering::SeqCst);
         }
     }
 
-    fn full_add_count(&self, n: isize, guard: &Guard) {
+    fn full_add_count(&self, n: isize, mut uncontended: bool, guard: &Guard) {
+        let mut collide = false;
         loop {
-            // safety: this dereference is safe because counter_cells is never null.
-            let counter_cells = unsafe { self.counter_cells.load(Ordering::SeqCst, guard).deref() };
-            let cs = counter_cells
-                .choose(&mut rand::rngs::SmallRng::from_entropy())
-                .unwrap();
-            let cv = cs.load(Ordering::SeqCst);
-            if cs
-                .compare_exchange(cv, cv + n, Ordering::SeqCst, Ordering::Relaxed)
-                .is_ok()
-            {
-                // we've picked a random counter cell and incremented its count.
-                break;
-            }
-            if self
-                .cells_busy
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
-                .is_ok()
-            {
-                // the selected counter cell had contention so we should increase the number of counter cells
-                // safety: only one thread can access this branch at a time so deref_mut should be safe.
-                // although i'm not sure, will update this safety message after someone confirms.
-                unsafe { self.counter_cells.load(Ordering::SeqCst, guard).deref_mut() }
-                    .resize_with((n << 1) as usize, AtomicIsize::default);
-                self.cells_busy.store(false, Ordering::SeqCst);
-                continue;
-            }
+            let cs = self.counter_cells.load(Ordering::SeqCst, guard);
+            if !cs.is_null() {
+                if !uncontended {
+                    uncontended = true;
+                    continue;
+                }
 
-            // Fall back on using count
-            let c = self.count.load(Ordering::SeqCst);
-            if self
-                .count
-                .compare_exchange(c, c + n, Ordering::SeqCst, Ordering::Relaxed)
-                .is_ok()
+                // safety: the counter cells pointer is valid because when we experience
+                // contention the counter cells are initialized and will not be deallocated
+                // until the hashmap is deallocated. counter cells are never used if contention
+                // doesn't atleast happen once.
+                let cs = unsafe { cs.deref() };
+                let c = cs
+                    .choose(&mut rand::rngs::SmallRng::from_entropy())
+                    .unwrap();
+                let cv = c.load(Ordering::SeqCst);
+                if c.compare_exchange(cv, cv + n, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    // we've picked a random counter cell and incremented its count.
+                    break;
+                }
+
+                if cs.len() >= num_cpus() {
+                    collide = false;
+                    // prevent counter cells from growing past cpu max.
+                    // this ensures the loop keeps retrying with the max amount of counter cells
+                    // this machine has to its disposal. eventually a counter cell would free up
+                    // and increment its count instead of resizing counter cells indefinitely.
+                    continue;
+                }
+
+                if !collide {
+                    collide = true;
+                    continue;
+                }
+
+                if self
+                    .cells_busy
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    // the selected counter cell had contention, increase the number of counter cells!
+                    let new_len = cs.len() << 1;
+
+                    let mut new_cells = Vec::with_capacity(new_len);
+
+                    for cell in 0..new_len {
+                        match cs.get(cell) {
+                            Some(old_cell) => {
+                                let value = old_cell.load(Ordering::SeqCst);
+                                new_cells.push(AtomicIsize::new(value));
+                            }
+                            None => new_cells.push(AtomicIsize::new(0)),
+                        }
+                    }
+
+                    let now_garbage =
+                        self.counter_cells
+                            .swap(Owned::new(new_cells), Ordering::SeqCst, guard);
+                    drop(now_garbage);
+
+                    self.cells_busy.store(false, Ordering::SeqCst);
+                    collide = false;
+                    continue;
+                }
+            } else if cs.is_null()
+                && self
+                    .cells_busy
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
             {
+                self.counter_cells.store(
+                    Owned::new(vec![AtomicIsize::new(n), AtomicIsize::new(0)]),
+                    Ordering::SeqCst,
+                );
+                self.cells_busy.store(false, Ordering::SeqCst);
                 break;
+            } else {
+                // fall back on using count
+                let c = self.count.load(Ordering::SeqCst);
+                if self
+                    .count
+                    .compare_exchange(c, c + n, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    break;
+                }
             }
         }
-    }
-
-    fn sum_count(&self, guard: &Guard) -> isize {
-        // safety: this dereference is safe because counter_cells is never null.
-        unsafe { self.counter_cells.load(Ordering::SeqCst, guard).deref() }
-            .iter()
-            .map(|cs| cs.load(Ordering::SeqCst))
-            .sum()
     }
 
     /// Tries to reserve capacity for at least `additional` more elements to be inserted in the
@@ -3069,6 +3143,11 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
         // safety: same as above + we own the table
         let mut table = unsafe { table.into_owned() }.into_box();
         table.drop_bins();
+
+        let cs = self.counter_cells.load(Ordering::SeqCst, guard);
+        if !cs.is_null() {
+            drop(cs);
+        }
     }
 }
 
