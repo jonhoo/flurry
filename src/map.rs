@@ -3143,7 +3143,8 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
 
         let cs = self.counter_cells.load(Ordering::SeqCst, guard);
         if !cs.is_null() {
-            drop(cs);
+            // safety: same as above + we own all counter cells
+            drop(unsafe { cs.into_owned() });
         }
     }
 }
