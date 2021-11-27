@@ -420,7 +420,7 @@ impl<K, V, S> HashMap<K, V, S> {
         // doesn't atleast happen once.
         let count: isize = unsafe { cs.deref() }
             .iter()
-            .map(|cs| cs.load(Ordering::SeqCst))
+            .map(|c| c.load(Ordering::SeqCst))
             .sum();
 
         self.count.load(Ordering::SeqCst) + count
@@ -1352,10 +1352,7 @@ where
 
                     for cell in 0..new_len {
                         match cs.get(cell) {
-                            Some(old_cell) => {
-                                let value = old_cell.load(Ordering::SeqCst);
-                                new_cells.push(AtomicIsize::new(value));
-                            }
+                            Some(old_cell) => new_cells.push(AtomicIsize::new(old_cell.load(Ordering::SeqCst))),
                             None => new_cells.push(AtomicIsize::new(0)),
                         }
                     }
