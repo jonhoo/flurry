@@ -1352,7 +1352,9 @@ where
 
                     for cell in 0..new_len {
                         match cs.get(cell) {
-                            Some(old_cell) => new_cells.push(AtomicIsize::new(old_cell.load(Ordering::SeqCst))),
+                            Some(old_cell) => {
+                                new_cells.push(AtomicIsize::new(old_cell.load(Ordering::SeqCst)))
+                            }
                             None => new_cells.push(AtomicIsize::new(0)),
                         }
                     }
