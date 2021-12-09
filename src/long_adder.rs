@@ -165,9 +165,6 @@ impl LongAdder {
     }
 }
 
-unsafe impl Send for LongAdder {}
-unsafe impl Sync for LongAdder {}
-
 impl Drop for LongAdder {
     fn drop(&mut self) {
         // safety: we have &mut self _and_ all references we have returned are bound to the
