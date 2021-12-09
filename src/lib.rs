@@ -251,6 +251,7 @@ mod node;
 mod raw;
 mod set;
 mod set_ref;
+mod long_adder;
 
 #[cfg(feature = "rayon")]
 mod rayon_impls;
