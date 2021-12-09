@@ -1,5 +1,5 @@
 use crate::iter::*;
-use crate::long_adder::LongAdder;
+use crate::long_adder::*;
 use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
