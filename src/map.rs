@@ -379,7 +379,7 @@ impl<K, V, S> HashMap<K, V, S> {
     }
 
     /// Returns the number of entries in the map.
-    /// 
+    ///
     /// Note that the returned value is _NOT_ an
     /// atomic snapshot; invocation in the absence of concurrent
     /// updates returns an accurate result, but concurrent updates that
