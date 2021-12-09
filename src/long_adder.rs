@@ -49,9 +49,9 @@ impl LongAdder {
                     continue;
                 }
 
-                // safety: the counter cells pointer is valid because when we experience
-                // contention the counter cells are initialized and will not be deallocated
-                // until the hashmap is deallocated. counter cells are never used if contention
+                // safety: the cells pointer is valid because when we experience
+                // contention the cells are initialized and will not be deallocated
+                // until the hashmap is deallocated. cells are never used if contention
                 // doesn't atleast happen once.
                 let cells = unsafe { cells.deref() };
                 let c = cells
@@ -61,16 +61,16 @@ impl LongAdder {
                 if c.compare_exchange(cv, cv + value, Ordering::SeqCst, Ordering::Relaxed)
                     .is_ok()
                 {
-                    // we've picked a random counter cell and incremented its count.
+                    // we've picked a random cell and incremented its count.
                     break;
                 }
 
                 if cells.len() >= crate::map::num_cpus() {
                     collide = false;
-                    // prevent counter cells from growing past cpu max.
-                    // this ensures the loop keeps retrying with the max amount of counter cells
-                    // this machine has to its disposal. eventually a counter cell would free up
-                    // and increment its count instead of resizing counter cells indefinitely.
+                    // prevent cells from growing past cpu max.
+                    // this ensures the loop keeps retrying with the max amount of cells
+                    // this machine has to its disposal. eventually a cell would free up
+                    // and increment its count instead of resizing cells indefinitely.
                     continue;
                 }
 
@@ -84,7 +84,7 @@ impl LongAdder {
                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
                     .is_ok()
                 {
-                    // the selected counter cell had contention, increase the number of counter cells!
+                    // the selected cell had contention, increase the number of cells!
                     let new_len = cells.len() << 1;
 
                     let mut new_cells = Vec::with_capacity(new_len);
@@ -113,7 +113,7 @@ impl LongAdder {
                     //    the epoch of our guard. since the garbage is placed in our
                     //    epoch, it won't be freed until the _next_ epoch, at which
                     //    point, that thread must have dropped its guard, and with it,
-                    //    any reference to `counter_cells`.
+                    //    any reference to `cells`.
                     unsafe { guard.defer_destroy(now_garbage) };
 
                     self.cells_busy.store(false, Ordering::SeqCst);
@@ -133,7 +133,7 @@ impl LongAdder {
                 self.cells_busy.store(false, Ordering::SeqCst);
                 break;
             } else {
-                // fall back on using count
+                // fall back on using base
                 let b = self.base.load(Ordering::SeqCst);
                 if self
                     .base
@@ -152,9 +152,9 @@ impl LongAdder {
             return self.base.load(Ordering::SeqCst);
         }
 
-        // safety: the counter cells pointer is valid because when we experience
-        // contention the counter cells are initialized and will not be deallocated
-        // until the hashmap is deallocated. counter cells are never used if contention
+        // safety: the cells pointer is valid because when we experience
+        // contention the cells are initialized and will not be deallocated
+        // until the hashmap is deallocated. cells are never used if contention
         // doesn't atleast happen once.
         let count: isize = unsafe { cells.deref() }
             .iter()
@@ -168,21 +168,16 @@ impl LongAdder {
 impl Drop for LongAdder {
     fn drop(&mut self) {
         // safety: we have &mut self _and_ all references we have returned are bound to the
-        // lifetime of their borrow of self, so there cannot be any outstanding references to
-        // anything in the map.
-        //
-        // NOTE: we _could_ relax the bounds in all the methods that return `&'g ...` to not also
-        // bound `&self` by `'g`, but if we did that, we would need to use a regular `epoch::Guard`
-        // here rather than an unprotected one.
+        // lifetime of their borrow of self, so there cannot be any outstanding references.
         let guard = unsafe { crossbeam_epoch::unprotected() };
 
         let cells = self.cells.swap(Shared::null(), Ordering::SeqCst, guard);
         if cells.is_null() {
-            // table was never allocated!
+            // cells were never allocated!
             return;
         }
 
-        // safety: same as above + we own all counter cells
+        // safety: same as above + we own the long adder.
         drop(unsafe { cells.into_owned() });
     }
 }
