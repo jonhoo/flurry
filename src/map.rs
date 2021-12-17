@@ -1,5 +1,5 @@
+use crate::counter::*;
 use crate::iter::*;
-use crate::long_adder::*;
 use crate::node::*;
 use crate::raw::*;
 use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
@@ -100,7 +100,7 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// next element count value upon which to resize the table.
     size_ctl: AtomicIsize,
 
-    long_adder: LongAdder,
+    counter: ConcurrentCounter,
 
     /// Collector that all `Guard` references used for operations on this map must be tied to. It
     /// is important that they all assocate with the _same_ `Collector`, otherwise you end up with
@@ -299,7 +299,7 @@ impl<K, V, S> HashMap<K, V, S> {
             next_table: Atomic::null(),
             transfer_index: AtomicIsize::new(0),
             size_ctl: AtomicIsize::new(0),
-            long_adder: LongAdder::default(),
+            counter: ConcurrentCounter::new(),
             build_hasher: hash_builder,
             collector: epoch::default_collector().clone(),
         }
@@ -398,7 +398,7 @@ impl<K, V, S> HashMap<K, V, S> {
     /// assert!(map.pin().len() == 2);
     /// ```
     pub fn len(&self) -> usize {
-        let n = self.long_adder.sum(&self.guard());
+        let n = self.counter.sum();
         if n < 0 {
             0
         } else {
@@ -1173,7 +1173,7 @@ where
     }
 
     fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard) {
-        self.long_adder.add(n, guard);
+        self.counter.add(n);
 
         // if resize_hint is None, it means the caller does not want us to consider a resize.
         // if it is Some(n), the caller saw n entries in a bin
@@ -1186,7 +1186,7 @@ where
             None => return,
         }
 
-        let mut count = self.long_adder.sum(guard);
+        let mut count = self.counter.sum();
 
         // TODO: use the resize hint
         let _saw_bin_length = resize_hint.unwrap();
@@ -1248,7 +1248,7 @@ where
             }
 
             // another resize may be needed!
-            count = self.long_adder.sum(guard);
+            count = self.counter.sum();
         }
     }
 

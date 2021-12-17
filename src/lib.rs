@@ -245,7 +245,7 @@
 use crossbeam_epoch::Guard;
 use std::ops::Deref;
 
-mod long_adder;
+mod counter;
 mod map;
 mod map_ref;
 mod node;
