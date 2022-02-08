@@ -1,5 +1,7 @@
+use seize::Linked;
+
 use crate::node::*;
-use crossbeam_epoch::{Atomic, Guard, Owned, Pointer, Shared};
+use crate::reclaim::{self, Atomic, Collector, Guard, Shared};
 use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::sync::atomic::Ordering;
@@ -49,19 +51,17 @@ pub(crate) struct Table<K, V> {
     next_table: Atomic<Table<K, V>>,
 }
 
-impl<K, V> From<Vec<Atomic<BinEntry<K, V>>>> for Table<K, V> {
-    fn from(bins: Vec<Atomic<BinEntry<K, V>>>) -> Self {
+impl<K, V> Table<K, V> {
+    pub(crate) fn from(bins: Vec<Atomic<BinEntry<K, V>>>, collector: &Collector) -> Self {
         Self {
             bins: bins.into_boxed_slice(),
-            moved: Atomic::from(Owned::new(BinEntry::Moved)),
+            moved: Atomic::from(Shared::boxed(BinEntry::Moved, collector)),
             next_table: Atomic::null(),
         }
     }
-}
 
-impl<K, V> Table<K, V> {
-    pub(crate) fn new(bins: usize) -> Self {
-        Self::from(vec![Atomic::null(); bins])
+    pub(crate) fn new(bins: usize, collector: &Collector) -> Self {
+        Self::from(vec![Atomic::null(); bins], &collector)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -75,15 +75,16 @@ impl<K, V> Table<K, V> {
     pub(crate) fn get_moved<'g>(
         &'g self,
         for_table: Shared<'g, Table<K, V>>,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) -> Shared<'g, BinEntry<K, V>> {
         match self.next_table(guard) {
             t if t.is_null() => {
                 // if a no next table is yet associated with this table,
                 // create one and store it in `self.next_table`
-                match self.next_table.compare_and_set(
+                match self.next_table.compare_exchange(
                     Shared::null(),
                     for_table,
+                    Ordering::SeqCst,
                     Ordering::SeqCst,
                     guard,
                 ) {
@@ -104,20 +105,20 @@ impl<K, V> Table<K, V> {
 
     pub(crate) fn find<'g, Q>(
         &'g self,
-        bin: &BinEntry<K, V>,
+        bin: &Linked<BinEntry<K, V>>,
         hash: u64,
         key: &Q,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) -> Shared<'g, BinEntry<K, V>>
     where
         K: Borrow<Q>,
         Q: ?Sized + Ord,
     {
-        match *bin {
+        match **bin {
             BinEntry::Node(_) => {
                 let mut node = bin;
                 loop {
-                    let n = if let BinEntry::Node(ref n) = node {
+                    let n = if let BinEntry::Node(ref n) = **node {
                         n
                     } else {
                         unreachable!("BinEntry::Node only points to BinEntry::Node");
@@ -153,7 +154,7 @@ impl<K, V> Table<K, V> {
                     // safety: the table is protected by the guard, and so is the bin.
                     let bin = unsafe { bin.deref() };
 
-                    match *bin {
+                    match **bin {
                         BinEntry::Node(_) | BinEntry::Tree(_) => {
                             break table.find(bin, hash, key, guard)
                         }
@@ -179,7 +180,7 @@ impl<K, V> Table<K, V> {
         // safety: we have &mut self _and_ all references we have returned are bound to the
         // lifetime of their borrow of self, so there cannot be any outstanding references to
         // anything in the map.
-        let guard = unsafe { crossbeam_epoch::unprotected() };
+        let guard = unsafe { reclaim::unprotected() };
 
         for bin in Vec::from(std::mem::replace(&mut self.bins, vec![].into_boxed_slice())) {
             if bin.load(Ordering::SeqCst, guard).is_null() {
@@ -192,37 +193,37 @@ impl<K, V> Table<K, V> {
             // of `drop`
             // safety: same as above
             let bin_entry = unsafe { bin.load(Ordering::SeqCst, guard).deref() };
-            match *bin_entry {
+            match **bin_entry {
                 BinEntry::Moved => {}
                 BinEntry::Node(_) => {
                     // safety: same as above + we own the bin - Nodes are not shared across the table
-                    let mut p = unsafe { bin.into_owned() };
+                    let mut p = unsafe { bin.into_box() };
                     loop {
                         // safety below:
                         // we're dropping the entire map, so no-one else is accessing it.
                         // we replaced the bin with a NULL, so there's no future way to access it
                         // either; we own all the nodes in the list.
 
-                        let node = if let BinEntry::Node(node) = *p.into_box() {
+                        let node = if let BinEntry::Node(node) = Linked::into_inner(*p) {
                             node
                         } else {
                             unreachable!();
                         };
 
                         // first, drop the value in this node
-                        let _ = unsafe { node.value.into_owned() };
+                        let _ = unsafe { node.value.into_box() };
 
                         // then we move to the next node
                         if node.next.load(Ordering::SeqCst, guard).is_null() {
                             break;
                         }
-                        p = unsafe { node.next.into_owned() };
+                        p = unsafe { node.next.into_box() };
                     }
                 }
                 BinEntry::Tree(_) => {
                     // safety: same as for BinEntry::Node
-                    let p = unsafe { bin.into_owned() };
-                    let bin = if let BinEntry::Tree(bin) = *p.into_box() {
+                    let p = unsafe { bin.into_box() };
+                    let bin = if let BinEntry::Tree(bin) = Linked::into_inner(*p) {
                         bin
                     } else {
                         unreachable!();
@@ -243,7 +244,7 @@ impl<K, V> Drop for Table<K, V> {
         // safety: we have &mut self _and_ all references we have returned are bound to the
         // lifetime of their borrow of self, so there cannot be any outstanding references to
         // anything in the map.
-        let guard = unsafe { crossbeam_epoch::unprotected() };
+        let guard = unsafe { reclaim::unprotected() };
 
         // since BinEntry::Nodes are either dropped by drop_bins or transferred to a new table,
         // all bins are empty or contain a Shared pointing to shared the BinEntry::Moved (if
@@ -259,7 +260,7 @@ impl<K, V> Drop for Table<K, V> {
                 } else {
                     // safety: we have mut access to self, so no-one else will drop this value under us.
                     let bin = unsafe { bin.deref() };
-                    if let BinEntry::Moved = *bin {
+                    if let BinEntry::Moved = **bin {
                     } else {
                         unreachable!("dropped table with non-empty bin");
                     }
@@ -282,7 +283,7 @@ impl<K, V> Drop for Table<K, V> {
         );
 
         // safety: we have mut access to self, so no-one else will drop this value under us.
-        let moved = unsafe { moved.into_owned() };
+        let moved = unsafe { moved.into_box() };
         drop(moved);
 
         // NOTE that the current table _is not_ responsible for `defer_destroy`ing the _next_ table
@@ -297,35 +298,29 @@ impl<K, V> Table<K, V> {
     }
 
     #[inline]
-    pub(crate) fn bin<'g>(&'g self, i: usize, guard: &'g Guard) -> Shared<'g, BinEntry<K, V>> {
+    pub(crate) fn bin<'g>(&'g self, i: usize, guard: &'g Guard<'_>) -> Shared<'g, BinEntry<K, V>> {
         self.bins[i].load(Ordering::Acquire, guard)
     }
 
     #[inline]
     #[allow(clippy::type_complexity)]
-    pub(crate) fn cas_bin<'g, P>(
+    pub(crate) fn cas_bin<'g>(
         &'g self,
         i: usize,
         current: Shared<'_, BinEntry<K, V>>,
-        new: P,
-        guard: &'g Guard,
-    ) -> Result<
-        Shared<'g, BinEntry<K, V>>,
-        crossbeam_epoch::CompareAndSetError<'g, BinEntry<K, V>, P>,
-    >
-    where
-        P: Pointer<BinEntry<K, V>>,
-    {
-        self.bins[i].compare_and_set(current, new, Ordering::AcqRel, guard)
+        new: Shared<'g, BinEntry<K, V>>,
+        guard: &'g Guard<'_>,
+    ) -> Result<Shared<'g, BinEntry<K, V>>, reclaim::CompareExchangeError<'g, BinEntry<K, V>>> {
+        self.bins[i].compare_exchange(current, new, Ordering::AcqRel, Ordering::Acquire, guard)
     }
 
     #[inline]
-    pub(crate) fn store_bin<P: Pointer<BinEntry<K, V>>>(&self, i: usize, new: P) {
+    pub(crate) fn store_bin(&self, i: usize, new: Shared<'_, BinEntry<K, V>>) {
         self.bins[i].store(new, Ordering::Release)
     }
 
     #[inline]
-    pub(crate) fn next_table<'g>(&'g self, guard: &'g Guard) -> Shared<'g, Table<K, V>> {
+    pub(crate) fn next_table<'g>(&'g self, guard: &'g Guard<'_>) -> Shared<'g, Table<K, V>> {
         self.next_table.load(Ordering::SeqCst, guard)
     }
 }

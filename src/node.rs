@@ -1,7 +1,8 @@
 use crate::raw::Table;
+use crate::reclaim::{self, Atomic, Collector, Guard, RetireShared, Shared};
 use core::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use crossbeam_epoch::{Atomic, Guard, Owned, Shared};
 use parking_lot::Mutex;
+use seize::Linked;
 use std::borrow::Borrow;
 use std::thread::{current, park, Thread};
 
@@ -134,7 +135,7 @@ impl<K, V> TreeNode<K, V> {
         from: Shared<'g, BinEntry<K, V>>,
         hash: u64,
         key: &Q,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) -> Shared<'g, BinEntry<K, V>>
     where
         K: Borrow<Q>,
@@ -240,9 +241,8 @@ where
     /// Constructs a new bin from the given nodes.
     ///
     /// Nodes are arranged into an ordered red-black tree.
-    pub(crate) fn new(bin: Owned<BinEntry<K, V>>, guard: &Guard) -> Self {
+    pub(crate) fn new(bin: Shared<'_, BinEntry<K, V>>, guard: &Guard<'_>) -> Self {
         let mut root = Shared::null();
-        let bin = bin.into_shared(guard);
 
         // safety: We own the nodes for creating this new TreeBin, so they are
         // not shared with another thread and cannot get invalidated.
@@ -328,14 +328,14 @@ where
 
 impl<K, V> TreeBin<K, V> {
     /// Acquires write lock for tree restucturing.
-    fn lock_root(&self, guard: &Guard) {
+    fn lock_root(&self, guard: &Guard<'_>, collector: &Collector) {
         if self
             .lock_state
             .compare_exchange(0, WRITER, Ordering::SeqCst, Ordering::Relaxed)
             .is_err()
         {
             // the current lock state is non-zero, which means the lock is contended
-            self.contended_lock(guard);
+            self.contended_lock(guard, collector);
         }
     }
 
@@ -345,7 +345,7 @@ impl<K, V> TreeBin<K, V> {
     }
 
     /// Possibly blocks awaiting root lock.
-    fn contended_lock(&self, guard: &Guard) {
+    fn contended_lock(&self, guard: &Guard<'_>, collector: &Collector) {
         let mut waiting = false;
         let mut state: i64;
         loop {
@@ -378,8 +378,8 @@ impl<K, V> TreeBin<K, V> {
                         // we noticed that there were no readers immediately after setting us as
                         // the waiter, and then went directly into this branch. In that case, some
                         // other thread may simultaneously have noticed that we wanted to be woken
-                        // up, and be trying to call `.unpark`. So, we `defer_destroy` instead.
-                        unsafe { guard.defer_destroy(waiter) };
+                        // up, and be trying to call `.unpark`. So, we `retire_shared` instead.
+                        unsafe { guard.retire_shared(waiter) };
                     }
                     return;
                 }
@@ -392,7 +392,7 @@ impl<K, V> TreeBin<K, V> {
                     .is_ok()
                 {
                     waiting = true;
-                    let current_thread = Owned::new(current());
+                    let current_thread = Shared::boxed(current(), &collector);
                     let waiter = self.waiter.swap(current_thread, Ordering::SeqCst, guard);
                     assert!(waiter.is_null());
                 }
@@ -410,7 +410,7 @@ impl<K, V> TreeBin<K, V> {
         bin: Shared<'g, BinEntry<K, V>>,
         hash: u64,
         key: &Q,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) -> Shared<'g, BinEntry<K, V>>
     where
         K: Borrow<Q>,
@@ -513,7 +513,8 @@ impl<K, V> TreeBin<K, V> {
         &'g self,
         p: Shared<'g, BinEntry<K, V>>,
         drop_value: bool,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
+        collector: &Collector,
     ) -> bool {
         // safety: we were read under our guard, at which point the tree
         // structure was valid. Since our guard pins the current epoch, the
@@ -582,7 +583,7 @@ impl<K, V> TreeBin<K, V> {
         // if we get here, we know that we will still be a tree and have
         // unlinked the `next` and `prev` pointers, so it's time to restructure
         // the tree
-        self.lock_root(guard);
+        self.lock_root(guard, collector);
         // NOTE: since we have the write lock for the tree, we know that all
         // readers will read along the linear `next` pointers until we release
         // the lock (these pointers were adjusted above to exclude the removed
@@ -758,9 +759,9 @@ impl<K, V> TreeBin<K, V> {
         #[allow(unused_unsafe)]
         unsafe {
             if drop_value {
-                guard.defer_destroy(p_deref.node.value.load(Ordering::Relaxed, guard));
+                guard.retire_shared(p_deref.node.value.load(Ordering::Relaxed, guard));
             }
-            guard.defer_destroy(p);
+            guard.retire_shared(p);
         }
 
         if cfg!(debug_assertions) {
@@ -782,20 +783,23 @@ where
         hash: u64,
         key: K,
         value: Shared<'g, V>,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
+        collector: &Collector,
     ) -> Shared<'g, BinEntry<K, V>> {
         let mut p = self.root.load(Ordering::SeqCst, guard);
         if p.is_null() {
             // the current root is `null`, i.e. the tree is currently empty.
             // This, we simply insert the new entry as the root.
-            let tree_node = Owned::new(BinEntry::TreeNode(TreeNode::new(
-                hash,
-                key,
-                Atomic::from(value),
-                Atomic::null(),
-                Atomic::null(),
-            )))
-            .into_shared(guard);
+            let tree_node = Shared::boxed(
+                BinEntry::TreeNode(TreeNode::new(
+                    hash,
+                    key,
+                    Atomic::from(value),
+                    Atomic::null(),
+                    Atomic::null(),
+                )),
+                collector,
+            );
             self.root.store(tree_node, Ordering::Release);
             self.first.store(tree_node, Ordering::Release);
             return Shared::null();
@@ -854,14 +858,16 @@ where
                 // position (which is here, since we arrived here by comparing
                 // hash and key of the new entry)
                 let first = self.first.load(Ordering::SeqCst, guard);
-                let x = Owned::new(BinEntry::TreeNode(TreeNode::new(
-                    hash,
-                    key,
-                    Atomic::from(value),
-                    Atomic::from(first),
-                    Atomic::from(xp),
-                )))
-                .into_shared(guard);
+                let x = Shared::boxed(
+                    BinEntry::TreeNode(TreeNode::new(
+                        hash,
+                        key,
+                        Atomic::from(value),
+                        Atomic::from(first),
+                        Atomic::from(xp),
+                    )),
+                    collector,
+                );
                 self.first.store(x, Ordering::SeqCst);
                 if !first.is_null() {
                     unsafe { TreeNode::get_tree_node(first) }
@@ -889,7 +895,7 @@ where
                         .red
                         .store(true, Ordering::SeqCst);
                 } else {
-                    self.lock_root(guard);
+                    self.lock_root(guard, collector);
                     self.root.store(
                         TreeNode::balance_insertion(
                             self.root.load(Ordering::Relaxed, guard),
@@ -929,10 +935,12 @@ impl<K, V> TreeBin<K, V> {
     /// method.
     pub(crate) unsafe fn defer_drop_without_values<'g>(
         bin: Shared<'g, BinEntry<K, V>>,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) {
-        guard.defer_unchecked(move || {
-            if let BinEntry::Tree(mut tree_bin) = *bin.into_owned().into_box() {
+        guard.retire(bin.as_ptr(), |mut link| {
+            let bin = link.cast::<BinEntry<K, V>>();
+
+            if let BinEntry::Tree(mut tree_bin) = Linked::into_inner(*Box::from_raw(bin)) {
                 tree_bin.drop_fields(false);
             } else {
                 unreachable!("bin is a tree bin");
@@ -953,7 +961,7 @@ impl<K, V> TreeBin<K, V> {
 
         // swap out first pointer so nodes will not get dropped again when
         // `tree_bin` is dropped
-        let guard = crossbeam_epoch::unprotected();
+        let guard = reclaim::unprotected();
         let p = self.first.swap(Shared::null(), Ordering::Relaxed, guard);
         Self::drop_tree_nodes(p, drop_values, guard);
     }
@@ -967,14 +975,14 @@ impl<K, V> TreeBin<K, V> {
     pub(crate) unsafe fn drop_tree_nodes<'g>(
         from: Shared<'g, BinEntry<K, V>>,
         drop_values: bool,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) {
         let mut p = from;
         while !p.is_null() {
-            if let BinEntry::TreeNode(tree_node) = *p.into_owned().into_box() {
+            if let BinEntry::TreeNode(tree_node) = Linked::into_inner(*p.into_box()) {
                 // if specified, drop the value in this node
                 if drop_values {
-                    let _ = tree_node.node.value.into_owned();
+                    let _ = tree_node.node.value.into_box();
                 }
                 // then we move to the next node
                 p = tree_node.node.next.load(Ordering::SeqCst, guard);
@@ -1016,7 +1024,7 @@ impl<K, V> TreeNode<K, V> {
     fn rotate_left<'g>(
         mut root: Shared<'g, BinEntry<K, V>>,
         p: Shared<'g, BinEntry<K, V>>,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) -> Shared<'g, BinEntry<K, V>> {
         if p.is_null() {
             return root;
@@ -1061,7 +1069,7 @@ impl<K, V> TreeNode<K, V> {
     fn rotate_right<'g>(
         mut root: Shared<'g, BinEntry<K, V>>,
         p: Shared<'g, BinEntry<K, V>>,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) -> Shared<'g, BinEntry<K, V>> {
         if p.is_null() {
             return root;
@@ -1106,7 +1114,7 @@ impl<K, V> TreeNode<K, V> {
     fn balance_insertion<'g>(
         mut root: Shared<'g, BinEntry<K, V>>,
         mut x: Shared<'g, BinEntry<K, V>>,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) -> Shared<'g, BinEntry<K, V>> {
         // safety: the containing TreeBin of all TreeNodes was read under our
         // guard, at which point the tree structure was valid. Since our guard
@@ -1206,7 +1214,7 @@ impl<K, V> TreeNode<K, V> {
     fn balance_deletion<'g>(
         mut root: Shared<'g, BinEntry<K, V>>,
         mut x: Shared<'g, BinEntry<K, V>>,
-        guard: &'g Guard,
+        guard: &'g Guard<'_>,
     ) -> Shared<'g, BinEntry<K, V>> {
         let mut x_parent: Shared<'_, BinEntry<K, V>>;
         let mut x_parent_left: Shared<'_, BinEntry<K, V>>;
@@ -1363,7 +1371,7 @@ impl<K, V> TreeNode<K, V> {
         }
     }
     /// Checks invariants recursively for the tree of Nodes rootet at t.
-    fn check_invariants<'g>(t: Shared<'g, BinEntry<K, V>>, guard: &'g Guard) {
+    fn check_invariants<'g>(t: Shared<'g, BinEntry<K, V>>, guard: &'g Guard<'_>) {
         // safety: the containing TreeBin of all TreeNodes was read under our
         // guard, at which point the tree structure was valid. Since our guard
         // pins the current epoch, the TreeNodes remain valid for at least as
@@ -1446,14 +1454,13 @@ impl<K, V> TreeNode<K, V> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossbeam_epoch::Owned;
     use std::sync::atomic::Ordering;
 
-    fn new_node(hash: u64, key: usize, value: usize) -> Node<usize, usize> {
+    fn new_node(hash: u64, key: usize, value: usize, collector: &Collector) -> Node<usize, usize> {
         Node {
             hash,
             key,
-            value: Atomic::new(value),
+            value: Atomic::from(Shared::boxed(value, &collector)),
             next: Atomic::null(),
             lock: Mutex::new(()),
         }
@@ -1461,27 +1468,33 @@ mod tests {
 
     #[test]
     fn find_node_no_match() {
-        let guard = &crossbeam_epoch::pin();
-        let node2 = new_node(4, 5, 6);
+        let collector = seize::Collector::new();
+        let guard = collector.enter();
+
+        let node2 = new_node(4, 5, 6, &collector);
         let entry2 = BinEntry::Node(node2);
-        let node1 = new_node(1, 2, 3);
-        node1.next.store(Owned::new(entry2), Ordering::SeqCst);
-        let entry1 = Owned::new(BinEntry::Node(node1)).into_shared(guard);
-        let mut tab = Table::from(vec![Atomic::from(entry1)]);
+        let node1 = new_node(1, 2, 3, &collector);
+        node1
+            .next
+            .store(Shared::boxed(entry2, &collector), Ordering::SeqCst);
+        let entry1 = Shared::boxed(BinEntry::Node(node1), &collector);
+        let mut tab = Table::from(vec![Atomic::from(entry1)], &collector);
 
         // safety: we have not yet dropped entry1
-        assert!(tab.find(unsafe { entry1.deref() }, 1, &0, guard).is_null());
+        assert!(tab.find(unsafe { entry1.deref() }, 1, &0, &guard).is_null());
         tab.drop_bins();
     }
 
     #[test]
     fn find_node_single_match() {
-        let guard = &crossbeam_epoch::pin();
-        let entry = Owned::new(BinEntry::Node(new_node(1, 2, 3))).into_shared(guard);
-        let mut tab = Table::from(vec![Atomic::from(entry)]);
+        let collector = seize::Collector::new();
+        let guard = collector.enter();
+
+        let entry = Shared::boxed(BinEntry::Node(new_node(1, 2, 3, &collector)), &collector);
+        let mut tab = Table::from(vec![Atomic::from(entry)], &collector);
         assert_eq!(
             // safety: we have not yet dropped entry
-            unsafe { tab.find(entry.deref(), 1, &2, guard).deref() }
+            unsafe { tab.find(entry.deref(), 1, &2, &guard).deref() }
                 .as_node()
                 .unwrap()
                 .key,
@@ -1492,16 +1505,20 @@ mod tests {
 
     #[test]
     fn find_node_multi_match() {
-        let guard = &crossbeam_epoch::pin();
-        let node2 = new_node(4, 5, 6);
+        let collector = seize::Collector::new();
+        let guard = collector.enter();
+
+        let node2 = new_node(4, 5, 6, &collector);
         let entry2 = BinEntry::Node(node2);
-        let node1 = new_node(1, 2, 3);
-        node1.next.store(Owned::new(entry2), Ordering::SeqCst);
-        let entry1 = Owned::new(BinEntry::Node(node1)).into_shared(guard);
-        let mut tab = Table::from(vec![Atomic::from(entry1)]);
+        let node1 = new_node(1, 2, 3, &collector);
+        node1
+            .next
+            .store(Shared::boxed(entry2, &collector), Ordering::SeqCst);
+        let entry1 = Shared::boxed(BinEntry::Node(node1), &collector);
+        let mut tab = Table::from(vec![Atomic::from(entry1)], &collector);
         assert_eq!(
             // safety: we have not yet dropped entry1
-            unsafe { tab.find(entry1.deref(), 4, &5, guard).deref() }
+            unsafe { tab.find(entry1.deref(), 4, &5, &guard).deref() }
                 .as_node()
                 .unwrap()
                 .key,
@@ -1512,69 +1529,93 @@ mod tests {
 
     #[test]
     fn find_moved_empty_bins_no_match() {
-        let guard = &crossbeam_epoch::pin();
-        let mut table = Table::<usize, usize>::new(1);
-        let mut table2 = Owned::new(Table::new(1)).into_shared(guard);
+        let collector = seize::Collector::new();
+        let guard = collector.enter();
 
-        let entry = table.get_moved(table2, guard);
+        let mut table = Table::<usize, usize>::new(1, &collector);
+        let table2 = Shared::boxed(Table::new(1, &collector), &collector);
+
+        let entry = table.get_moved(table2, &guard);
         table.store_bin(0, entry);
-        assert!(table.find(&BinEntry::Moved, 1, &2, guard).is_null());
+        assert!(table
+            .find(&collector.link(BinEntry::Moved), 1, &2, &guard)
+            .is_null());
         table.drop_bins();
         // safety: table2 is still valid and not accessed by different threads
-        unsafe { table2.deref_mut() }.drop_bins();
-        unsafe { guard.defer_destroy(table2) };
+        unsafe { &mut *table2.as_ptr() }.drop_bins();
+        unsafe { guard.retire_shared(table2) };
     }
 
     #[test]
     fn find_moved_no_bins_no_match() {
-        let guard = &crossbeam_epoch::pin();
-        let mut table = Table::<usize, usize>::new(1);
-        let mut table2 = Owned::new(Table::new(0)).into_shared(guard);
-        let entry = table.get_moved(table2, guard);
+        let collector = seize::Collector::new();
+        let guard = collector.enter();
+
+        let mut table = Table::<usize, usize>::new(1, &collector);
+        let table2 = Shared::boxed(Table::new(0, &collector), &collector);
+        let entry = table.get_moved(table2, &guard);
         table.store_bin(0, entry);
-        assert!(table.find(&BinEntry::Moved, 1, &2, guard).is_null());
+        assert!(table
+            .find(&collector.link(BinEntry::Moved), 1, &2, &guard)
+            .is_null());
         table.drop_bins();
         // safety: table2 is still valid and not accessed by different threads
-        unsafe { table2.deref_mut() }.drop_bins();
-        unsafe { guard.defer_destroy(table2) };
+        unsafe { &mut *table2.as_ptr() }.drop_bins();
+        unsafe { guard.retire_shared(table2) };
     }
 
     #[test]
     fn find_moved_null_bin_no_match() {
-        let guard = &crossbeam_epoch::pin();
-        let mut table = Table::<usize, usize>::new(1);
-        let mut table2 = Owned::new(Table::new(2)).into_shared(guard);
-        unsafe { table2.deref() }.store_bin(0, Owned::new(BinEntry::Node(new_node(1, 2, 3))));
-        let entry = table.get_moved(table2, guard);
+        let collector = seize::Collector::new();
+        let guard = collector.enter();
+
+        let mut table = Table::<usize, usize>::new(1, &collector);
+        let table2 = Shared::boxed(Table::new(2, &collector), &collector);
+        unsafe { table2.deref() }.store_bin(
+            0,
+            Shared::boxed(BinEntry::Node(new_node(1, 2, 3, &collector)), &collector),
+        );
+        let entry = table.get_moved(table2, &guard);
         table.store_bin(0, entry);
-        assert!(table.find(&BinEntry::Moved, 0, &1, guard).is_null());
+        assert!(table
+            .find(&collector.link(BinEntry::Moved), 0, &1, &guard)
+            .is_null());
         table.drop_bins();
         // safety: table2 is still valid and not accessed by different threads
-        unsafe { table2.deref_mut() }.drop_bins();
-        unsafe { guard.defer_destroy(table2) };
+        unsafe { &mut *table2.as_ptr() }.drop_bins();
+        unsafe { guard.retire_shared(table2) };
     }
 
     #[test]
     fn find_moved_match() {
-        let guard = &crossbeam_epoch::pin();
-        let mut table = Table::<usize, usize>::new(1);
-        let mut table2 = Owned::new(Table::new(1)).into_shared(guard);
+        let collector = seize::Collector::new();
+        let guard = collector.enter();
+
+        let mut table = Table::<usize, usize>::new(1, &collector);
+        let table2 = Shared::boxed(Table::new(1, &collector), &collector);
         // safety: table2 is still valid
-        unsafe { table2.deref() }.store_bin(0, Owned::new(BinEntry::Node(new_node(1, 2, 3))));
-        let entry = table.get_moved(table2, guard);
+        unsafe { table2.deref() }.store_bin(
+            0,
+            Shared::boxed(BinEntry::Node(new_node(1, 2, 3, &collector)), &collector),
+        );
+        let entry = table.get_moved(table2, &guard);
         table.store_bin(0, entry);
         assert_eq!(
             // safety: entry is still valid since the table was not dropped and the
             // entry was not removed
-            unsafe { table.find(&BinEntry::Moved, 1, &2, guard).deref() }
-                .as_node()
-                .unwrap()
-                .key,
+            unsafe {
+                table
+                    .find(&collector.link(BinEntry::Moved), 1, &2, &guard)
+                    .deref()
+            }
+            .as_node()
+            .unwrap()
+            .key,
             2
         );
         table.drop_bins();
         // safety: table2 is still valid and not accessed by different threads
-        unsafe { table2.deref_mut() }.drop_bins();
-        unsafe { guard.defer_destroy(table2) };
+        unsafe { &mut *table2.as_ptr() }.drop_bins();
+        unsafe { guard.retire_shared(table2) };
     }
 }

@@ -1,16 +1,17 @@
-use crossbeam_epoch as epoch;
 use flurry::*;
 use std::sync::Arc;
 
 #[test]
 fn pin() {
-    let _map = HashMap::<usize, usize>::new().pin();
+    let map = HashMap::<usize, usize>::new();
+    let _pinned = map.pin();
 }
 
 #[test]
 fn with_guard() {
-    let guard = epoch::pin();
-    let _map = HashMap::<usize, usize>::new().with_guard(&guard);
+    let map = HashMap::<usize, usize>::new();
+    let guard = map.guard();
+    let _pinned = map.with_guard(&guard);
 }
 
 #[test]
