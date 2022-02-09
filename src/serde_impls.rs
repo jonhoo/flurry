@@ -83,11 +83,14 @@ where
             Some(n) => HashMap::with_capacity_and_hasher(n, S::default()),
             None => HashMap::with_hasher(S::default()),
         };
-        let guard = map.guard();
 
-        while let Some((key, value)) = access.next_entry()? {
-            if let Some(_old_value) = map.insert(key, value, &guard) {
-                unreachable!("Serialized map held two values with the same key");
+        {
+            let guard = map.guard();
+
+            while let Some((key, value)) = access.next_entry()? {
+                if let Some(_old_value) = map.insert(key, value, &guard) {
+                    unreachable!("Serialized map held two values with the same key");
+                }
             }
         }
 
@@ -162,10 +165,13 @@ where
         A: SeqAccess<'de>,
     {
         let set = HashSet::default();
-        let guard = set.guard();
 
-        while let Some(value) = access.next_element()? {
-            let _ = set.insert(value, &guard);
+        {
+            let guard = set.guard();
+
+            while let Some(value) = access.next_element()? {
+                let _ = set.insert(value, &guard);
+            }
         }
 
         Ok(set)

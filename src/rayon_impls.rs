@@ -173,14 +173,18 @@ mod test {
         let to_extend_with = Vec::new();
 
         let mut map = HashMap::new();
-        let guard = map.guard();
-        map.insert(1, 2, &guard);
-        map.insert(3, 4, &guard);
+
+        {
+            let guard = map.guard();
+            map.insert(1, 2, &guard);
+            map.insert(3, 4, &guard);
+        }
 
         map.par_extend(to_extend_with.into_par_iter());
 
         assert_eq!(map.len(), 2);
 
+        let guard = map.guard();
         assert_eq!(map.get(&1, &guard), Some(&2));
         assert_eq!(map.get(&3, &guard), Some(&4));
     }
@@ -193,13 +197,17 @@ mod test {
         }
 
         let mut map = HashMap::new();
-        let guard = map.guard();
-        map.insert(1, 2, &guard);
-        map.insert(3, 4, &guard);
+
+        {
+            let guard = map.guard();
+            map.insert(1, 2, &guard);
+            map.insert(3, 4, &guard);
+        }
 
         map.par_extend(to_extend_with.into_par_iter());
         assert_eq!(map.len(), 102);
 
+        let guard = map.guard();
         assert_eq!(map.get(&1, &guard), Some(&2));
         assert_eq!(map.get(&3, &guard), Some(&4));
         assert_eq!(map.get(&100, &guard), Some(&0));
@@ -249,14 +257,18 @@ mod test {
         let to_extend_with = Vec::new();
 
         let mut set = HashSet::new();
-        let guard = set.guard();
-        set.insert(1, &guard);
-        set.insert(3, &guard);
+
+        {
+            let guard = set.guard();
+            set.insert(1, &guard);
+            set.insert(3, &guard);
+        }
 
         set.par_extend(to_extend_with.into_par_iter());
 
         assert_eq!(set.len(), 2);
 
+        let guard = set.guard();
         assert!(set.contains(&1, &guard));
         assert!(!set.contains(&17, &guard));
     }
@@ -269,13 +281,17 @@ mod test {
         }
 
         let mut set = HashSet::new();
-        let guard = set.guard();
-        set.insert((1, 2), &guard);
-        set.insert((3, 4), &guard);
+
+        {
+            let guard = set.guard();
+            set.insert((1, 2), &guard);
+            set.insert((3, 4), &guard);
+        }
 
         set.par_extend(to_extend_with.into_par_iter());
         assert_eq!(set.len(), 102);
 
+        let guard = set.guard();
         assert!(set.contains(&(1, 2), &guard));
         assert!(set.contains(&(199, 990), &guard));
         assert!(!set.contains(&(199, 167), &guard));
@@ -286,13 +302,17 @@ mod test {
         let to_extend_with = Vec::new();
 
         let mut set = HashSet::new();
-        let guard = set.guard();
-        set.insert((1, 2), &guard);
-        set.insert((3, 4), &guard);
+
+        {
+            let guard = set.guard();
+            set.insert((1, 2), &guard);
+            set.insert((3, 4), &guard);
+        }
 
         set.par_extend(to_extend_with.into_par_iter());
         assert_eq!(set.len(), 2);
 
+        let guard = set.guard();
         assert!(set.contains(&(1, 2), &guard));
         assert!(!set.contains(&(199, 990), &guard));
         assert!(!set.contains(&(199, 167), &guard));
