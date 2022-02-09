@@ -76,8 +76,8 @@ macro_rules! load_factor {
 /// A concurrent hash table.
 ///
 /// Flurry uses [`Guards`] to control the lifetime of the resources that get stored and
-/// extracted from the map. [`Guards`] are acquired through the [`epoch::pin`], [`HashMap::pin`]
-/// and [`HashMap::guard`] functions. For more information, see the [notes in the crate-level
+/// extracted from the map. [`Guards`] are acquired through the [`HashMap::pin`] and
+/// [`HashMap::guard`] functions. For more information, see the [notes in the crate-level
 /// documentation].
 ///
 /// [notes in the crate-level documentation]: index.html#a-note-on-guard-and-memory-use
@@ -329,15 +329,14 @@ impl<K, V, S> HashMap<K, V, S> {
         map
     }
 
-    /// Associate a custom [`epoch::Collector`] with this map.
+    /// Associate a custom [`seize::Collector`] with this map.
     ///
     /// By default, the global collector is used. With this method you can use a different
     /// collector instead. This may be desireable if you want more control over when and how memory
     /// reclamation happens.
     ///
     /// Note that _all_ `Guard` references provided to access the returned map _must_ be
-    /// constructed using guards produced by `collector`. You can use [`HashMap::register`] to get
-    /// a thread-local handle to the collector that then lets you construct an [`epoch::Guard`].
+    /// constructed using guards produced by `collector`.
     pub fn with_collector(mut self, collector: Collector) -> Self {
         self.collector = collector;
         self
