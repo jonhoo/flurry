@@ -337,6 +337,7 @@ impl<K, V, S> HashMap<K, V, S> {
     ///
     /// Note that _all_ `Guard` references provided to access the returned map _must_ be
     /// constructed using guards produced by `collector`.
+    #[must_use]
     pub fn with_collector(mut self, collector: Collector) -> Self {
         self.collector = collector;
         self

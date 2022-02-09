@@ -392,7 +392,7 @@ impl<K, V> TreeBin<K, V> {
                     .is_ok()
                 {
                     waiting = true;
-                    let current_thread = Shared::boxed(current(), &collector);
+                    let current_thread = Shared::boxed(current(), collector);
                     let waiter = self.waiter.swap(current_thread, Ordering::SeqCst, guard);
                     assert!(waiter.is_null());
                 }

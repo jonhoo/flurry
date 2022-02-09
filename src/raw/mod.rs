@@ -61,7 +61,7 @@ impl<K, V> Table<K, V> {
     }
 
     pub(crate) fn new(bins: usize, collector: &Collector) -> Self {
-        Self::from(vec![Atomic::null(); bins], &collector)
+        Self::from(vec![Atomic::null(); bins], collector)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
