@@ -108,7 +108,7 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// unsoundness as described in https://github.com/jonhoo/flurry/issues/46. Specifically, a
     /// user can do:
     ///
-    /// ```rust,should_panic
+    /// ```rust,no_run
     /// # use flurry::HashMap;
     /// let map: HashMap<_, _> = HashMap::default();
     /// map.insert(42, String::from("hello"), &map.guard());
