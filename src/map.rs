@@ -106,12 +106,7 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// unsoundness as described in https://github.com/jonhoo/flurry/issues/46. Specifically, a
     /// user can do:
     ///
-    // this should be:
-    // ```rust,should_panic
-    // but that won't work with coverage at the moment:
-    // https://github.com/xd009642/tarpaulin/issues/344
-    // so:
-    /// ```rust,no_run
+    /// ```rust,should_panic
     /// # use flurry::HashMap;
     /// # use crossbeam_epoch;
     /// let map: HashMap<_, _> = HashMap::default();
