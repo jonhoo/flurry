@@ -1826,18 +1826,19 @@ where
                             // the key already exists in the map!
                             let current_value = n.value.load(Ordering::SeqCst, guard);
 
-                            // safety: since the value is present now, and we've held a guard from
-                            // the beginning of the search, the value cannot be dropped until the
-                            // next epoch, which won't arrive until after we drop our guard.
-                            let current_value = unsafe { current_value.deref() };
-
                             if no_replacement {
                                 // the key is not absent, so don't update because of
                                 // `no_replacement`, we don't use the new value, so we need to clean
                                 // it up and return it back to the caller
-                                // safety: we own value and did not share it
+
+                                // safety: since the value is present now, and we've held a guard from
+                                // the beginning of the search, the value cannot be dropped until the
+                                // next epoch, which won't arrive until after we drop our guard.
+                                let current_value = unsafe { current_value.deref() };
+
                                 return PutResult::Exists {
                                     current: current_value,
+                                    // safety: we own value and did not share it
                                     not_inserted: unsafe { value.into_box() },
                                 };
                             } else {
@@ -1865,8 +1866,17 @@ where
                                 //    `value` field (which is what we swapped), so freeing
                                 //    now_garbage is fine.
                                 unsafe { guard.retire_shared(now_garbage) };
+
+                                // safety: since the value is present now, and we've held a guard from
+                                // safety: same as the deref in the no_replacement case
+                                //
+                                // note that we must deref *after* calling retire_shared
+                                // because it creates an &mut T which would not be unique
+                                // if we are holding on to &T
+                                let current_value = unsafe { current_value.deref() };
+
+                                break Some(current_value);
                             }
-                            break Some(current_value);
                         }
 
                         // TODO: This Ordering can probably be relaxed due to the Mutex
