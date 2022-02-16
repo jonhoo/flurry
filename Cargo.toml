@@ -24,7 +24,7 @@ parking_lot = "0.10"
 num_cpus = "1.12.0"
 rayon = {version = "1.3", optional = true}
 serde = {version = "1.0.105", optional = true}
-seize = { git = "https://github.com/ibraheemdev/seize" }
+seize = {git = "https://github.com/ibraheemdev/seize"}
 
 [dependencies.ahash]
 version = "0.3.2"
