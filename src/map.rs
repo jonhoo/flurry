@@ -108,7 +108,7 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// unsoundness as described in https://github.com/jonhoo/flurry/issues/46. Specifically, a
     /// user can do:
     ///
-    /// ```rust,no_run
+    /// ```rust,should_panic
     /// # use flurry::HashMap;
     /// let map: HashMap<_, _> = HashMap::default();
     /// map.insert(42, String::from("hello"), &map.guard());
@@ -352,12 +352,11 @@ impl<K, V, S> HashMap<K, V, S> {
     }
 
     #[inline]
-    fn check_guard(&self, _guard: &Guard<'_>) {
-        // TODO
-        // // guard.collector() may be `None` if it is unprotected
-        // if let Some(c) = guard.collector() {
-        //     assert_eq!(c, &self.collector);
-        // }
+    fn check_guard(&self, guard: &Guard<'_>) {
+        // guard.collector() may be `None` if it is unprotected
+        if let Some(c) = guard.collector() {
+            assert_eq!(c, &self.collector);
+        }
     }
 
     /// Returns the number of entries in the map.
@@ -3573,8 +3572,6 @@ mod tree_bins {
 
     #[test]
     #[should_panic]
-    // TODO
-    #[ignore]
     fn disallow_evil() {
         let map: HashMap<_, _> = HashMap::default();
         map.insert(42, String::from("hello"), &map.guard());
