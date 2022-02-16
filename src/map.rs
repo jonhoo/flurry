@@ -355,7 +355,7 @@ impl<K, V, S> HashMap<K, V, S> {
     fn check_guard(&self, guard: &Guard<'_>) {
         // guard.collector() may be `None` if it is unprotected
         if let Some(c) = guard.collector() {
-            assert_eq!(c, &self.collector);
+            assert!(Collector::ptr_eq(c, &self.collector));
         }
     }
 
@@ -3093,11 +3093,14 @@ where
     S: BuildHasher + Clone,
 {
     fn clone(&self) -> HashMap<K, V, S> {
-        let cloned_map = Self::with_capacity_and_hasher(self.len(), self.build_hasher.clone());
+        let cloned_map = Self::with_capacity_and_hasher(self.len(), self.build_hasher.clone())
+            .with_collector(self.collector.clone());
+
         {
             let guard = self.collector.enter();
+            let cloned_guard = cloned_map.collector.enter();
             for (k, v) in self.iter(&guard) {
-                cloned_map.insert(k.clone(), v.clone(), &guard);
+                cloned_map.insert(k.clone(), v.clone(), &cloned_guard);
             }
         }
         cloned_map
