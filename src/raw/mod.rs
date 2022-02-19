@@ -85,7 +85,7 @@ impl<K, V> Table<K, V> {
                     Shared::null(),
                     for_table,
                     Ordering::SeqCst,
-                    Ordering::SeqCst,
+                    Ordering::Relaxed,
                     guard,
                 ) {
                     Ok(_) => {}
