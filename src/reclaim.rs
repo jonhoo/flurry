@@ -12,8 +12,8 @@ impl<T> Atomic<T> {
         Self(seize::AtomicPtr::default())
     }
 
-    pub(crate) fn load<'g>(&self, _: Ordering, guard: &'g Guard<'_>) -> Shared<'g, T> {
-        guard.protect(&self.0).into()
+    pub(crate) fn load<'g>(&self, ordering: Ordering, guard: &'g Guard<'_>) -> Shared<'g, T> {
+        guard.protect(&self.0, ordering).into()
     }
 
     pub(crate) fn store(&self, new: Shared<'_, T>, ordering: Ordering) {
