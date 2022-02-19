@@ -1,8 +1,7 @@
 mod traverser;
-use seize::Linked;
 pub(crate) use traverser::NodeIter;
 
-use crate::reclaim::Guard;
+use crate::reclaim::{Guard, Shared};
 use std::sync::atomic::Ordering;
 
 /// An iterator over a map's entries.
@@ -15,11 +14,9 @@ pub struct Iter<'g, K, V> {
 }
 
 impl<'g, K, V> Iter<'g, K, V> {
-    pub(crate) fn next_internal(&mut self) -> Option<(&'g K, &'g Linked<V>)> {
+    pub(crate) fn next_internal(&mut self) -> Option<(&'g K, Shared<'g, V>)> {
         let node = self.node_iter.next()?;
         let value = node.value.load(Ordering::SeqCst, self.guard);
-        // safety: flurry does not drop or move until after guard drop
-        let value = unsafe { value.deref() };
         Some((&node.key, value))
     }
 }
@@ -27,7 +24,9 @@ impl<'g, K, V> Iter<'g, K, V> {
 impl<'g, K, V> Iterator for Iter<'g, K, V> {
     type Item = (&'g K, &'g V);
     fn next(&mut self) -> Option<Self::Item> {
-        self.next_internal().map(|(k, v)| (k, &**v))
+        // safety: flurry does not drop or move until after guard drop
+        self.next_internal()
+            .map(|(k, v)| unsafe { (k, &**v.deref()) })
     }
 }
 

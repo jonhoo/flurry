@@ -664,7 +664,7 @@ where
     fn transfer<'g>(
         &'g self,
         table: Shared<'g, Table<K, V>>,
-        mut next_table: Shared<'g, Table<K, V>>,
+        mut next_table_ptr: Shared<'g, Table<K, V>>,
         guard: &'g Guard<'_>,
     ) {
         // safety: table was read while `guard` was held. the code that drops table only drops it
@@ -677,17 +677,17 @@ where
         let stride = if ncpu > 1 { (n >> 3) / ncpu } else { n };
         let stride = std::cmp::max(stride as isize, MIN_TRANSFER_STRIDE);
 
-        if next_table.is_null() {
+        if next_table_ptr.is_null() {
             // we are initiating a resize
             let table = Shared::boxed(Table::new(n << 1, &self.collector), &self.collector);
             let now_garbage = self.next_table.swap(table, Ordering::SeqCst, guard);
             assert!(now_garbage.is_null());
             self.transfer_index.store(n as isize, Ordering::SeqCst);
-            next_table = self.next_table.load(Ordering::Relaxed, guard);
+            next_table_ptr = self.next_table.load(Ordering::Relaxed, guard);
         }
 
         // safety: same argument as for table above
-        let next_n = unsafe { next_table.deref() }.len();
+        let next_n = unsafe { next_table_ptr.deref() }.len();
 
         let mut advance = true;
         let mut finishing = false;
@@ -732,7 +732,7 @@ where
                 if finishing {
                     // this branch is only taken for one thread partaking in the resize!
                     self.next_table.store(Shared::null(), Ordering::SeqCst);
-                    let now_garbage = self.table.swap(next_table, Ordering::SeqCst, guard);
+                    let now_garbage = self.table.swap(next_table_ptr, Ordering::SeqCst, guard);
                     // safety: need to guarantee that now_garbage is no longer reachable. more
                     // specifically, no thread that executes _after_ this line can ever get a
                     // reference to now_garbage.
@@ -798,12 +798,17 @@ where
             let bin = table.bin(i as usize, guard);
             if bin.is_null() {
                 advance = table
-                    .cas_bin(i, Shared::null(), table.get_moved(next_table, guard), guard)
+                    .cas_bin(
+                        i,
+                        Shared::null(),
+                        table.get_moved(next_table_ptr, guard),
+                        guard,
+                    )
                     .is_ok();
                 continue;
             }
             // safety: as for table above
-            let next_table = unsafe { next_table.deref() };
+            let next_table = unsafe { next_table_ptr.deref() };
 
             // safety: bin is a valid pointer.
             //
@@ -915,10 +920,7 @@ where
 
                     next_table.store_bin(i, low_bin);
                     next_table.store_bin(i + n, high_bin);
-                    table.store_bin(
-                        i,
-                        table.get_moved(Shared::from(next_table as *const _), guard),
-                    );
+                    table.store_bin(i, table.get_moved(Shared::from(next_table_ptr), guard));
 
                     // everything up to last_run in the _old_ bin linked list is now garbage.
                     // those nodes have all been re-allocated in the new bin linked list.
@@ -1081,10 +1083,7 @@ where
 
                     next_table.store_bin(i, low_bin);
                     next_table.store_bin(i + n, high_bin);
-                    table.store_bin(
-                        i,
-                        table.get_moved(Shared::from(next_table as *const _), guard),
-                    );
+                    table.store_bin(i, table.get_moved(Shared::from(next_table_ptr), guard));
 
                     // if we did not re-use the old bin, it is now garbage,
                     // since all of its nodes have been reallocated. However,
@@ -2711,9 +2710,10 @@ where
         self.check_guard(guard);
         let mut iter = self.iter(guard);
         while let Some((k, v)) = iter.next_internal() {
-            if !f(k, v) {
-                let old_value: Shared<'_, V> = Shared::from(v as *const _);
-                self.replace_node(k, None, Some(old_value), guard);
+            // safety: flurry does not drop or move until after guard drop
+            let value = unsafe { v.deref() };
+            if !f(k, value) {
+                self.replace_node(k, None, Some(v), guard);
             }
         }
     }

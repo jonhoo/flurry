@@ -125,7 +125,9 @@ impl<K, V> Table<K, V> {
                     };
 
                     if n.hash == hash && n.key.borrow() == key {
-                        return Shared::from(node as *const _);
+                        // safety: this cast is fine because find
+                        // is only used to return shared references
+                        return Shared::from(node as *const _ as *mut _);
                     }
                     let next = n.next.load(Ordering::SeqCst, guard);
                     if next.is_null() {
@@ -172,7 +174,11 @@ impl<K, V> Table<K, V> {
                     "`find` was called on a TreeNode, which cannot be the first entry in a bin"
                 );
             }
-            BinEntry::Tree(_) => TreeBin::find(Shared::from(bin as *const _), hash, key, guard),
+            BinEntry::Tree(_) => {
+                // safety: this cast is fine because TreeBin::find
+                // only needs a shared reference to the bin
+                TreeBin::find(Shared::from(bin as *const _ as *mut _), hash, key, guard)
+            }
         }
     }
 

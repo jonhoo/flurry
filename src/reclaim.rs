@@ -143,12 +143,6 @@ impl<T> From<*mut Linked<T>> for Shared<'_, T> {
     }
 }
 
-impl<T> From<*const Linked<T>> for Shared<'_, T> {
-    fn from(ptr: *const Linked<T>) -> Self {
-        Shared::from(ptr as *mut _)
-    }
-}
-
 pub(crate) trait RetireShared {
     unsafe fn retire_shared<T>(&self, shared: Shared<'_, T>);
 }
