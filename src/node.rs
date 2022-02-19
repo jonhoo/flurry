@@ -938,9 +938,15 @@ impl<K, V> TreeBin<K, V> {
         guard: &'g Guard<'_>,
     ) {
         guard.retire(bin.as_ptr(), |mut link| {
-            let bin = link.cast::<BinEntry<K, V>>();
+            let bin = unsafe {
+                // SAFETY: `bin` is a `BinEntry<K, V>`
+                let ptr = link.cast::<BinEntry<K, V>>();
+                // SAFETY: `retire` guarantees that we
+                // have unique access to `bin` at this point
+                *Box::from_raw(ptr)
+            };
 
-            if let BinEntry::Tree(mut tree_bin) = Linked::into_inner(*Box::from_raw(bin)) {
+            if let BinEntry::Tree(mut tree_bin) = Linked::into_inner(bin) {
                 tree_bin.drop_fields(false);
             } else {
                 unreachable!("bin is a tree bin");
