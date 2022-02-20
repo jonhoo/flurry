@@ -384,7 +384,7 @@ where
 
 impl<T, S> HashSet<T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Ord,
+    T: Sync + Send + Clone + Hash + Ord,
     S: BuildHasher,
 {
     /// Adds a value to the set.
@@ -556,7 +556,7 @@ where
 
 impl<T, S> Extend<T> for &HashSet<T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Ord,
+    T: Sync + Send + Clone + Hash + Ord,
     S: BuildHasher,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
@@ -566,7 +566,7 @@ where
 
 impl<'a, T, S> Extend<&'a T> for &HashSet<T, S>
 where
-    T: 'static + Sync + Send + Copy + Hash + Ord,
+    T: Sync + Send + Copy + Hash + Ord,
     S: BuildHasher,
 {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iter: I) {
@@ -576,7 +576,7 @@ where
 
 impl<T, S> FromIterator<T> for HashSet<T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Ord,
+    T: Sync + Send + Clone + Hash + Ord,
     S: BuildHasher + Default,
 {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
@@ -588,7 +588,7 @@ where
 
 impl<'a, T, S> FromIterator<&'a T> for HashSet<T, S>
 where
-    T: 'static + Sync + Send + Copy + Hash + Ord,
+    T: Sync + Send + Copy + Hash + Ord,
     S: BuildHasher + Default,
 {
     fn from_iter<I: IntoIterator<Item = &'a T>>(iter: I) -> Self {
@@ -600,7 +600,7 @@ where
 
 impl<T, S> Clone for HashSet<T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Ord,
+    T: Sync + Send + Clone + Hash + Ord,
     S: BuildHasher + Clone,
 {
     fn clone(&self) -> HashSet<T, S> {

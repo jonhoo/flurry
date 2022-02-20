@@ -4,8 +4,8 @@ use std::hash::{BuildHasher, Hash};
 
 impl<K, V, S> FromParallelIterator<(K, V)> for HashMap<K, V, S>
 where
-    K: Clone + Hash + Ord + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    K: Clone + Hash + Ord + Send + Sync,
+    V: Send + Sync,
     S: BuildHasher + Default + Sync,
 {
     fn from_par_iter<I>(par_iter: I) -> Self
@@ -20,8 +20,8 @@ where
 
 impl<K, V, S> ParallelExtend<(K, V)> for HashMap<K, V, S>
 where
-    K: Clone + Hash + Ord + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    K: Clone + Hash + Ord + Send + Sync,
+    V: Send + Sync,
     S: BuildHasher + Sync,
 {
     fn par_extend<I>(&mut self, par_iter: I)
@@ -34,8 +34,8 @@ where
 
 impl<K, V, S> ParallelExtend<(K, V)> for &HashMap<K, V, S>
 where
-    K: Clone + Hash + Ord + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    K: Clone + Hash + Ord + Send + Sync,
+    V: Send + Sync,
     S: BuildHasher + Sync,
 {
     fn par_extend<I>(&mut self, par_iter: I)
@@ -53,8 +53,8 @@ where
 
 impl<'map, K, V, S> ParallelExtend<(K, V)> for HashMapRef<'map, K, V, S>
 where
-    K: Clone + Hash + Ord + Send + Sync + 'static,
-    V: Send + Sync + 'static,
+    K: Clone + Hash + Ord + Send + Sync,
+    V: Send + Sync,
     S: BuildHasher + Sync,
 {
     fn par_extend<I>(&mut self, par_iter: I)
@@ -67,7 +67,7 @@ where
 
 impl<K, S> FromParallelIterator<K> for HashSet<K, S>
 where
-    K: Clone + Hash + Ord + Send + Sync + 'static,
+    K: Clone + Hash + Ord + Send + Sync,
     S: BuildHasher + Default + Sync,
 {
     fn from_par_iter<I>(par_iter: I) -> Self
@@ -82,7 +82,7 @@ where
 
 impl<K, S> ParallelExtend<K> for HashSet<K, S>
 where
-    K: Clone + Hash + Ord + Send + Sync + 'static,
+    K: Clone + Hash + Ord + Send + Sync,
     S: BuildHasher + Sync,
 {
     fn par_extend<I>(&mut self, par_iter: I)
@@ -95,7 +95,7 @@ where
 
 impl<K, S> ParallelExtend<K> for &HashSet<K, S>
 where
-    K: Clone + Hash + Ord + Send + Sync + 'static,
+    K: Clone + Hash + Ord + Send + Sync,
     S: BuildHasher + Sync,
 {
     fn par_extend<I>(&mut self, par_iter: I)
@@ -109,7 +109,7 @@ where
 
 impl<'set, K, S> ParallelExtend<K> for HashSetRef<'set, K, S>
 where
-    K: Clone + Hash + Ord + Send + Sync + 'static,
+    K: Clone + Hash + Ord + Send + Sync,
     S: BuildHasher + Sync,
 {
     fn par_extend<I>(&mut self, par_iter: I)

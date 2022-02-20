@@ -35,7 +35,7 @@ where
 
 fn t2<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: 'static + Sync + Send + Copy + Hash + Ord + std::fmt::Display,
+    K: Sync + Send + Copy + Hash + Ord + std::fmt::Display,
 {
     let mut sum = 0;
     let guard = map.guard();
@@ -49,7 +49,7 @@ where
 
 fn t3<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: 'static + Sync + Send + Copy + Hash + Ord,
+    K: Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
     let guard = map.guard();
@@ -77,7 +77,7 @@ where
 
 fn t5<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: 'static + Sync + Send + Copy + Hash + Ord,
+    K: Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
     let guard = map.guard();

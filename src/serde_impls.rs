@@ -41,8 +41,8 @@ where
 
 impl<'de, K, V, S> Deserialize<'de> for HashMap<K, V, S>
 where
-    K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
-    V: 'static + Deserialize<'de> + Send + Sync + Ord,
+    K: Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
+    V: Deserialize<'de> + Send + Sync + Ord,
     S: Default + BuildHasher,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -65,8 +65,8 @@ impl<K, V, S> HashMapVisitor<K, V, S> {
 
 impl<'de, K, V, S> Visitor<'de> for HashMapVisitor<K, V, S>
 where
-    K: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
-    V: 'static + Deserialize<'de> + Send + Sync + Ord,
+    K: Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
+    V: Deserialize<'de> + Send + Sync + Ord,
     S: Default + BuildHasher,
 {
     type Value = HashMap<K, V, S>;
@@ -124,7 +124,7 @@ where
 
 impl<'de, T, S> Deserialize<'de> for HashSet<T, S>
 where
-    T: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
+    T: Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
     S: Default + BuildHasher,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -151,7 +151,7 @@ impl<T, S> HashSetVisitor<T, S> {
 
 impl<'de, T, S> Visitor<'de> for HashSetVisitor<T, S>
 where
-    T: 'static + Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
+    T: Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
     S: Default + BuildHasher,
 {
     type Value = HashSet<T, S>;

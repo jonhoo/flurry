@@ -149,8 +149,8 @@ where
 
 impl<K, V, S> HashMapRef<'_, K, V, S>
 where
-    K: 'static + Sync + Send + Clone + Hash + Ord,
-    V: 'static + Sync + Send,
+    K: Sync + Send + Clone + Hash + Ord,
+    V: Sync + Send,
     S: BuildHasher,
 {
     /// Inserts a key-value pair into the map.

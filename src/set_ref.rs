@@ -112,7 +112,7 @@ where
 
 impl<T, S> HashSetRef<'_, T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Ord,
+    T: Sync + Send + Clone + Hash + Ord,
     S: BuildHasher,
 {
     /// Adds a value to the set.
