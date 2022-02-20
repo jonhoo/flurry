@@ -3,7 +3,7 @@ use seize::Linked;
 use crate::iter::*;
 use crate::node::*;
 use crate::raw::*;
-use crate::reclaim::{self, Atomic, Collector, Guard, RetireShared, Shared};
+use crate::reclaim::{Atomic, Collector, Guard, RetireShared, Shared};
 use std::borrow::Borrow;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -498,7 +498,7 @@ impl<K, V, S> HashMap<K, V, S> {
 
         // safety: we are creating this map, so no other thread can access it,
         // while we are initializing it.
-        let guard = unsafe { reclaim::unprotected() };
+        let guard = unsafe { Guard::unprotected() };
 
         let requested_capacity = if size >= MAXIMUM_CAPACITY / 2 {
             MAXIMUM_CAPACITY
@@ -512,7 +512,7 @@ impl<K, V, S> HashMap<K, V, S> {
 
         // sanity check that the map has indeed not been set up already
         assert_eq!(self.size_ctl.load(Ordering::SeqCst), 0);
-        assert!(self.table.load(Ordering::SeqCst, guard).is_null());
+        assert!(self.table.load(Ordering::SeqCst, &guard).is_null());
 
         // the table has not yet been initialized, so we can just create it
         // with as many bins as were requested
@@ -2987,10 +2987,10 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
         // NOTE: we _could_ relax the bounds in all the methods that return `&'g ...` to not also
         // bound `&self` by `'g`, but if we did that, we would need to use a regular `epoch::Guard`
         // here rather than an unprotected one.
-        let guard = unsafe { reclaim::unprotected() };
+        let guard = unsafe { Guard::unprotected() };
 
-        assert!(self.next_table.load(Ordering::SeqCst, guard).is_null());
-        let table = self.table.swap(Shared::null(), Ordering::SeqCst, guard);
+        assert!(self.next_table.load(Ordering::SeqCst, &guard).is_null());
+        let table = self.table.swap(Shared::null(), Ordering::SeqCst, &guard);
         if table.is_null() {
             // table was never allocated!
             return;
@@ -3050,13 +3050,13 @@ where
         if let Some((key, value)) = iter.next() {
             // safety: we own `map`, so it's not concurrently accessed by
             // anyone else at this point.
-            let guard = unsafe { reclaim::unprotected() };
+            let guard = unsafe { Guard::unprotected() };
 
             let (lower, _) = iter.size_hint();
             let map = HashMap::with_capacity_and_hasher(lower.saturating_add(1), S::default());
 
-            map.put(key, value, false, guard);
-            map.put_all(iter, guard);
+            map.put(key, value, false, &guard);
+            map.put_all(iter, &guard);
             map
         } else {
             Self::default()

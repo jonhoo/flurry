@@ -1,5 +1,5 @@
 use crate::raw::Table;
-use crate::reclaim::{self, Atomic, Collector, Guard, RetireShared, Shared};
+use crate::reclaim::{Atomic, Collector, Guard, RetireShared, Shared};
 use core::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use parking_lot::Mutex;
 use seize::Linked;
@@ -967,9 +967,9 @@ impl<K, V> TreeBin<K, V> {
 
         // swap out first pointer so nodes will not get dropped again when
         // `tree_bin` is dropped
-        let guard = reclaim::unprotected();
-        let p = self.first.swap(Shared::null(), Ordering::Relaxed, guard);
-        Self::drop_tree_nodes(p, drop_values, guard);
+        let guard = Guard::unprotected();
+        let p = self.first.swap(Shared::null(), Ordering::Relaxed, &guard);
+        Self::drop_tree_nodes(p, drop_values, &guard);
     }
 
     /// Drops the given list of tree nodes, but only drops their values when specified.

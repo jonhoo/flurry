@@ -186,10 +186,10 @@ impl<K, V> Table<K, V> {
         // safety: we have &mut self _and_ all references we have returned are bound to the
         // lifetime of their borrow of self, so there cannot be any outstanding references to
         // anything in the map.
-        let guard = unsafe { reclaim::unprotected() };
+        let guard = unsafe { Guard::unprotected() };
 
         for bin in Vec::from(std::mem::replace(&mut self.bins, vec![].into_boxed_slice())) {
-            if bin.load(Ordering::SeqCst, guard).is_null() {
+            if bin.load(Ordering::SeqCst, &guard).is_null() {
                 // bin was never used
                 continue;
             }
@@ -198,7 +198,7 @@ impl<K, V> Table<K, V> {
             // note that dropping the shared Moved, if it exists, is the responsibility
             // of `drop`
             // safety: same as above
-            let bin_entry = unsafe { bin.load(Ordering::SeqCst, guard).deref() };
+            let bin_entry = unsafe { bin.load(Ordering::SeqCst, &guard).deref() };
             match **bin_entry {
                 BinEntry::Moved => {}
                 BinEntry::Node(_) => {
@@ -220,7 +220,7 @@ impl<K, V> Table<K, V> {
                         let _ = unsafe { node.value.into_box() };
 
                         // then we move to the next node
-                        if node.next.load(Ordering::SeqCst, guard).is_null() {
+                        if node.next.load(Ordering::SeqCst, &guard).is_null() {
                             break;
                         }
                         p = unsafe { node.next.into_box() };
@@ -250,7 +250,7 @@ impl<K, V> Drop for Table<K, V> {
         // safety: we have &mut self _and_ all references we have returned are bound to the
         // lifetime of their borrow of self, so there cannot be any outstanding references to
         // anything in the map.
-        let guard = unsafe { reclaim::unprotected() };
+        let guard = unsafe { Guard::unprotected() };
 
         // since BinEntry::Nodes are either dropped by drop_bins or transferred to a new table,
         // all bins are empty or contain a Shared pointing to shared the BinEntry::Moved (if
@@ -260,7 +260,7 @@ impl<K, V> Drop for Table<K, V> {
         // when testing, we check the above invariant. in production, we assume it to be true
         if cfg!(debug_assertions) {
             for bin in bins.iter() {
-                let bin = bin.load(Ordering::SeqCst, guard);
+                let bin = bin.load(Ordering::SeqCst, &guard);
                 if bin.is_null() {
                     continue;
                 } else {
@@ -282,7 +282,7 @@ impl<K, V> Drop for Table<K, V> {
         // we need to drop the shared forwarding node (since it is heap allocated).
         // Note that this needs to happen _independently_ of whether or not there was
         // a previous call to drop_bins.
-        let moved = self.moved.swap(Shared::null(), Ordering::SeqCst, guard);
+        let moved = self.moved.swap(Shared::null(), Ordering::SeqCst, &guard);
         assert!(
             !moved.is_null(),
             "self.moved is initialized together with the table"

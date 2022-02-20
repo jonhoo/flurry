@@ -153,16 +153,6 @@ impl RetireShared for Guard<'_> {
     }
 }
 
-pub(crate) unsafe fn unprotected() -> &'static Guard<'static> {
-    struct RacyGuard(Guard<'static>);
-
-    unsafe impl Send for RacyGuard {}
-    unsafe impl Sync for RacyGuard {}
-
-    static UNPROTECTED: RacyGuard = RacyGuard(unsafe { Guard::unprotected() });
-    &UNPROTECTED.0
-}
-
 pub(crate) enum GuardRef<'g> {
     Owned(Guard<'g>),
     Ref(&'g Guard<'g>),
