@@ -1040,7 +1040,8 @@ where
                             BinEntry::Tree(TreeBin::new(
                                 // safety: we have just created `low` and its `next`
                                 // nodes and have never shared them
-                                low, guard,
+                                unsafe { low.into_box() },
+                                guard,
                             )),
                             &self.collector,
                         )
@@ -1067,7 +1068,8 @@ where
                             BinEntry::Tree(TreeBin::new(
                                 // safety: we have just created `high` and its `next`
                                 // nodes and have never shared them
-                                high, guard,
+                                unsafe { high.into_box() },
+                                guard,
                             )),
                             &self.collector,
                         )
@@ -2824,7 +2826,8 @@ where
                             BinEntry::Tree(TreeBin::new(
                                 // safety: we have just created `head` and its `next`
                                 // nodes and have never shared them
-                                head, guard,
+                                unsafe { head.into_box() },
+                                guard,
                             )),
                             &self.collector,
                         ),
