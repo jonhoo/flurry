@@ -3281,13 +3281,13 @@ mod tests {
 /// drop(r);
 /// ```
 ///
-/// # Keys and values must be static
+/// # Keys and values do not have be static
 ///
-/// ```compile_fail
+/// ```no_run
 /// let x = String::from("foo");
 /// let map: flurry::HashMap<_, _> = std::iter::once((&x, &x)).collect();
 /// ```
-/// ```compile_fail
+/// ```no_run
 /// let x = String::from("foo");
 /// let map: flurry::HashMap<_, _> = flurry::HashMap::new();
 /// map.insert(&x, &x, &map.guard());

@@ -10,7 +10,7 @@
 //!
 //! You may have noticed that many of the access methods on this map take a reference to an
 //! [`Guard`]. The exact details of this are beyond the scope of this documentation (for
-//! that, see [`crossbeam::epoch`]), but some of the implications bear repeating here. You obtain a
+//! that, see the [`seize`] crate), but some of the implications bear repeating here. You obtain a
 //! `Guard` using [`HashMap::guard`], and you can use references to the same guard to make multiple API
 //! calls if you wish. Whenever you get a reference to something stored in the map, that reference
 //! is tied to the lifetime of the `Guard` that you provided. This is because each `Guard` prevents
@@ -226,12 +226,12 @@
 //! The Java implementation can rely on Java's runtime garbage collection to safely deallocate
 //! deleted or removed nodes, keys, and values. Since Rust does not have such a runtime, we must
 //! ensure through some other mechanism that we do not drop values before all references to them
-//! have gone away. We do this using [`crossbeam::epoch`], which provides an implementation of an
-//! epoch-based garbage collection scheme. This forces us to make certain API changes such as
-//! requiring `Guard` arguments to many methods or wrapping the return values, but provides much
-//! more efficient operation than if everything had to be atomically reference-counted.
+//! have gone away. We do this using [`seize`], which provides a garbage collection scheme based
+//! on batch reference-counting. This forces us to make certain API changes such as requiring
+//! `Guard` arguments to many methods or wrapping the return values, but provides much more efficient
+//! operation than if every individual value had to be atomically reference-counted.
 //!
-//!  [`crossbeam::epoch`]: https://docs.rs/crossbeam/0.7/crossbeam/epoch/index.html
+//!  [`seize`]: https://docs.rs/seize
 #![deny(
     missing_docs,
     missing_debug_implementations,
