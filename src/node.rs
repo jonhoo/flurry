@@ -153,8 +153,8 @@ impl<K, V> TreeNode<K, V> {
         while !p.is_null() {
             // safety: the containing TreeBin of all TreeNodes was read under our
             // guard, at which point the tree structure was valid. Since our guard
-            // pins the current epoch, the TreeNodes remain valid for at least as
-            // long as we hold onto the guard.
+            // marks the current thread as active, the TreeNodes remain valid for
+            // at least as long as we hold onto the guard.
             // Structurally, TreeNodes always point to TreeNodes, so this is sound.
             let p_deref = unsafe { Self::get_tree_node(p) };
             let p_hash = p_deref.node.hash;
@@ -422,18 +422,17 @@ impl<K, V> TreeBin<K, V> {
         // there are three cases when a bin pointer is invalidated:
         //
         //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-        //     that case, the table (and all its heads) will be dropped in the next epoch
-        //     following that.
+        //     that case, the table (and all its heads) will be retired.
         //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-        //     will then be dropped in the following epoch after that happens.
+        //     will be retired.
         //  3. when elements are inserted into or removed from the map, bin may be changed into
         //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-        //     dropped in the following epoch if that happens.
+        //     retired.
         //
         // in all cases, we held the guard when we got the reference to the bin. if any such
         // swap happened, it must have happened _after_ we read. since we did the read while
-        // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
-        // are holding up by holding on to our guard).
+        // the current thread was marked as active, we must be included in the reference count,
+        // and the drop must happen _after_ we decrement the count (i.e drop our guard).
         let bin_deref = unsafe { bin.deref() }.as_tree_bin().unwrap();
         let mut element = bin_deref.first.load(Ordering::SeqCst, guard);
         while !element.is_null() {
@@ -444,10 +443,10 @@ impl<K, V> TreeBin<K, V> {
                 // pointers of the `TreeNode` linearly, as we cannot trust the
                 // tree's structure.
                 //
-                // safety: we were read under our guard, at which point the tree
-                // structure was valid. Since our guard pins the current epoch,
-                // the TreeNodes remain valid for at least as long as we hold
-                // onto the guard.
+                // safety: we read under our guard, at which point the tree
+                // structure was valid. Since our guard marks the current thread
+                // as active, the TreeNodes remain valid for at least as long as
+                // we hold onto the guard.
                 // Structurally, TreeNodes always point to TreeNodes, so this is sound.
                 let element_deref = unsafe { TreeNode::get_tree_node(element) };
                 let element_key = &element_deref.node.key;
@@ -517,9 +516,9 @@ impl<K, V> TreeBin<K, V> {
         guard: &'g Guard<'_>,
         collector: &Collector,
     ) -> bool {
-        // safety: we were read under our guard, at which point the tree
-        // structure was valid. Since our guard pins the current epoch, the
-        // TreeNodes remain valid for at least as long as we hold onto the
+        // safety: we read under our guard, at which point the tree
+        // structure was valid. Since our guard marks the current thread as active,
+        // the TreeNodes remain valid for at least as long as we hold onto the
         // guard. Additionally, this method assumes `p` to be non-null.
         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         let p_deref = TreeNode::get_tree_node(p);
@@ -755,7 +754,7 @@ impl<K, V> TreeBin<K, V> {
         // safety: we just completely unlinked `p` from both linear and tree
         // traversal, making it and its value unreachable for any future thread.
         // Any existing references to one of them were obtained under a guard
-        // that pins an epoch <= our epoch, and thus have to be released before
+        // included in the reference count, and thus have to be released before
         // `p` is actually dropped.
         #[allow(unused_unsafe)]
         unsafe {
@@ -805,9 +804,9 @@ where
             self.first.store(tree_node, Ordering::Release);
             return Shared::null();
         }
-        // safety: we were read under our guard, at which point the tree
-        // structure was valid. Since our guard pins the current epoch, the
-        // TreeNodes remain valid for at least as long as we hold onto the
+        // safety: we read under our guard, at which point the tree
+        // structure was valid. Since our guard marks the current thread as active,
+        // the TreeNodes remain valid for at least as long as we hold onto the
         // guard.
         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         loop {
@@ -1038,8 +1037,8 @@ impl<K, V> TreeNode<K, V> {
         }
         // safety: the containing TreeBin of all TreeNodes was read under our
         // guard, at which point the tree structure was valid. Since our guard
-        // pins the current epoch, the TreeNodes remain valid for at least as
-        // long as we hold onto the guard.
+        // marks the current thread as active, the TreeNodes remain valid for
+        // at least as long as we hold onto the guard.
         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         let p_deref = treenode!(p);
         let right = p_deref.right.load(Ordering::Relaxed, guard);
@@ -1083,8 +1082,8 @@ impl<K, V> TreeNode<K, V> {
         }
         // safety: the containing TreeBin of all TreeNodes was read under our
         // guard, at which point the tree structure was valid. Since our guard
-        // pins the current epoch, the TreeNodes remain valid for at least as
-        // long as we hold onto the guard.
+        // marks the current thread as active, the TreeNodes remain valid for
+        // at least as long as we hold onto the guard.
         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         let p_deref = treenode!(p);
         let left = p_deref.left.load(Ordering::Relaxed, guard);
@@ -1125,8 +1124,8 @@ impl<K, V> TreeNode<K, V> {
     ) -> Shared<'g, BinEntry<K, V>> {
         // safety: the containing TreeBin of all TreeNodes was read under our
         // guard, at which point the tree structure was valid. Since our guard
-        // pins the current epoch, the TreeNodes remain valid for at least as
-        // long as we hold onto the guard.
+        // marks the current thread as active, the TreeNodes remain valid for
+        // at least as long as we hold onto the guard.
         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         treenode!(x).red.store(true, Ordering::Relaxed);
 
@@ -1228,8 +1227,8 @@ impl<K, V> TreeNode<K, V> {
         let mut x_parent_right: Shared<'_, BinEntry<K, V>>;
         // safety: the containing TreeBin of all TreeNodes was read under our
         // guard, at which point the tree structure was valid. Since our guard
-        // pins the current epoch, the TreeNodes remain valid for at least as
-        // long as we hold onto the guard.
+        // marks the current thread as active, the TreeNodes remain valid for at
+        // least as long as we hold onto the guard.
         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         loop {
             if x.is_null() || x == root {
@@ -1381,8 +1380,8 @@ impl<K, V> TreeNode<K, V> {
     fn check_invariants<'g>(t: Shared<'g, BinEntry<K, V>>, guard: &'g Guard<'_>) {
         // safety: the containing TreeBin of all TreeNodes was read under our
         // guard, at which point the tree structure was valid. Since our guard
-        // pins the current epoch, the TreeNodes remain valid for at least as
-        // long as we hold onto the guard.
+        // marks the current thread as active, the TreeNodes remain valid for
+        // at least as long as we hold onto the guard.
         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
         let t_deref = treenode!(t);
         let t_parent = t_deref.parent.load(Ordering::Relaxed, guard);

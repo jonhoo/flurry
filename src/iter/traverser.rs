@@ -175,8 +175,8 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
                         // contained node
                         e = Some(
                             // safety: `bin` was read under our guard, at which
-                            // point the tree was valid. Since our guard pins
-                            // the current epoch, the TreeNodes remain valid for
+                            // point the tree was valid. Since our guard marks
+                            // the current thread as active, the TreeNodes remain valid for
                             // at least as long as we hold onto the guard.
                             // Structurally, TreeNodes always point to TreeNodes, so this is sound.
                             &unsafe {

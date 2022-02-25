@@ -21,9 +21,9 @@ pub(crate) struct Table<K, V> {
     // table as `map::HashMap.table` and reading a BinEntry::Moved while still holding the
     // guard used for this load:
     //
-    // When loading the current table of the HashMap with a guard g, the current epoch will be
-    // pinned by g. This happens _before_ the resize which put the Moved entry into the this
-    // table finishes, as otherwise a different table would have been loaded (see
+    // When loading the current table of the HashMap with a guard g, the current thread will be
+    // marked as active by g. This happens _before_ the resize which put the Moved entry into the
+    // this table finishes, as otherwise a different table would have been loaded (see
     // `map::HashMap::transfer`).
     //
     // Hence:
@@ -36,10 +36,9 @@ pub(crate) struct Table<K, V> {
     //     next_table is still valid.
     //
     //   - The above is true until a subsequent resize ends, at which point `map::HashMap.table´ is
-    //     set to another new table != next_table and next_table is `epoch::Guard::defer_destroy`ed
+    //     set to another new table != next_table and next_table is `Guard::retire_shared`ed
     //     (again, see `map::HashMap::transfer`). At this point, next_table is not referenced by the
-    //     map anymore. However, the guard g used to load _this_ table is still pinning the epoch at
-    //     the time of the call to `defer_destroy`. Thus, next_table remains valid for at least the
+    //     map anymore, however `Guard::retire_shared` guarantees that next_table remains valid for at least the
     //     lifetime of g and, in particular, cannot be dropped before _this_ table.
     //
     //   - After releasing g, either the current resize is finished and operations on the map
@@ -133,8 +132,8 @@ impl<K, V> Table<K, V> {
                     if next.is_null() {
                         return Shared::null();
                     }
-                    // safety: next will only be dropped, if bin are dropped. bin won't be dropped until
-                    // an epoch passes, which is protected by guard.
+                    // safety: next will only be dropped, if bin are dropped. bin was read under
+                    // a guard, and so cannot be dropped until we drop the guard at the earliest.
                     node = unsafe { next.deref() };
                 }
             }

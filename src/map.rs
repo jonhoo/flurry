@@ -119,9 +119,9 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     ///
     /// map.remove(&42, &map.guard());
     /// // at this point, the default collector is allowed to free `"hello"`
-    /// // since no-one has the global epoch pinned as far as it is aware.
+    /// // since no guard from `map`s collector is active.
     /// // `oops` is tied to the lifetime of a Guard that is not a part of
-    /// // the same epoch group, and so can now be dangling.
+    /// // the same collector, and so can now be dangling.
     /// // but we can still access it!
     /// assert_eq!(oops.unwrap(), "hello");
     /// ```
@@ -129,18 +129,6 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// We avoid that by checking that every external guard that is passed in is associated with
     /// the `Collector` that was specified when the map was created (which may be the global
     /// collector).
-    ///
-    /// Note also that the fact that this can be a global collector is what necessitates the
-    /// `'static` bounds on `K` and `V`. Since deallocation can be deferred arbitrarily, it is not
-    /// okay for us to take a `K` or `V` with a limited lifetime, since we may drop it far after
-    /// that lifetime has passed.
-    ///
-    /// One possibility is to never use the global allocator, and instead _always_ create and use
-    /// our own `Collector`. If we did that, then we could accept non-`'static` keys and values since
-    /// the destruction of the collector would ensure that that all deferred destructors are run.
-    /// It would, sadly, mean that we don't get to share a collector with other things that use
-    /// `crossbeam-epoch` though. For more on this (and a cool optimization), see:
-    /// https://github.com/crossbeam-rs/crossbeam/blob/ebecb82c740a1b3d9d10f235387848f7e3fa9c68/crossbeam-skiplist/src/base.rs#L308-L319
     collector: Collector,
 
     build_hasher: S,
@@ -451,8 +439,8 @@ impl<K, V, S> HashMap<K, V, S> {
     fn init_table<'g>(&'g self, guard: &'g Guard<'_>) -> Shared<'g, Table<K, V>> {
         loop {
             let table = self.table.load(Ordering::SeqCst, guard);
-            // safety: we loaded the table while epoch was pinned. table won't be deallocated until
-            // next epoch at the earliest.
+            // safety: we loaded the table while the thread was marked as active.
+            // table won't be deallocated until the guard is dropped at the earliest.
             if !table.is_null() && !unsafe { table.deref() }.is_empty() {
                 break table;
             }
@@ -472,8 +460,8 @@ impl<K, V, S> HashMap<K, V, S> {
                 // we get to do it!
                 let mut table = self.table.load(Ordering::SeqCst, guard);
 
-                // safety: we loaded the table while epoch was pinned. table won't be deallocated
-                // until next epoch at the earliest.
+                // safety: we loaded the table while the thread was marked as active.
+                // table won't be deallocated until the guard is dropped at the earliest.
                 if table.is_null() || unsafe { table.deref() }.is_empty() {
                     let n = if sc > 0 {
                         sc as usize
@@ -750,15 +738,14 @@ where
                     //    therefore they also cannot get to ::Moved that point to now_garbage, so
                     //    we're fine.
                     //
-                    // this means that no _future_ thread (i.e., in a later epoch where the value
-                    // may be freed) can get a reference to now_garbage.
+                    // this means that no _future_ thread (i.e., that was inactive before
+                    // the swap may be freed) can get a reference to now_garbage.
                     //
                     // next, let's talk about threads with _existing_ references to now_garbage.
                     // such a thread must have gotten that reference before the call to swap.
-                    // because of this, that thread must be pinned to an epoch <= the epoch of our
-                    // guard (since our guard is pinning the epoch). since the garbage is placed in
-                    // our epoch, it won't be freed until the _next_ epoch, at which point, that
-                    // thread must have dropped its guard, and with it, any reference to the value.
+                    // because of this, that thread must have been marked as active, and included
+                    // in the reference count, meaning the garbage will not be freed until
+                    // the thread drops its guard at the earliest.
                     unsafe { guard.retire_shared(now_garbage) };
                     self.size_ctl
                         .store(((n as isize) << 1) - ((n as isize) >> 1), Ordering::SeqCst);
@@ -815,18 +802,17 @@ where
             // there are three cases when a bin pointer is invalidated:
             //
             //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-            //     that case, the table (and all its heads) will be dropped in the next epoch
-            //     following that.
+            //     that case, the table (and all its heads) will be retired.
             //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-            //     will then be dropped in the following epoch after that happens.
+            //     will be retired.
             //  3. when elements are inserted into or removed from the map, bin may be changed into
             //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-            //     dropped in the following epoch if that happens.
+            //     retired.
             //
             // in all cases, we held the guard when we got the reference to the bin. if any such
             // swap happened, it must have happened _after_ we read. since we did the read while
-            // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
-            // are holding up by holding on to our guard).
+            // the current thread was marked as active, we must be included in the reference count,
+            // and the drop must happen _after_ we decrement the count (i.e drop our guard).
             match **unsafe { bin.deref() } {
                 BinEntry::Moved => {
                     // already processed
@@ -854,12 +840,12 @@ where
                     loop {
                         // safety: p is a valid pointer.
                         //
-                        // p is only dropped in the next epoch following when its bin is replaced
-                        // with a move node (see safety comment near table.store_bin below). we
-                        // read the bin, and got to p, so its bin has not yet been swapped with a
-                        // move node. and, we have the epoch pinned, so the next epoch cannot have
-                        // arrived yet. therefore, it will be dropped in a future epoch, and is
-                        // safe to use now.
+                        // p is only retired when its bin is replaced with a move node
+                        // (see safety comment near table.store_bin below). we read the
+                        // bin, and got to p, so its bin has not yet been swapped with a
+                        // move node. and, our thread is marked as active, so any retirement
+                        // must include us in the reference count. therefore, it can only be
+                        // dropped _after_ we drop our guard, and is safe to use now.
                         let node = unsafe { p.deref() }.as_node().unwrap();
                         let next = node.next.load(Ordering::SeqCst, guard);
 
@@ -889,12 +875,12 @@ where
                     while p != last_run {
                         // safety: p is a valid pointer.
                         //
-                        // p is only dropped in the next epoch following when its bin is replaced
-                        // with a move node (see safety comment near table.store_bin below). we
-                        // read the bin, and got to p, so its bin has not yet been swapped with a
-                        // move node. and, we have the epoch pinned, so the next epoch cannot have
-                        // arrived yet. therefore, it will be dropped in a future epoch, and is
-                        // safe to use now.
+                        // p is only retired when its bin is replaced with a move node
+                        // (see safety comment near table.store_bin below). we read the
+                        // bin, and got to p, so its bin has not yet been swapped with a
+                        // move node. and, our thread is marked as active, so any retirement
+                        // must include us in the reference count. therefore, it can only be
+                        // dropped _after_ we drop our guard, and is safe to use now.
                         let node = unsafe { p.deref() }.as_node().unwrap();
 
                         let link = if node.hash & n as u64 == 0 {
@@ -933,10 +919,8 @@ where
                         // BinEntry::Moved, p is no longer accessible.
                         //
                         // any existing reference to p must have been taken before table.store_bin.
-                        // at that time we had the epoch pinned, so any threads that have such a
-                        // reference must be before or at our epoch. since the p isn't destroyed
-                        // until the next epoch, those old references are fine since they are tied
-                        // to those old threads' pins of the old epoch.
+                        // any threads that have such a reference must have been active before we
+                        // retired p, so they are protected by the reference count.
                         let next = unsafe { p.deref() }
                             .as_node()
                             .unwrap()
@@ -968,10 +952,10 @@ where
                     let mut high_count = 0;
                     let mut e = tree_bin.first.load(Ordering::Relaxed, guard);
                     while !e.is_null() {
-                        // safety: the TreeBin was read under our guard, at
-                        // which point the tree structure was valid. Since our
-                        // guard pins the current epoch, the TreeNodes remain
-                        // valid for at least as long as we hold onto the guard.
+                        // safety: we read under our guard, at which point the tree
+                        // structure was valid. Since our guard marks the current thread
+                        // as active, the TreeNodes remain valid for at least as long as
+                        // we hold onto the guard.
                         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
                         let tree_node = unsafe { TreeNode::get_tree_node(e) };
                         let hash = tree_node.node.hash;
@@ -1119,10 +1103,11 @@ where
             return table;
         }
 
-        // safety: table is only dropped on the next epoch change after it is swapped to null.
-        // we read it as not null, so it must not be dropped until a subsequent epoch. since we
-        // held `guard` at the time, we know that the current epoch continues to persist, and that
-        // our reference is therefore valid.
+        // safety: table is only retired after it is swapped to null.
+        // we read it as not null while holding `guard`, so any thread
+        // retiring the table must have seen us as active and included us
+        // in the reference count. therefore our reference is valid until
+        // we decrement the reference count (i.e drop our guard).
         let next_table = unsafe { table.deref() }.next_table(guard);
         if next_table.is_null() {
             return table;
@@ -1187,10 +1172,11 @@ where
                 break;
             }
 
-            // safety: table is only dropped on the next epoch change after it is swapped to null.
-            // we read it as not null, so it must not be dropped until a subsequent epoch. since we
-            // hold a Guard, we know that the current epoch will persist, and that our reference
-            // will therefore remain valid.
+            // safety: table is only retired after it is swapped to null.
+            // we read it as not null while holding `guard`, so any thread
+            // retiring the table must have seen us as active and included us
+            // in the reference count. therefore our reference is valid until
+            // we decrement the reference count (i.e drop our guard).
             let n = unsafe { table.deref() }.len();
             if n >= MAXIMUM_CAPACITY {
                 // can't resize any more anyway
@@ -1288,8 +1274,9 @@ where
             return None;
         }
 
-        // safety: we loaded the table while epoch was pinned. table won't be deallocated until
-        // next epoch at the earliest.
+        // safety: we loaded the table while holding a guard.
+        // table won't be deallocated until we drop our guard
+        // at the earliest.
         let table = unsafe { table.deref() };
         if table.is_empty() {
             return None;
@@ -1307,25 +1294,25 @@ where
         // there are three cases when a bin pointer is invalidated:
         //
         //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-        //     that case, the table (and all its heads) will be dropped in the next epoch
-        //     following that.
+        //     that case, the table (and all its heads) will be retired.
         //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-        //     will then be dropped in the following epoch after that happens.
+        //     will be retired.
         //  3. when elements are inserted into or removed from the map, bin may be changed into
         //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-        //     dropped in the following epoch if that happens.
+        //     retired.
         //
         // in all cases, we held the guard when we got the reference to the bin. if any such
         // swap happened, it must have happened _after_ we read. since we did the read while
-        // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
-        // are holding up by holding on to our guard).
+        // the current thread was marked as active, we must be included in the reference count,
+        // and the drop must happen _after_ we decrement the count (i.e drop our guard).
         let node = table.find(unsafe { bin.deref() }, h, key, guard);
         if node.is_null() {
             return None;
         }
-        // safety: we read the bin while pinning the epoch. a bin will never be dropped until the
-        // next epoch after it is removed. since it wasn't removed, and the epoch was pinned, that
-        // cannot be until after we drop our guard.
+
+        // safety: we loaded the bin while holding a guard, so any retirements
+        // must have seen us as active. the bin and its nodes cannot be dropped
+        // until at least after we drop our guard.
         let node = unsafe { node.deref() };
         Some(match **node {
             BinEntry::Node(ref n) => n,
@@ -1524,7 +1511,7 @@ where
 
                             // free the node's value
                             // safety: any thread that sees this p's value must have read the bin before we stored null
-                            // into it above. it must also have pinned the epoch before that time. therefore, the
+                            // into it above. it must also have been marked as active. therefore, the
                             // defer_destroy below won't be executed until that thread's guard is dropped, at which
                             // point it holds no outstanding references to the value anyway.
                             unsafe { guard.retire_shared(value) };
@@ -1565,11 +1552,10 @@ where
                     while !p.is_null() {
                         delta -= 1;
                         p = {
-                            // safety: the TreeBin was read under our guard, at
-                            // which point the tree was valid. Since our guard
-                            // pins the current epoch, the TreeNodes remain
-                            // valid for at least as long as we hold onto the
-                            // guard.
+                            // safety: we read under our guard, at which point the tree
+                            // structure was valid. Since our guard marks the current thread
+                            // as active, the TreeNodes remain valid for at least as long as
+                            // we hold onto the guard.
                             // Structurally, TreeNodes always point to TreeNodes, so this is sound.
                             let tree_node = unsafe { TreeNode::get_tree_node(p) };
                             // NOTE: we do not drop the TreeNodes or their
@@ -1711,13 +1697,11 @@ where
             // we are in one of three cases:
             //
             //  1. if table is the one we read before the loop, then we read it while holding the
-            //     guard, so it won't be dropped until after we drop that guard b/c the drop logic
-            //     only queues a drop for the next epoch after removing the table.
+            //     guard, so it won't be dropped until after we drop that guard b/c this thread must
+            //     have been included in the reference count of a retirement.
             //
-            //  2. if table is read by init_table, then either we did a load, and the argument is
-            //     as for point 1. or, we allocated a table, in which case the earliest it can be
-            //     deallocated is in the next epoch. we are holding up the epoch by holding the
-            //     guard, so this deref is safe.
+            //  2. if table is read by init_table, we did so while holding a guard, so the
+            //     argument is as for point 1.
             //
             //  3. if table is set by a Moved node (below) through help_transfer, it will _either_
             //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
@@ -1736,10 +1720,9 @@ where
                         self.add_count(1, Some(0), guard);
                         // safety: we have not moved the node's value since we placed it into
                         // its `Atomic` in the very beginning of the method, so the ref is still
-                        // valid. since the value is not currently marked as garbage, we know it
-                        // will not collected until at least one epoch passes, and since `value`
-                        // was produced under a guard the pins the current epoch, the returned
-                        // reference will remain valid for the guard's lifetime.
+                        // valid. since the value is not currently marked as garbage, and since
+                        // `value` was loaded under a guard, the returned reference will remain valid
+                        // for the guard's lifetime.
                         return PutResult::Inserted {
                             new: unsafe { value.deref() },
                         };
@@ -1758,25 +1741,22 @@ where
                 }
             }
 
-            // slow path -- bin is non-empty
-
             // safety: bin is a valid pointer.
             //
             // there are three cases when a bin pointer is invalidated:
             //
             //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-            //     that case, the table (and all its heads) will be dropped in the next epoch
-            //     following that.
+            //     that case, the table (and all its heads) will be retired.
             //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-            //     will then be dropped in the following epoch after that happens.
+            //     will be retired.
             //  3. when elements are inserted into or removed from the map, bin may be changed into
             //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-            //     dropped in the following epoch if that happens.
+            //     retired.
             //
             // in all cases, we held the guard when we got the reference to the bin. if any such
             // swap happened, it must have happened _after_ we read. since we did the read while
-            // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
-            // are holding up by holding on to our guard).
+            // the current thread was marked as active, we must be included in the reference count,
+            // and the drop must happen _after_ we decrement the count (i.e drop our guard).
             match **unsafe { bin.deref() } {
                 BinEntry::Moved => {
                     table = self.help_transfer(table, guard);
@@ -1788,8 +1768,7 @@ where
                     // fast path if replacement is disallowed and first bin matches
                     let v = head.value.load(Ordering::SeqCst, guard);
                     // safety (for v): since the value is present now, and we've held a guard from
-                    // the beginning of the search, the value cannot be dropped until the next
-                    // epoch, which won't arrive until after we drop our guard.
+                    // the beginning of the search, the value cannot be dropped after we drop our guard.
                     // safety (for value): since we never inserted the value in the tree, `value`
                     // is the last remaining pointer to the initial value.
                     return PutResult::Exists {
@@ -1817,18 +1796,17 @@ where
                     let mut p = bin;
 
                     old_val = loop {
-                        // safety: we read the bin while pinning the epoch. a bin will never be
-                        // dropped until the next epoch after it is removed. since it wasn't
-                        // removed, and the epoch was pinned, that cannot be until after we drop
-                        // our guard.
+                        // safety: we loaded the bin while holding a guard, so any retirements
+                        // must have seen us as active. the bin and its nodes cannot be dropped
+                        // until at least after we drop our guard.
                         let n = unsafe { p.deref() }.as_node().unwrap();
                         if n.hash == hash && n.key == key {
                             // the key already exists in the map!
                             let current_value = n.value.load(Ordering::SeqCst, guard);
 
                             // safety: since the value is present now, and we've held a guard from
-                            // the beginning of the search, the value cannot be dropped until the
-                            // next epoch, which won't arrive until after we drop our guard.
+                            // the beginning of the search, the value cannot be dropped until after
+                            // we drop our guard.
                             let current_value = unsafe { current_value.deref() };
 
                             if no_replacement {
@@ -1852,12 +1830,12 @@ where
                                 // here are the possible cases:
                                 //
                                 //  - another thread already has a reference to now_garbage.
-                                //    they must have read it before the call to swap.
-                                //    because of this, that thread must be pinned to an epoch <=
-                                //    the epoch of our guard. since the garbage is placed in our
-                                //    epoch, it won't be freed until the _next_ epoch, at which
-                                //    point, that thread must have dropped its guard, and with it,
-                                //    any reference to the value.
+                                //    they must have read it before the call to swap while
+                                //    marked as active (holding a guard), and are included in
+                                //    the reference count. therefore t won't be freed until _after_
+                                //    it decrements the reference count, which can only happen
+                                //    when that thread drops its guard, and with it, any reference
+                                //    to the value.
                                 //  - another thread is about to get a reference to this value.
                                 //    they execute _after_ the swap, and therefore do _not_ get a
                                 //    reference to now_garbage (they get value instead). there are
@@ -1912,17 +1890,17 @@ where
                         // and we are done.
                         break;
                     }
-                    // safety: the TreeBin was read under our guard, at
-                    // which point the tree structure was valid. Since our
-                    // guard pins the current epoch, the TreeNodes remain
-                    // valid for at least as long as we hold onto the guard.
+                    // safety: the TreeBin was read under our guard, at which point the tree
+                    // structure was valid. Since our guard marks the current thread as active,
+                    // the TreeNodes remain valid for at least as long as we hold onto the
+                    // guard.
                     // Structurally, TreeNodes always point to TreeNodes, so this is sound.
                     let tree_node = unsafe { TreeNode::get_tree_node(p) };
                     old_val = {
                         let current_value = tree_node.node.value.load(Ordering::SeqCst, guard);
                         // safety: since the value is present now, and we've held a guard from
-                        // the beginning of the search, the value cannot be dropped until the
-                        // next epoch, which won't arrive until after we drop our guard.
+                        // the beginning of the search, the value cannot be dropped until after
+                        // we drop our guard.
                         let current_value = unsafe { current_value.deref() };
                         if no_replacement {
                             // the key is not absent, so don't update because of
@@ -1945,15 +1923,15 @@ where
                             // here are the possible cases:
                             //
                             //  - another thread already has a reference to now_garbage.
-                            //    they must have read it before the call to swap.
-                            //    because of this, that thread must be pinned to an epoch <=
-                            //    the epoch of our guard. since the garbage is placed in our
-                            //    epoch, it won't be freed until the _next_ epoch, at which
-                            //    point, that thread must have dropped its guard, and with it,
-                            //    any reference to the value.
+                            //    they must have read it before the call to swap while
+                            //    marked as active (holding a guard), and are included in
+                            //    the reference count. therefore t won't be freed until _after_
+                            //    it decrements the reference count, which can only happen
+                            //    when that thread drops its guard, and with it, any reference
+                            //    to the value.
                             //  - another thread is about to get a reference to this value.
                             //    they execute _after_ the swap, and therefore do _not_ get a
-                            //    reference to now_garbage (they get `value` instead). there are
+                            //    reference to now_garbage (they get value instead). there are
                             //    no other ways to get to a value except through its Node's
                             //    `value` field (which is what we swapped), so freeing
                             //    now_garbage is fine.
@@ -1978,12 +1956,11 @@ where
             if let Some(old_val) = old_val {
                 return PutResult::Replaced {
                     old: old_val,
-                    // safety: we have not moved the node's value since we placed it into its
-                    // `Atomic` in the very beginning of the method, so the ref is still valid.
-                    // since the value is not currently marked as garbage, we know it will not
-                    // collected until at least one epoch passes, and since `value` was produced
-                    // under a guard the pins the current epoch, the returned reference will remain
-                    // valid for the guard's lifetime.
+                    // safety: we have not moved the node's value since we placed it into
+                    // its `Atomic` in the very beginning of the method, so the ref is still
+                    // valid. since the value is not currently marked as garbage, and since
+                    // `value` was loaded under a guard, the returned reference will remain valid
+                    // for the guard's lifetime.
                     new: unsafe { value.deref() },
                 };
             }
@@ -1993,12 +1970,11 @@ where
         debug_assert!(old_val.is_none());
         self.add_count(1, Some(bin_count), guard);
         PutResult::Inserted {
-            // safety: we have not moved the node's value since we placed it into its
-            // `Atomic` in the very beginning of the method, so the ref is still valid.
-            // since the value is not currently marked as garbage, we know it will not
-            // collected until at least one epoch passes, and since `value` was produced
-            // under a guard the pins the current epoch, the returned reference will remain
-            // valid for the guard's lifetime.
+            // safety: we have not moved the node's value since we placed it into
+            // its `Atomic` in the very beginning of the method, so the ref is still
+            // valid. since the value is not currently marked as garbage, and since
+            // `value` was loaded under a guard, the returned reference will remain valid
+            // for the guard's lifetime.
             new: unsafe { value.deref() },
         }
     }
@@ -2060,13 +2036,11 @@ where
             // we are in one of three cases:
             //
             //  1. if table is the one we read before the loop, then we read it while holding the
-            //     guard, so it won't be dropped until after we drop that guard b/c the drop logic
-            //     only queues a drop for the next epoch after removing the table.
+            //     guard, so it won't be dropped until after we drop that guard b/c this thread must
+            //     have been included in the reference count of a retirement.
             //
-            //  2. if table is read by init_table, then either we did a load, and the argument is
-            //     as for point 1. or, we allocated a table, in which case the earliest it can be
-            //     deallocated is in the next epoch. we are holding up the epoch by holding the
-            //     guard, so this deref is safe.
+            //  2. if table is read by init_table, we did so while holding a guard, so the
+            //     argument is as for point 1.
             //
             //  3. if table is set by a Moved node (below) through help_transfer, it will _either_
             //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
@@ -2087,18 +2061,17 @@ where
             // there are three cases when a bin pointer is invalidated:
             //
             //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-            //     that case, the table (and all its heads) will be dropped in the next epoch
-            //     following that.
+            //     that case, the table (and all its heads) will be retired.
             //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-            //     will then be dropped in the following epoch after that happens.
+            //     will be retired.
             //  3. when elements are inserted into or removed from the map, bin may be changed into
             //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-            //     dropped in the following epoch if that happens.
+            //     retired.
             //
             // in all cases, we held the guard when we got the reference to the bin. if any such
             // swap happened, it must have happened _after_ we read. since we did the read while
-            // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
-            // are holding up by holding on to our guard).
+            // the current thread was marked as active, we must be included in the reference count,
+            // and the drop must happen _after_ we decrement the count (i.e drop our guard).
             match **unsafe { bin.deref() } {
                 BinEntry::Moved => {
                     table = self.help_transfer(table, guard);
@@ -2124,10 +2097,9 @@ where
                     let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
 
                     new_val = loop {
-                        // safety: we read the bin while pinning the epoch. a bin will never be
-                        // dropped until the next epoch after it is removed. since it wasn't
-                        // removed, and the epoch was pinned, that cannot be until after we drop
-                        // our guard.
+                        // safety: we loaded the bin while holding a guard, so any retirements
+                        // must have seen us as active. the bin and its nodes cannot be dropped
+                        // until at least after we drop our guard.
                         let n = unsafe { p.deref() }.as_node().unwrap();
                         // TODO: This Ordering can probably be relaxed due to the Mutex
                         let next = n.next.load(Ordering::SeqCst, guard);
@@ -2136,8 +2108,8 @@ where
                             let current_value = n.value.load(Ordering::SeqCst, guard);
 
                             // safety: since the value is present now, and we've held a guard from
-                            // the beginning of the search, the value cannot be dropped until the
-                            // next epoch, which won't arrive until after we drop our guard.
+                            // the beginning of the search, the value cannot be dropped until after
+                            // we drop our guard.
                             let new_value =
                                 remapping_function(&n.key, unsafe { current_value.deref() });
 
@@ -2153,12 +2125,12 @@ where
                                 // here are the possible cases:
                                 //
                                 //  - another thread already has a reference to now_garbage.
-                                //    they must have read it before the call to swap.
-                                //    because of this, that thread must be pinned to an epoch <=
-                                //    the epoch of our guard. since the garbage is placed in our
-                                //    epoch, it won't be freed until the _next_ epoch, at which
-                                //    point, that thread must have dropped its guard, and with it,
-                                //    any reference to the value.
+                                //    they must have read it before the call to swap while
+                                //    marked as active (holding a guard), and are included in
+                                //    the reference count. therefore t won't be freed until _after_
+                                //    it decrements the reference count, which can only happen
+                                //    when that thread drops its guard, and with it, any reference
+                                //    to the value.
                                 //  - another thread is about to get a reference to this value.
                                 //    they execute _after_ the swap, and therefore do _not_ get a
                                 //    reference to now_garbage (they get value instead). there are
@@ -2168,8 +2140,8 @@ where
                                 unsafe { guard.retire_shared(now_garbage) };
 
                                 // safety: since the value is present now, and we've held a guard from
-                                // the beginning of the search, the value cannot be dropped until the
-                                // next epoch, which won't arrive until after we drop our guard.
+                                // the beginning of the search, the value cannot be dropped until after
+                                // we drop our guard.
                                 break Some(unsafe { value.deref() });
                             } else {
                                 removed_node = true;
@@ -2194,18 +2166,19 @@ where
                                 //
                                 // here are the possible cases:
                                 //
-                                //  - another thread already has a reference to the old value.
-                                //    they must have read it before the call to store_bin.
-                                //    because of this, that thread must be pinned to an epoch <=
-                                //    the epoch of our guard. since the garbage is placed in our
-                                //    epoch, it won't be freed until the _next_ epoch, at which
-                                //    point, that thread must have dropped its guard, and with it,
-                                //    any reference to the value.
+                                //  - another thread already has a reference to now_garbage.
+                                //    they must have read it before the call to swap while
+                                //    marked as active (holding a guard), and are included in
+                                //    the reference count. therefore t won't be freed until _after_
+                                //    it decrements the reference count, which can only happen
+                                //    when that thread drops its guard, and with it, any reference
+                                //    to the value.
                                 //  - another thread is about to get a reference to this value.
-                                //    they execute _after_ the store_bin, and therefore do _not_ get a
-                                //    reference to the old value. there are no other ways to get to a
-                                //    value except through its Node's `value` field (which is now gone
-                                //    together with the node), so freeing the old value is fine.
+                                //    they execute _after_ the swap, and therefore do _not_ get a
+                                //    reference to now_garbage (they get value instead). there are
+                                //    no other ways to get to a value except through its Node's
+                                //    `value` field (which is what we swapped), so freeing
+                                //    now_garbage is fine.
                                 unsafe { guard.retire_shared(p) };
                                 unsafe { guard.retire_shared(current_value) };
                                 break None;
@@ -2253,19 +2226,17 @@ where
                             None
                         } else {
                             // a node for the given key exists, so we try to update it
-                            // safety: the TreeBin was read under our guard,
-                            // at which point the tree structure was valid.
-                            // Since our guard pins the current epoch, the
-                            // TreeNodes and `p` in particular remain valid
-                            // for at least as long as we hold onto the
+                            // safety: the TreeBin was read under our guard, at which point the tree
+                            // structure was valid. Since our guard marks the current thread as active,
+                            // the TreeNodes remain valid for at least as long as we hold onto the
                             // guard.
                             // Structurally, TreeNodes always point to TreeNodes, so this is sound.
                             let n = &unsafe { TreeNode::get_tree_node(p) }.node;
                             let current_value = n.value.load(Ordering::SeqCst, guard);
 
                             // safety: since the value is present now, and we've held a guard from
-                            // the beginning of the search, the value cannot be dropped until the
-                            // next epoch, which won't arrive until after we drop our guard.
+                            // the beginning of the search, the value cannot be dropped until after
+                            // we drop our guard.
                             let new_value =
                                 remapping_function(&n.key, unsafe { current_value.deref() });
 
@@ -2281,12 +2252,12 @@ where
                                 // here are the possible cases:
                                 //
                                 //  - another thread already has a reference to now_garbage.
-                                //    they must have read it before the call to swap.
-                                //    because of this, that thread must be pinned to an epoch <=
-                                //    the epoch of our guard. since the garbage is placed in our
-                                //    epoch, it won't be freed until the _next_ epoch, at which
-                                //    point, that thread must have dropped its guard, and with it,
-                                //    any reference to the value.
+                                //    they must have read it before the call to swap while
+                                //    marked as active (holding a guard), and are included in
+                                //    the reference count. therefore t won't be freed until _after_
+                                //    it decrements the reference count, which can only happen
+                                //    when that thread drops its guard, and with it, any reference
+                                //    to the value.
                                 //  - another thread is about to get a reference to this value.
                                 //    they execute _after_ the swap, and therefore do _not_ get a
                                 //    reference to now_garbage (they get value instead). there are
@@ -2295,8 +2266,8 @@ where
                                 //    now_garbage is fine.
                                 unsafe { guard.retire_shared(now_garbage) };
                                 // safety: since the value is present now, and we've held a guard from
-                                // the beginning of the search, the value cannot be dropped until the
-                                // next epoch, which won't arrive until after we drop our guard.
+                                // the beginning of the search, the value cannot be dropped until after
+                                // we drop our guard.
                                 Some(unsafe { value.deref() })
                             } else {
                                 removed_node = true;
@@ -2319,9 +2290,9 @@ where
                                     // since they are re-used in the linear bin.
                                     // safety: in the same way as for `now_garbage` above, any existing
                                     // references to `bin` must have been obtained before storing the
-                                    // linear bin. These references were obtained while pinning an epoch
-                                    // <= our epoch and have to be dropped before the epoch can advance
-                                    // past the destruction of the old bin. After the store, threads will
+                                    // linear bin. These references were obtained while holding a
+                                    // guard, and are protected until they drop it and decrement
+                                    // the reference count. After the store, threads will
                                     // always see the linear bin, so the cannot obtain new references either.
                                     //
                                     // The same holds for `p` and its value, which does not get dropped together
@@ -2462,12 +2433,13 @@ where
             // we are in one of two cases:
             //
             //  1. if table is the one we read before the loop, then we read it while holding the
-            //     guard, so it won't be dropped until after we drop that guard b/c the drop logic
-            //     only queues a drop for the next epoch after removing the table.
+            //     guard, so it won't be dropped until after we drop that guard b/c this thread must
+            //     have been included in the reference count of a retirement.
             //
-            //  2. if table is set by a Moved node (below) through help_transfer, it will use the
-            //     `next_table` raw pointer from inside the Moved. to see that if a Moved(t) is
-            //     _read_, then t must still be valid, see the safety comment on Table.next_table.
+            //  2. if table is set by a Moved node (below) through help_transfer, it will _either_
+            //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
+            //     pointer from inside the Moved. to see that if a Moved(t) is _read_, then t must
+            //     still be valid, see the safety comment on Table.next_table.
             let t = unsafe { table.deref() };
             let n = t.len() as u64;
             if n == 0 {
@@ -2484,18 +2456,17 @@ where
             // there are three cases when a bin pointer is invalidated:
             //
             //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-            //     that case, the table (and all its heads) will be dropped in the next epoch
-            //     following that.
+            //     that case, the table (and all its heads) will be retired.
             //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-            //     will then be dropped in the following epoch after that happens.
+            //     will be retired.
             //  3. when elements are inserted into or removed from the map, bin may be changed into
             //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-            //     dropped in the following epoch if that happens.
+            //     retired.
             //
             // in all cases, we held the guard when we got the reference to the bin. if any such
             // swap happened, it must have happened _after_ we read. since we did the read while
-            // pinning the epoch, the drop must happen in the _next_ epoch (i.e., the one that we
-            // are holding up by holding on to our guard).
+            // the current thread was marked as active, we must be included in the reference count,
+            // and the drop must happen _after_ we decrement the count (i.e drop our guard).
             match **unsafe { bin.deref() } {
                 BinEntry::Moved => {
                     table = self.help_transfer(table, guard);
@@ -2515,11 +2486,11 @@ where
                         // safety: either e is bin, in which case it is valid due to the above,
                         // or e was obtained from a next pointer. Any next pointer obtained from
                         // bin is valid at the time we look up bin in the table, at which point
-                        // the epoch is pinned by our guard. Since we found the next pointer
-                        // in a valid map and it is not null (as checked above and below), the
-                        // node it points to was present (i.e. not removed) from the map in the
-                        // current epoch. Thus, because the epoch cannot advance until we release
-                        // our guard, e is also valid if it was obtained from a next pointer.
+                        // we held a guard. Since we found the next pointer in a valid map and
+                        // it is not null (as checked above and below), the node it points to was
+                        // present (i.e. not removed) from the map while we were marked as active.
+                        // Thus, e cannot be dropped until we release our guard, e is also valid
+                        // if it was obtained from a next pointer.
                         let n = unsafe { e.deref() }.as_node().unwrap();
                         let next = n.next.load(Ordering::SeqCst, guard);
                         if n.hash == hash && n.key.borrow() == key {
@@ -2596,11 +2567,9 @@ where
                         // them matches the given key
                         break;
                     }
-                    // safety: the TreeBin was read under our guard,
-                    // at which point the tree structure was valid.
-                    // Since our guard pins the current epoch, the
-                    // TreeNodes and `p` in particular remain valid
-                    // for at least as long as we hold onto the
+                    // safety: the TreeBin was read our guard, at which point the tree
+                    // structure was valid. Since our guard marks the current thread as active,
+                    // the TreeNodes remain valid for at least as long as we hold onto the
                     // guard.
                     // Structurally, TreeNodes always point to TreeNodes, so this is sound.
                     let n = &unsafe { TreeNode::get_tree_node(p) }.node;
@@ -2658,18 +2627,19 @@ where
                 //
                 // here are the possible cases:
                 //
-                //  - another thread already has a reference to the old value.
-                //    they must have read it before the call to store_bin.
-                //    because of this, that thread must be pinned to an epoch <=
-                //    the epoch of our guard. since the garbage is placed in our
-                //    epoch, it won't be freed until the _next_ epoch, at which
-                //    point, that thread must have dropped its guard, and with it,
-                //    any reference to the value.
+                //  - another thread already has a reference to now_garbage.
+                //    they must have read it before the call to swap while
+                //    marked as active (holding a guard), and are included in
+                //    the reference count. therefore t won't be freed until _after_
+                //    it decrements the reference count, which can only happen
+                //    when that thread drops its guard, and with it, any reference
+                //    to the value.
                 //  - another thread is about to get a reference to this value.
-                //    they execute _after_ the store_bin, and therefore do _not_ get a
-                //    reference to the old value. there are no other ways to get to a
-                //    value except through its Node's `value` field (which is now gone
-                //    together with the node), so freeing the old value is fine.
+                //    they execute _after_ the swap, and therefore do _not_ get a
+                //    reference to now_garbage (they get value instead). there are
+                //    no other ways to get to a value except through its Node's
+                //    `value` field (which is what we swapped), so freeing
+                //    now_garbage is fine.
                 unsafe { guard.retire_shared(val) };
 
                 // safety: the lifetime of the reference is bound to the guard
@@ -2769,8 +2739,8 @@ where
             if bin.is_null() {
                 return;
             }
-            // safety: we loaded `bin` while the epoch was pinned by our
-            // guard. if the bin was replaced since then, the old bin still
+            // safety: we loaded `bin` while holding a guard.
+            // if the bin was replaced since then, the old bin still
             // won't be dropped until after we release our guard.
             match **unsafe { bin.deref() } {
                 BinEntry::Node(ref node) => {
@@ -2783,14 +2753,14 @@ where
                     let mut head = Shared::null();
                     let mut tail = Shared::null();
                     while !e.is_null() {
-                        // safety: either `e` is `bin`, in which case it is valid due to the above,
-                        // or `e` was obtained from a next pointer. Any next pointer obtained from
-                        // bin is valid at the time we look up bin in the table, at which point the
-                        // epoch is pinned by our guard. Since we found the next pointer in a valid
-                        // map and it is not null (as checked above), the node it points to was
-                        // present (i.e. not removed) from the map in the current epoch. Thus,
-                        // because the epoch cannot advance until we release our guard, `e` is also
-                        // valid if it was obtained from a next pointer.
+                        // safety: either e is bin, in which case it is valid due to the above,
+                        // or e was obtained from a next pointer. Any next pointer obtained from
+                        // bin is valid at the time we look up bin in the table, at which point
+                        // we held a guard. Since we found the next pointer in a valid map and
+                        // it is not null (as checked above and below), the node it points to was
+                        // present (i.e. not removed) from the map while we were marked as active.
+                        // Thus, e cannot be dropped until we release our guard, e is also valid
+                        // if it was obtained from a next pointer.
                         let e_deref = unsafe { e.deref() }.as_node().unwrap();
                         // NOTE: cloning the value uses a load with Ordering::Relaxed, but
                         // write access is synchronized through the bin lock
@@ -2838,10 +2808,10 @@ where
                     while !e.is_null() {
                         // safety: we just replaced the bin containing this BinEntry, making it
                         // unreachable for other threads since subsequent loads will see the new
-                        // bin. Threads with existing references to `e` must have obtained them in
-                        // this or an earlier epoch, and this epoch is pinned by our guard. Thus,
-                        // `e` will only be dropped after these threads release their guard, at
-                        // which point they can no longer hold their reference to `e`.
+                        // bin. Threads with existing references to `e` must have obtained them
+                        // while holding guards. Thus, `e` will only be dropped after these threads
+                        // release their guard, at which point they can no longer hold their reference
+                        // to `e`. Any loads after this point will see the new bin.
                         // The BinEntry pointers are valid to deref for the same reason as above.
                         //
                         // NOTE: we do not drop the value, since it gets moved to the new TreeNode
@@ -2988,7 +2958,7 @@ impl<K, V, S> Drop for HashMap<K, V, S> {
         // anything in the map.
         //
         // NOTE: we _could_ relax the bounds in all the methods that return `&'g ...` to not also
-        // bound `&self` by `'g`, but if we did that, we would need to use a regular `epoch::Guard`
+        // bound `&self` by `'g`, but if we did that, we would need to use a regular `Guard`
         // here rather than an unprotected one.
         let guard = unsafe { Guard::unprotected() };
 
@@ -3588,9 +3558,9 @@ mod tree_bins {
 
         map.remove(&42, &map.guard());
         // at this point, the default collector is allowed to free `"hello"`
-        // since no-one has the global epoch pinned as far as it is aware.
+        // since no guard from `map`s collector is active.
         // `oops` is tied to the lifetime of a Guard that is not a part of
-        // the same epoch group, and so can now be dangling.
+        // the same collector, and so can now be dangling.
         // but we can still access it!
         assert_eq!(oops.unwrap(), "hello");
     }
