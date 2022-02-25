@@ -3253,11 +3253,11 @@ mod tests {
 ///
 /// # Keys and values do not have be static
 ///
-/// ```no_run
+/// ```
 /// let x = String::from("foo");
 /// let map: flurry::HashMap<_, _> = std::iter::once((&x, &x)).collect();
 /// ```
-/// ```no_run
+/// ```
 /// let x = String::from("foo");
 /// let map: flurry::HashMap<_, _> = flurry::HashMap::new();
 /// map.insert(&x, &x, &map.guard());
@@ -3265,7 +3265,7 @@ mod tests {
 ///
 /// # get() key can be non-static
 ///
-/// ```no_run
+/// ```
 /// let x = String::from("foo");
 /// let map: flurry::HashMap<_, _> = flurry::HashMap::new();
 /// map.insert(x.clone(), x.clone(), &map.guard());
