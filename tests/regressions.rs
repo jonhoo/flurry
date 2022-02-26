@@ -12,7 +12,7 @@ fn issue90() {
     let map = HashMap::new();
     let g = map.guard();
     for _ in 0..ITERATIONS {
-        let el = rng.gen_range(0, 1000);
+        let el = rng.gen_range(0..1000);
         let _ = map.try_insert(el, el, &g);
     }
 }
