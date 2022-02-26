@@ -2492,7 +2492,7 @@ where
                         // we held a guard. Since we found the next pointer in a valid map and
                         // it is not null (as checked above and below), the node it points to was
                         // present (i.e. not removed) from the map while we were marked as active.
-                        // Thus, e cannot be dropped until we release our guard, e is also valid
+                        // Thus, e cannot be dropped until we release our guard. e is also valid
                         // if it was obtained from a next pointer.
                         let n = unsafe { e.deref() }.as_node().unwrap();
                         let next = n.next.load(Ordering::SeqCst, guard);
