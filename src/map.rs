@@ -1701,7 +1701,8 @@ where
             //     have been included in the reference count of a retirement.
             //
             //  2. if table is read by init_table, we did so while holding a guard, so the
-            //     argument is as for point 1.
+            //     argument is as for point 1. or, we allocated the table while holding a guard,
+            //     so the earliest it can be deallocated is after we drop our guard.
             //
             //  3. if table is set by a Moved node (below) through help_transfer, it will _either_
             //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
@@ -2042,7 +2043,8 @@ where
             //     have been included in the reference count of a retirement.
             //
             //  2. if table is read by init_table, we did so while holding a guard, so the
-            //     argument is as for point 1.
+            //     argument is as for point 1. or, we allocated the table while holding a guard,
+            //     so the earliest it can be deallocated is after we drop our guard.
             //
             //  3. if table is set by a Moved node (below) through help_transfer, it will _either_
             //     keep using `table` (which is fine by 1. and 2.), or use the `next_table` raw
