@@ -1,4 +1,3 @@
-use crossbeam_epoch as epoch;
 use flurry::{DefaultHashBuilder, HashMap};
 use std::hash::{BuildHasher, BuildHasherDefault, Hasher};
 
@@ -24,8 +23,8 @@ impl BuildHasher for ZeroHashBuilder {
 
 fn check<S: BuildHasher + Default>() {
     let range = if cfg!(miri) { 0..16 } else { 0..1000 };
-    let guard = epoch::pin();
     let map = HashMap::<i32, i32, S>::default();
+    let guard = map.guard();
     for i in range.clone() {
         map.insert(i, i, &guard);
     }

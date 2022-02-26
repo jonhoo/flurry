@@ -19,15 +19,12 @@ azure-devops = { project = "jonhoo/jonhoo", pipeline = "flurry", build = "15" }
 codecov = { repository = "jonhoo/flurry", branch = "master", service = "github" }
 maintenance = { status = "experimental" }
 
-[features]
-sanitize = ['crossbeam-epoch/sanitize']
-
 [dependencies]
-crossbeam-epoch = "0.8.2"
 parking_lot = "0.10"
 num_cpus = "1.12.0"
 rayon = {version = "1.3", optional = true}
 serde = {version = "1.0.105", optional = true}
+seize = "0.2.0"
 
 [dependencies.ahash]
 version = "0.3.2"

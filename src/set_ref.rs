@@ -1,6 +1,6 @@
 use crate::iter::*;
-use crate::{GuardRef, HashSet};
-use crossbeam_epoch::Guard;
+use crate::reclaim::{Guard, GuardRef};
+use crate::HashSet;
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
@@ -27,7 +27,7 @@ impl<T, S> HashSet<T, S> {
     }
 
     /// Get a reference to this set with the given guard.
-    pub fn with_guard<'g>(&'g self, guard: &'g Guard) -> HashSetRef<'g, T, S> {
+    pub fn with_guard<'g>(&'g self, guard: &'g Guard<'_>) -> HashSetRef<'g, T, S> {
         HashSetRef {
             guard: GuardRef::Ref(guard),
             set: self,
@@ -112,7 +112,7 @@ where
 
 impl<T, S> HashSetRef<'_, T, S>
 where
-    T: 'static + Sync + Send + Clone + Hash + Ord,
+    T: Sync + Send + Clone + Hash + Ord,
     S: BuildHasher,
 {
     /// Adds a value to the set.

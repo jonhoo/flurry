@@ -1,4 +1,3 @@
-use crossbeam_epoch as epoch;
 use flurry::*;
 use rand::prelude::*;
 use std::hash::Hash;
@@ -23,7 +22,7 @@ where
 {
     let mut sum = 0;
     let iters = 4;
-    let guard = epoch::pin();
+    let guard = map.guard();
     for _ in 0..iters {
         for key in keys {
             if map.get(key, &guard).is_some() {
@@ -36,10 +35,10 @@ where
 
 fn t2<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: 'static + Sync + Send + Copy + Hash + Ord + std::fmt::Display,
+    K: Sync + Send + Copy + Hash + Ord + std::fmt::Display,
 {
     let mut sum = 0;
-    let guard = epoch::pin();
+    let guard = map.guard();
     for key in keys {
         if map.remove(key, &guard).is_some() {
             sum += 1;
@@ -50,10 +49,10 @@ where
 
 fn t3<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: 'static + Sync + Send + Copy + Hash + Ord,
+    K: Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
-    let guard = epoch::pin();
+    let guard = map.guard();
     for i in 0..keys.len() {
         if map.insert(keys[i], 0, &guard).is_none() {
             sum += 1;
@@ -67,7 +66,7 @@ where
     K: Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
-    let guard = epoch::pin();
+    let guard = map.guard();
     for i in 0..keys.len() {
         if map.contains_key(&keys[i], &guard) {
             sum += 1;
@@ -78,10 +77,10 @@ where
 
 fn t5<K>(map: &HashMap<K, usize>, keys: &[K], expect: usize)
 where
-    K: 'static + Sync + Send + Copy + Hash + Ord,
+    K: Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
-    let guard = epoch::pin();
+    let guard = map.guard();
     let mut i = keys.len() as isize - 2;
     while i >= 0 {
         if map.remove(&keys[i as usize], &guard).is_some() {
@@ -98,7 +97,7 @@ where
     V: Sync + Send,
 {
     let mut sum = 0;
-    let guard = epoch::pin();
+    let guard = map.guard();
     for i in 0..expect {
         if map.get(&keys1[i], &guard).is_some() {
             sum += 1;
@@ -115,7 +114,7 @@ where
     K: Sync + Send + Copy + Hash + Ord,
 {
     let mut sum = 0;
-    let guard = epoch::pin();
+    let guard = map.guard();
     for i in 0..k1.len() {
         if map.contains_key(&k1[i], &guard) {
             sum += 1;
@@ -132,7 +131,7 @@ where
     K: Sync + Send + Copy + Hash + Eq,
 {
     let mut sum = 0;
-    let guard = epoch::pin();
+    let guard = map.guard();
     for _ in map.keys(&guard) {
         sum += 1;
     }
@@ -144,7 +143,7 @@ where
     K: Sync + Send + Copy + Hash + Eq,
 {
     let mut sum = 0;
-    let guard = epoch::pin();
+    let guard = map.guard();
     for _ in map.values(&guard) {
         sum += 1;
     }
@@ -156,7 +155,7 @@ where
     K: Sync + Send + Copy + Hash + Eq,
 {
     let mut sum = 0;
-    let guard = epoch::pin();
+    let guard = map.guard();
     for _ in map.iter(&guard) {
         sum += 1;
     }
