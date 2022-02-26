@@ -745,7 +745,7 @@ where
                     // such a thread must have gotten that reference before the call to swap.
                     // because of this, that thread must have been marked as active, and included
                     // in the reference count, meaning the garbage will not be freed until
-                    // the thread drops its guard at the earliest.
+                    // that thread drops its guard at the earliest.
                     unsafe { guard.retire_shared(now_garbage) };
                     self.size_ctl
                         .store(((n as isize) << 1) - ((n as isize) >> 1), Ordering::SeqCst);
@@ -802,12 +802,12 @@ where
             // there are three cases when a bin pointer is invalidated:
             //
             //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-            //     that case, the table (and all its heads) will be retired.
+            //     that case, the table (and all its heads) have already been retired.
             //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-            //     will be retired.
+            //     will only be retired after that happens.
             //  3. when elements are inserted into or removed from the map, bin may be changed into
-            //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-            //     retired.
+            //     or from a TreeBin from or into a regular, linear bin. the old bin will be
+            //     retired only once that happens.
             //
             // in all cases, we held the guard when we got the reference to the bin. if any such
             // swap happened, it must have happened _after_ we read. since we did the read while
@@ -1294,12 +1294,12 @@ where
         // there are three cases when a bin pointer is invalidated:
         //
         //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-        //     that case, the table (and all its heads) will be retired.
+        //     that case, the table (and all its heads) have already been retired.
         //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-        //     will be retired.
+        //     will only be retired after that happens.
         //  3. when elements are inserted into or removed from the map, bin may be changed into
-        //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-        //     retired.
+        //     or from a TreeBin from or into a regular, linear bin. the old bin will be
+        //     retired only once that happens.
         //
         // in all cases, we held the guard when we got the reference to the bin. if any such
         // swap happened, it must have happened _after_ we read. since we did the read while
@@ -1311,8 +1311,8 @@ where
         }
 
         // safety: we loaded the bin while holding a guard, so any retirements
-        // must have seen us as active. the bin and its nodes cannot be dropped
-        // until at least after we drop our guard.
+        // must have seen us as active, and any future retirements must see us as active.
+        // the bin and its nodes cannot be dropped until at least after we drop our guard.
         let node = unsafe { node.deref() };
         Some(match **node {
             BinEntry::Node(ref n) => n,
@@ -1511,7 +1511,7 @@ where
 
                             // free the node's value
                             // safety: any thread that sees this p's value must have read the bin before we stored null
-                            // into it above. it must also have been marked as active. therefore, the
+                            // into it above. it must also have already been marked as active. therefore, the
                             // defer_destroy below won't be executed until that thread's guard is dropped, at which
                             // point it holds no outstanding references to the value anyway.
                             unsafe { guard.retire_shared(value) };
@@ -1741,17 +1741,19 @@ where
                 }
             }
 
+            // slow path -- bin is non-empty
+            //
             // safety: bin is a valid pointer.
             //
             // there are three cases when a bin pointer is invalidated:
             //
             //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-            //     that case, the table (and all its heads) will be retired.
+            //     that case, the table (and all its heads) have already been retired.
             //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-            //     will be retired.
+            //     will only be retired after that happens.
             //  3. when elements are inserted into or removed from the map, bin may be changed into
-            //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-            //     retired.
+            //     or from a TreeBin from or into a regular, linear bin. the old bin will be
+            //     retired only once that happens.
             //
             // in all cases, we held the guard when we got the reference to the bin. if any such
             // swap happened, it must have happened _after_ we read. since we did the read while
@@ -1838,7 +1840,7 @@ where
                                 //    to the value.
                                 //  - another thread is about to get a reference to this value.
                                 //    they execute _after_ the swap, and therefore do _not_ get a
-                                //    reference to now_garbage (they get value instead). there are
+                                //    reference to now_garbage (they get `value` instead). there are
                                 //    no other ways to get to a value except through its Node's
                                 //    `value` field (which is what we swapped), so freeing
                                 //    now_garbage is fine.
@@ -1931,7 +1933,7 @@ where
                             //    to the value.
                             //  - another thread is about to get a reference to this value.
                             //    they execute _after_ the swap, and therefore do _not_ get a
-                            //    reference to now_garbage (they get value instead). there are
+                            //    reference to now_garbage (they get `value` instead). there are
                             //    no other ways to get to a value except through its Node's
                             //    `value` field (which is what we swapped), so freeing
                             //    now_garbage is fine.
@@ -2056,17 +2058,18 @@ where
             }
 
             // slow path -- bin is non-empty
+            //
             // safety: bin is a valid pointer.
             //
             // there are three cases when a bin pointer is invalidated:
             //
             //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-            //     that case, the table (and all its heads) will be retired.
+            //     that case, the table (and all its heads) have already been retired.
             //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-            //     will be retired.
+            //     will only be retired after that happens.
             //  3. when elements are inserted into or removed from the map, bin may be changed into
-            //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-            //     retired.
+            //     or from a TreeBin from or into a regular, linear bin. the old bin will be
+            //     retired only once that happens.
             //
             // in all cases, we held the guard when we got the reference to the bin. if any such
             // swap happened, it must have happened _after_ we read. since we did the read while
@@ -2133,7 +2136,7 @@ where
                                 //    to the value.
                                 //  - another thread is about to get a reference to this value.
                                 //    they execute _after_ the swap, and therefore do _not_ get a
-                                //    reference to now_garbage (they get value instead). there are
+                                //    reference to now_garbage (they get `value` instead). there are
                                 //    no other ways to get to a value except through its Node's
                                 //    `value` field (which is what we swapped), so freeing
                                 //    now_garbage is fine.
@@ -2175,7 +2178,7 @@ where
                                 //    to the value.
                                 //  - another thread is about to get a reference to this value.
                                 //    they execute _after_ the swap, and therefore do _not_ get a
-                                //    reference to now_garbage (they get value instead). there are
+                                //    reference to now_garbage (they get `value` instead). there are
                                 //    no other ways to get to a value except through its Node's
                                 //    `value` field (which is what we swapped), so freeing
                                 //    now_garbage is fine.
@@ -2260,7 +2263,7 @@ where
                                 //    to the value.
                                 //  - another thread is about to get a reference to this value.
                                 //    they execute _after_ the swap, and therefore do _not_ get a
-                                //    reference to now_garbage (they get value instead). there are
+                                //    reference to now_garbage (they get `value` instead). there are
                                 //    no other ways to get to a value except through its Node's
                                 //    `value` field (which is what we swapped), so freeing
                                 //    now_garbage is fine.
@@ -2456,12 +2459,12 @@ where
             // there are three cases when a bin pointer is invalidated:
             //
             //  1. if the table was resized, bin is a move entry, and the resize has completed. in
-            //     that case, the table (and all its heads) will be retired.
+            //     that case, the table (and all its heads) have already been retired.
             //  2. if the table is being resized, bin may be swapped with a move entry. the old bin
-            //     will be retired.
+            //     will only be retired after that happens.
             //  3. when elements are inserted into or removed from the map, bin may be changed into
-            //     or from a TreeBin from or into a regular, linear bin. the old bin will also be
-            //     retired.
+            //     or from a TreeBin from or into a regular, linear bin. the old bin will be
+            //     retired only once that happens.
             //
             // in all cases, we held the guard when we got the reference to the bin. if any such
             // swap happened, it must have happened _after_ we read. since we did the read while
@@ -2483,7 +2486,7 @@ where
                     let mut e = bin;
                     let mut pred: Shared<'_, BinEntry<K, V>> = Shared::null();
                     loop {
-                        // safety: either e is bin, in which case it is valid due to the above,
+                        // safety: either `e` is `bin`, in which case it is valid due to the above,
                         // or e was obtained from a next pointer. Any next pointer obtained from
                         // bin is valid at the time we look up bin in the table, at which point
                         // we held a guard. Since we found the next pointer in a valid map and
@@ -2636,7 +2639,7 @@ where
                 //    to the value.
                 //  - another thread is about to get a reference to this value.
                 //    they execute _after_ the swap, and therefore do _not_ get a
-                //    reference to now_garbage (they get value instead). there are
+                //    reference to now_garbage (they get `value` instead). there are
                 //    no other ways to get to a value except through its Node's
                 //    `value` field (which is what we swapped), so freeing
                 //    now_garbage is fine.
@@ -2753,13 +2756,13 @@ where
                     let mut head = Shared::null();
                     let mut tail = Shared::null();
                     while !e.is_null() {
-                        // safety: either e is bin, in which case it is valid due to the above,
+                        // safety: either `e` is `bin`, in which case it is valid due to the above,
                         // or e was obtained from a next pointer. Any next pointer obtained from
                         // bin is valid at the time we look up bin in the table, at which point
                         // we held a guard. Since we found the next pointer in a valid map and
                         // it is not null (as checked above and below), the node it points to was
                         // present (i.e. not removed) from the map while we were marked as active.
-                        // Thus, e cannot be dropped until we release our guard, e is also valid
+                        // Thus, e cannot be dropped until we release our guard. e is also valid
                         // if it was obtained from a next pointer.
                         let e_deref = unsafe { e.deref() }.as_node().unwrap();
                         // NOTE: cloning the value uses a load with Ordering::Relaxed, but
