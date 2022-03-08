@@ -367,7 +367,7 @@ impl<K, V, S> HashMap<K, V, S> {
     /// assert!(map.pin().len() == 2);
     /// ```
     pub fn len(&self) -> usize {
-        let n = self.counter.sum();
+        let n = self.counter.sum(Ordering::Relaxed);
         if n < 0 {
             0
         } else {
@@ -1147,6 +1147,7 @@ where
     }
 
     fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard<'_>) {
+        // TODO: finish Java CounterCell port, this is only a bare minimum implementation.
         self.counter.add(n);
 
         // if resize_hint is None, it means the caller does not want us to consider a resize.
@@ -1160,7 +1161,7 @@ where
             None => return,
         }
 
-        let mut count = self.counter.sum();
+        let mut count = self.counter.sum(Ordering::Relaxed);
 
         // TODO: use the resize hint
         let _saw_bin_length = resize_hint.unwrap();
@@ -1223,7 +1224,7 @@ where
             }
 
             // another resize may be needed!
-            count = self.counter.sum();
+            count = self.counter.sum(Ordering::Relaxed);
         }
     }
 

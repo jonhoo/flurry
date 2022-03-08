@@ -22,7 +22,6 @@ maintenance = { status = "experimental" }
 [dependencies]
 parking_lot = "0.12"
 num_cpus = "1.12.0"
-rand = { version = "0.8", features = ["small_rng"] }
 rayon = {version = "1.3", optional = true}
 serde = {version = "1.0.105", optional = true}
 seize = "0.2.1"
