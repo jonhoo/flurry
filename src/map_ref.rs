@@ -1,6 +1,6 @@
 use crate::iter::*;
-use crate::{GuardRef, HashMap, TryInsertError};
-use crossbeam_epoch::Guard;
+use crate::reclaim::{Guard, GuardRef};
+use crate::{HashMap, TryInsertError};
 use std::borrow::Borrow;
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{BuildHasher, Hash};
@@ -28,7 +28,7 @@ impl<K, V, S> HashMap<K, V, S> {
     }
 
     /// Get a reference to this map with the given guard.
-    pub fn with_guard<'g>(&'g self, guard: &'g Guard) -> HashMapRef<'g, K, V, S> {
+    pub fn with_guard<'g>(&'g self, guard: &'g Guard<'_>) -> HashMapRef<'g, K, V, S> {
         HashMapRef {
             guard: GuardRef::Ref(guard),
             map: self,
@@ -149,8 +149,8 @@ where
 
 impl<K, V, S> HashMapRef<'_, K, V, S>
 where
-    K: 'static + Sync + Send + Clone + Hash + Ord,
-    V: 'static + Sync + Send,
+    K: Sync + Send + Clone + Hash + Ord,
+    V: Sync + Send,
     S: BuildHasher,
 {
     /// Inserts a key-value pair into the map.

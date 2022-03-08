@@ -178,10 +178,9 @@ fn different_size_maps_not_equal() {
     let set1 = HashSet::<usize>::new();
     let set2 = HashSet::<usize>::new();
     {
-        let guard = set1.guard();
-        set1.insert(1, &guard);
-        set1.insert(2, &guard);
-        set2.insert(1, &guard);
+        set1.pin().insert(1);
+        set1.pin().insert(2);
+        set2.pin().insert(1);
     }
 
     assert_ne!(set1, set2);
@@ -193,9 +192,8 @@ fn same_values_equal() {
     let set1 = HashSet::<usize>::new();
     let set2 = HashSet::<usize>::new();
     {
-        let guard = set1.guard();
-        set1.insert(1, &guard);
-        set2.insert(1, &guard);
+        set1.pin().insert(1);
+        set2.pin().insert(1);
     }
 
     assert_eq!(set1, set2);
@@ -207,9 +205,8 @@ fn different_values_not_equal() {
     let set1 = HashSet::<usize>::new();
     let set2 = HashSet::<usize>::new();
     {
-        let guard = set1.guard();
-        set1.insert(1, &guard);
-        set2.insert(2, &guard);
+        set1.pin().insert(1);
+        set2.pin().insert(2);
     }
 
     assert_ne!(set1, set2);

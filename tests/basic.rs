@@ -393,10 +393,15 @@ fn different_size_maps_not_equal() {
     let map1 = HashMap::<usize, usize>::new();
     let map2 = HashMap::<usize, usize>::new();
     {
-        let guard = map1.guard();
-        map1.insert(1, 0, &guard);
-        map1.insert(2, 0, &guard);
-        map2.insert(1, 0, &guard);
+        let guard1 = map1.guard();
+        let guard2 = map2.guard();
+
+        map1.insert(1, 0, &guard1);
+        map1.insert(2, 0, &guard1);
+        map1.insert(3, 0, &guard1);
+
+        map2.insert(1, 0, &guard2);
+        map2.insert(2, 0, &guard2);
     }
 
     assert_ne!(map1, map2);
@@ -408,9 +413,8 @@ fn same_values_equal() {
     let map1 = HashMap::<usize, usize>::new();
     let map2 = HashMap::<usize, usize>::new();
     {
-        let guard = map1.guard();
-        map1.insert(1, 0, &guard);
-        map2.insert(1, 0, &guard);
+        map1.pin().insert(1, 0);
+        map2.pin().insert(1, 0);
     }
 
     assert_eq!(map1, map2);
@@ -422,9 +426,8 @@ fn different_values_not_equal() {
     let map1 = HashMap::<usize, usize>::new();
     let map2 = HashMap::<usize, usize>::new();
     {
-        let guard = map1.guard();
-        map1.insert(1, 0, &guard);
-        map2.insert(1, 1, &guard);
+        map1.pin().insert(1, 0);
+        map2.pin().insert(1, 1);
     }
 
     assert_ne!(map1, map2);

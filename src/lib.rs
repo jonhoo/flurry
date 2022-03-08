@@ -9,9 +9,9 @@
 //! # A note on `Guard` and memory use
 //!
 //! You may have noticed that many of the access methods on this map take a reference to an
-//! [`epoch::Guard`]. The exact details of this are beyond the scope of this documentation (for
-//! that, see [`crossbeam::epoch`]), but some of the implications bear repeating here. You obtain a
-//! `Guard` using [`epoch::pin`], and you can use references to the same guard to make multiple API
+//! [`Guard`]. The exact details of this are beyond the scope of this documentation (for
+//! that, see the [`seize`] crate), but some of the implications bear repeating here. You obtain a
+//! `Guard` using [`HashMap::guard`], and you can use references to the same guard to make multiple API
 //! calls if you wish. Whenever you get a reference to something stored in the map, that reference
 //! is tied to the lifetime of the `Guard` that you provided. This is because each `Guard` prevents
 //! the destruction of any item associated with it. Whenever something is read under a `Guard`,
@@ -23,9 +23,7 @@
 //! Notice that there is a trade-off here. Creating and dropping a `Guard` is not free, since it
 //! also needs to interact with said bookkeeping. But if you keep one around for a long time, you
 //! may accumulate much garbage which will take up valuable free memory on your system. Use your
-//! best judgement in deciding whether or not to re-use a `Guard`. This is also the reason why the
-//! map requires that `K: 'static` and `V: 'static`. If we did not, then your keys and values may
-//! get dropped far later, potentially after those lifetimes have passed, which would not be sound.
+//! best judgement in deciding whether or not to re-use a `Guard`.
 //!
 //! # Consistency
 //!
@@ -228,12 +226,12 @@
 //! The Java implementation can rely on Java's runtime garbage collection to safely deallocate
 //! deleted or removed nodes, keys, and values. Since Rust does not have such a runtime, we must
 //! ensure through some other mechanism that we do not drop values before all references to them
-//! have gone away. We do this using [`crossbeam::epoch`], which provides an implementation of an
-//! epoch-based garbage collection scheme. This forces us to make certain API changes such as
-//! requiring `Guard` arguments to many methods or wrapping the return values, but provides much
-//! more efficient operation than if everything had to be atomically reference-counted.
+//! have gone away. We do this using [`seize`], which provides a garbage collection scheme based
+//! on batch reference-counting. This forces us to make certain API changes such as requiring
+//! `Guard` arguments to many methods or wrapping the return values, but provides much more efficient
+//! operation than if every individual value had to be atomically reference-counted.
 //!
-//!  [`crossbeam::epoch`]: https://docs.rs/crossbeam/0.7/crossbeam/epoch/index.html
+//!  [`seize`]: https://docs.rs/seize
 #![deny(
     missing_docs,
     missing_debug_implementations,
@@ -242,14 +240,13 @@
 )]
 #![warn(rust_2018_idioms)]
 #![allow(clippy::cognitive_complexity)]
-use crossbeam_epoch::Guard;
-use std::ops::Deref;
 
 mod counter;
 mod map;
 mod map_ref;
 mod node;
 mod raw;
+mod reclaim;
 mod set;
 mod set_ref;
 
@@ -270,23 +267,4 @@ pub use set_ref::HashSetRef;
 /// Default hasher for [`HashMap`].
 pub type DefaultHashBuilder = ahash::RandomState;
 
-/// Types needed to safely access shared data concurrently.
-pub mod epoch {
-    pub use crossbeam_epoch::{pin, Guard};
-}
-
-pub(crate) enum GuardRef<'g> {
-    Owned(Guard),
-    Ref(&'g Guard),
-}
-
-impl Deref for GuardRef<'_> {
-    type Target = Guard;
-
-    #[inline]
-    fn deref(&self) -> &Guard {
-        match *self {
-            GuardRef::Owned(ref guard) | GuardRef::Ref(&ref guard) => guard,
-        }
-    }
-}
+pub use seize::Guard;

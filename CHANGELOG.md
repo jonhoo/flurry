@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [0.4.0] - 2022-02-26
+### Changed
+- Moved memory management to [`seize`]() ([#102])
+- Bumped `ahash` and `parking_lot` ([#105])
+
+[`seize`]: https://docs.rs/seize/latest/seize/
+[#102]: https://github.com/jonhoo/flurry/pull/102
+[#105]: https://github.com/jonhoo/flurry/pull/105
+
 ## [0.3.1] - 2020-08-28
 ### Added
 - Basic `rayon` support (#89)
@@ -35,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - First "real" release.
 
-[Unreleased]: https://github.com/jonhoo/flurry/compare/v0.3.1...HEAD
-[0.3.0]: https://github.com/jonhoo/flurry/compare/v0.3.0...v0.3.1
+[Unreleased]: https://github.com/jonhoo/flurry/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jonhoo/flurry/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/jonhoo/flurry/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/jonhoo/flurry/compare/v0.2.1...v0.3.0
