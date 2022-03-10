@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicIsize, Ordering};
 
+// TODO: finish Java CounterCell port, this is only a bare minimum implementation.
 pub(crate) struct ConcurrentCounter {
     base: AtomicIsize,
     cells: Vec<AtomicIsize>,

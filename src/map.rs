@@ -93,6 +93,8 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// The next table index (plus one) to split while resizing.
     transfer_index: AtomicIsize,
 
+    counter: ConcurrentCounter,
+
     /// Table initialization and resizing control.  When negative, the
     /// table is being initialized or resized: -1 for initialization,
     /// else -(1 + the number of active resizing threads).  Otherwise,
@@ -100,8 +102,6 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// creation, or 0 for default. After initialization, holds the
     /// next element count value upon which to resize the table.
     size_ctl: AtomicIsize,
-
-    counter: ConcurrentCounter,
 
     /// Collector that all `Guard` references used for operations on this map must be tied to. It
     /// is important that they all assocate with the _same_ `Collector`, otherwise you end up with
@@ -1147,18 +1147,12 @@ where
     }
 
     fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard<'_>) {
-        // TODO: finish Java CounterCell port, this is only a bare minimum implementation.
         self.counter.add(n);
 
         // if resize_hint is None, it means the caller does not want us to consider a resize.
         // if it is Some(n), the caller saw n entries in a bin
-        match resize_hint {
-            Some(rh) => {
-                if rh <= 1 {
-                    return;
-                }
-            }
-            None => return,
+        if resize_hint.unwrap_or(0) <= 1 {
+            return;
         }
 
         let mut count = self.counter.sum(Ordering::Relaxed);
@@ -3102,7 +3096,7 @@ pub(crate) fn num_cpus() -> usize {
 
 #[cfg(miri)]
 #[inline]
-const fn num_cpus() -> usize {
+pub(crate) const fn num_cpus() -> usize {
     1
 }
 
