@@ -395,7 +395,7 @@ impl<K, V, S> HashMap<K, V, S> {
     /// Returns the capacity of the map.
     fn capacity(&self, guard: &Guard<'_>) -> usize {
         self.check_guard(guard);
-        let table = self.table.load(Ordering::Relaxed, &guard);
+        let table = self.table.load(Ordering::Relaxed, guard);
 
         if table.is_null() {
             0

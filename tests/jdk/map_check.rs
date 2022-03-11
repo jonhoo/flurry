@@ -173,27 +173,27 @@ fn everything() {
     let keys = &keys[ABSENT_SIZE..];
 
     // put (absent)
-    t3(&map, &keys[..], SIZE);
+    t3(&map, keys, SIZE);
     // put (present)
-    t3(&map, &keys[..], 0);
+    t3(&map, keys, 0);
     // contains_key (present & absent)
-    t7(&map, &keys[..], &absent_keys[..]);
+    t7(&map, keys, absent_keys);
     // contains_key (present)
-    t4(&map, &keys[..], SIZE);
+    t4(&map, keys, SIZE);
     // contains_key (absent)
-    t4(&map, &absent_keys[..], 0);
+    t4(&map, absent_keys, 0);
     // get
-    t6(&map, &keys[..], &absent_keys[..], SIZE);
+    t6(&map, keys, absent_keys, SIZE);
     // get (present)
-    t1(&map, &keys[..], SIZE);
+    t1(&map, keys, SIZE);
     // get (absent)
-    t1(&map, &absent_keys[..], 0);
+    t1(&map, absent_keys, 0);
     // remove (absent)
-    t2(&map, &absent_keys[..], 0);
+    t2(&map, absent_keys, 0);
     // remove (present)
-    t5(&map, &keys[..], SIZE / 2);
+    t5(&map, keys, SIZE / 2);
     // put (half present)
-    t3(&map, &keys[..], SIZE / 2);
+    t3(&map, keys, SIZE / 2);
     // iter, keys, values (present)
     ittest1(&map, SIZE);
     ittest2(&map, SIZE);

@@ -1466,7 +1466,7 @@ mod tests {
         Node {
             hash,
             key,
-            value: Atomic::from(Shared::boxed(value, &collector)),
+            value: Atomic::from(Shared::boxed(value, collector)),
             next: Atomic::null(),
             lock: Mutex::new(()),
         }
