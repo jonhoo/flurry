@@ -389,7 +389,7 @@ impl<K, V, S> HashMap<K, V, S> {
     /// Returns the capacity of the map.
     fn capacity(&self, guard: &Guard<'_>) -> usize {
         self.check_guard(guard);
-        let table = self.table.load(Ordering::Relaxed, &guard);
+        let table = self.table.load(Ordering::Relaxed, guard);
 
         if table.is_null() {
             0
@@ -906,7 +906,7 @@ where
 
                     next_table.store_bin(i, low_bin);
                     next_table.store_bin(i + n, high_bin);
-                    table.store_bin(i, table.get_moved(Shared::from(next_table_ptr), guard));
+                    table.store_bin(i, table.get_moved(next_table_ptr, guard));
 
                     // everything up to last_run in the _old_ bin linked list is now garbage.
                     // those nodes have all been re-allocated in the new bin linked list.
@@ -1069,7 +1069,7 @@ where
 
                     next_table.store_bin(i, low_bin);
                     next_table.store_bin(i + n, high_bin);
-                    table.store_bin(i, table.get_moved(Shared::from(next_table_ptr), guard));
+                    table.store_bin(i, table.get_moved(next_table_ptr, guard));
 
                     // if we did not re-use the old bin, it is now garbage,
                     // since all of its nodes have been reallocated. However,

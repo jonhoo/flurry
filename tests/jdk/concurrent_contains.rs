@@ -35,7 +35,7 @@ fn test_once(content: [usize; NUM_ENTRIES], map: Arc<HashMap<usize, usize>>) {
     let mut threads = Vec::new();
     for _ in 0..num_cpus::get().min(8) {
         let map = map.clone();
-        let content = content.clone();
+        let content = content;
         let handle = thread::spawn(move || {
             let guard = map.guard();
             let map = map.clone();

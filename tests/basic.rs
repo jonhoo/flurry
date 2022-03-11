@@ -512,7 +512,7 @@ fn extend() {
     let guard = map.guard();
 
     let mut entries: Vec<(usize, usize)> = vec![(42, 0), (16, 6), (38, 42)];
-    entries.sort();
+    entries.sort_unstable();
 
     (&map).extend(entries.clone().into_iter());
 
@@ -520,7 +520,7 @@ fn extend() {
         .iter(&guard)
         .map(|(key, value)| (*key, *value))
         .collect();
-    collected.sort();
+    collected.sort_unstable();
 
     assert_eq!(entries, collected);
 }
@@ -577,7 +577,7 @@ fn retain_empty() {
 
 #[test]
 fn retain_all_false() {
-    let map: HashMap<u32, u32> = (0..10 as u32).map(|x| (x, x)).collect();
+    let map: HashMap<u32, u32> = (0..10_u32).map(|x| (x, x)).collect();
     let guard = map.guard();
     map.retain(|_, _| false, &guard);
     assert_eq!(map.len(), 0);

@@ -267,12 +267,12 @@ fn extend() {
     let guard = set.guard();
 
     let mut entries = vec![42, 16, 38];
-    entries.sort();
+    entries.sort_unstable();
 
     (&set).extend(entries.clone().into_iter());
 
-    let mut collected: Vec<_> = set.iter(&guard).map(|value| *value).collect();
-    collected.sort();
+    let mut collected: Vec<_> = set.iter(&guard).copied().collect();
+    collected.sort_unstable();
 
     assert_eq!(entries, collected);
 }
