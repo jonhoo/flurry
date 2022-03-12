@@ -1151,7 +1151,7 @@ where
 
         // if resize_hint is None, it means the caller does not want us to consider a resize.
         // if it is Some(n), the caller saw n entries in a bin
-        if resize_hint.unwrap_or(0) <= 1 {
+        if resize_hint.is_none() {
             return;
         }
 
