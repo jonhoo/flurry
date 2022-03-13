@@ -18,14 +18,20 @@ impl ConcurrentCounter {
     }
 
     pub(crate) fn add(&self, value: isize) {
-        let base = self.base.load(Ordering::SeqCst);
+        let mut base = self.base.load(Ordering::SeqCst);
         let mut index = base + value;
 
-        while self
-            .base
-            .compare_exchange(base, base + value, Ordering::SeqCst, Ordering::Relaxed)
-            .is_err()
-        {
+        loop {
+            match self.base.compare_exchange(
+                base,
+                base + value,
+                Ordering::SeqCst,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(b) => base = b,
+            }
+
             let c = &self.cells[index as usize % self.cells.len()];
             let cv = c.load(Ordering::SeqCst);
             index += cv;
