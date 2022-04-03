@@ -9,7 +9,7 @@
  */
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use flurry::{epoch, HashMap};
+use flurry::HashMap;
 
 const SIZE: usize = 1000;
 
@@ -53,7 +53,7 @@ macro_rules! bench_insert {
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
             let map: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
             b.iter(|| {
-                let guard = epoch::pin();
+                let guard = map.guard();
                 map.clear(&guard);
                 ($keydist).take(SIZE).for_each(|i| {
                     map.insert(i, i, &guard);
@@ -77,7 +77,7 @@ macro_rules! bench_insert_erase {
             // NOTE: in testing, I tried running this without the local scope.
             // not dropping the guard and pinning the epoch for the entire benchmark literally
             // crashed multiple programs on my PC, so I advise not to do that...
-            let guard = epoch::pin();
+            let guard = base.guard();
             ($keydist).take(SIZE).for_each(|i| {
                 base.insert(i, i, &guard);
             });
@@ -92,7 +92,7 @@ macro_rules! bench_insert_erase {
 
                 // While keeping the size constant,
                 // replace the first keydist with the second.
-                let guard = epoch::pin();
+                let guard = map.guard();
                 (&mut add_iter)
                     .zip(&mut remove_iter)
                     .take(SIZE)
@@ -100,6 +100,7 @@ macro_rules! bench_insert_erase {
                         map.insert(add, add, &guard);
                         black_box(map.remove(&remove, &guard));
                     });
+                drop(guard);
                 black_box(&mut map);
             });
         });
@@ -117,7 +118,7 @@ macro_rules! bench_lookup {
         let map: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
         {
             // see bench_insert_erase for a comment on the local scope
-            let guard = epoch::pin();
+            let guard = map.guard();
             ($keydist).take(SIZE).for_each(|i| {
                 map.insert(i, i, &guard);
             });
@@ -125,7 +126,7 @@ macro_rules! bench_lookup {
 
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
             b.iter(|| {
-                let guard = epoch::pin();
+                let guard = map.guard();
                 ($keydist).take(SIZE).for_each(|i| {
                     black_box(map.get(&i, &guard));
                 });
@@ -142,7 +143,7 @@ macro_rules! bench_lookup_fail {
         let mut iter = $keydist;
         {
             // see bench_insert_erase for a comment on the local scope
-            let guard = epoch::pin();
+            let guard = map.guard();
             (&mut iter).take(SIZE).for_each(|i| {
                 map.insert(i, i, &guard);
             });
@@ -150,7 +151,7 @@ macro_rules! bench_lookup_fail {
 
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
             b.iter(|| {
-                let guard = epoch::pin();
+                let guard = map.guard();
                 (&mut iter).take(SIZE).for_each(|i| {
                     black_box(map.get(&i, &guard));
                 });
@@ -170,7 +171,7 @@ macro_rules! bench_iter {
         let map: HashMap<_, _> = HashMap::with_capacity(SIZE as usize);
         {
             // see bench_insert_erase for a comment on the local scope
-            let guard = epoch::pin();
+            let guard = map.guard();
             ($keydist).take(SIZE).for_each(|i| {
                 map.insert(i, i, &guard);
             });
@@ -178,7 +179,7 @@ macro_rules! bench_iter {
 
         $group.bench_function(BenchmarkId::from_parameter($bench_id), |b| {
             b.iter(|| {
-                let guard = epoch::pin();
+                let guard = map.guard();
                 for k in map.iter(&guard) {
                     black_box(k);
                 }
