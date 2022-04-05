@@ -43,3 +43,7 @@ harness = false
 [[bench]]
 name = "flurry_hashbrown" 
 harness = false
+
+[[bench]]
+name = "flurry_counter" 
+harness = false
