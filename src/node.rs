@@ -521,7 +521,7 @@ impl<K, V> TreeBin<K, V> {
         // the TreeNodes remain valid for at least as long as we hold onto the
         // guard. Additionally, this method assumes `p` to be non-null.
         // Structurally, TreeNodes always point to TreeNodes, so this is sound.
-        let p_deref = TreeNode::get_tree_node(p);
+        let p_deref = unsafe { TreeNode::get_tree_node(p) };
         let next = p_deref.node.next.load(Ordering::SeqCst, guard);
         let prev = p_deref.prev.load(Ordering::SeqCst, guard);
 
@@ -530,13 +530,15 @@ impl<K, V> TreeBin<K, V> {
             // the node to delete is the first node
             self.first.store(next, Ordering::SeqCst);
         } else {
-            TreeNode::get_tree_node(prev)
+            // safety: structurally, TreeNodes always point to TreeNodes
+            unsafe { TreeNode::get_tree_node(prev) }
                 .node
                 .next
                 .store(next, Ordering::SeqCst);
         }
         if !next.is_null() {
-            TreeNode::get_tree_node(next)
+            // safety: structurally, TreeNodes always point to TreeNodes
+            unsafe { TreeNode::get_tree_node(next) }
                 .prev
                 .store(prev, Ordering::SeqCst);
         }
@@ -554,30 +556,44 @@ impl<K, V> TreeBin<K, V> {
         // about restructuring the tree since the bin will be untreeified
         // anyway, so we check that
         let mut root = self.root.load(Ordering::SeqCst, guard);
+
         // TODO: Can `root` even be `null`?
         // The Java code has `NULL` checks for this, but in theory it should not be possible to
         // encounter a tree that has no root when we have its lock. It should always have at
         // least `UNTREEIFY_THRESHOLD` nodes. If it is indeed impossible we should replace
         // this with an assertion instead.
-        if root.is_null()
-            || TreeNode::get_tree_node(root)
-                .right
-                .load(Ordering::SeqCst, guard)
-                .is_null()
+        if root.is_null() {
+            return true;
+        }
+
+        // safety: structurally, TreeNodes always point to TreeNodes,
+        // and we just verified that `root` is not null
+        if unsafe { TreeNode::get_tree_node(root) }
+            .right
+            .load(Ordering::SeqCst, guard)
+            .is_null()
         {
             return true;
-        } else {
-            let root_left = TreeNode::get_tree_node(root)
-                .left
-                .load(Ordering::SeqCst, guard);
-            if root_left.is_null()
-                || TreeNode::get_tree_node(root_left)
-                    .left
-                    .load(Ordering::SeqCst, guard)
-                    .is_null()
-            {
-                return true;
-            }
+        }
+
+        // safety: structurally, TreeNodes always point to TreeNodes
+        // and we just verified that `root` is not null
+        let root_left = unsafe { TreeNode::get_tree_node(root) }
+            .left
+            .load(Ordering::SeqCst, guard);
+
+        if root_left.is_null() {
+            return true;
+        }
+
+        // safety: structurally, TreeNodes always point to TreeNodes,
+        // and we just verified that `root_left` is not null
+        if unsafe { TreeNode::get_tree_node(root_left) }
+            .left
+            .load(Ordering::SeqCst, guard)
+            .is_null()
+        {
+            return true;
         }
 
         // if we get here, we know that we will still be a tree and have
@@ -597,11 +613,15 @@ impl<K, V> TreeBin<K, V> {
         if !p_left.is_null() && !p_right.is_null() {
             // find the smalles successor of `p`
             let mut successor = p_right;
-            let mut successor_deref = TreeNode::get_tree_node(successor);
+            // safety: structurally, TreeNodes always point to TreeNodes,
+            // and we just verified that `successor` is not null
+            let mut successor_deref = unsafe { TreeNode::get_tree_node(successor) };
             let mut successor_left = successor_deref.left.load(Ordering::Relaxed, guard);
             while !successor_left.is_null() {
                 successor = successor_left;
-                successor_deref = TreeNode::get_tree_node(successor);
+                // safety: structurally, TreeNodes always point to TreeNodes,
+                // and we just verified that `successor` is not null
+                successor_deref = unsafe { TreeNode::get_tree_node(successor) };
                 successor_left = successor_deref.left.load(Ordering::Relaxed, guard);
             }
             // swap colors
@@ -622,23 +642,20 @@ impl<K, V> TreeBin<K, V> {
                 let successor_parent = successor_deref.parent.load(Ordering::Relaxed, guard);
                 p_deref.parent.store(successor_parent, Ordering::Relaxed);
                 if !successor_parent.is_null() {
-                    if successor
-                        == TreeNode::get_tree_node(successor_parent)
-                            .left
-                            .load(Ordering::Relaxed, guard)
-                    {
-                        TreeNode::get_tree_node(successor_parent)
-                            .left
-                            .store(p, Ordering::Relaxed);
+                    // safety: the parent of a TreeNode must be a TreeNode,
+                    // and we just verified that `successor_parent` is not null
+                    let successor_parent = unsafe { TreeNode::get_tree_node(successor_parent) };
+                    if successor == successor_parent.left.load(Ordering::Relaxed, guard) {
+                        successor_parent.left.store(p, Ordering::Relaxed);
                     } else {
-                        TreeNode::get_tree_node(successor_parent)
-                            .right
-                            .store(p, Ordering::Relaxed);
+                        successor_parent.right.store(p, Ordering::Relaxed);
                     }
                 }
                 successor_deref.right.store(p_right, Ordering::Relaxed);
                 if !p_right.is_null() {
-                    TreeNode::get_tree_node(p_right)
+                    // safety: structurally, TreeNodes always point to TreeNodes,
+                    // and we just verified that `p_right` is not null
+                    unsafe { TreeNode::get_tree_node(p_right) }
                         .parent
                         .store(successor, Ordering::Relaxed);
                 }
@@ -647,13 +664,17 @@ impl<K, V> TreeBin<K, V> {
             p_deref.left.store(Shared::null(), Ordering::Relaxed);
             p_deref.right.store(successor_right, Ordering::Relaxed);
             if !successor_right.is_null() {
-                TreeNode::get_tree_node(successor_right)
+                // safety: structurally, TreeNodes always point to TreeNodes,
+                // and we just verified that `successor_right` is not null
+                unsafe { TreeNode::get_tree_node(successor_right) }
                     .parent
                     .store(p, Ordering::Relaxed);
             }
             successor_deref.left.store(p_left, Ordering::Relaxed);
             if !p_left.is_null() {
-                TreeNode::get_tree_node(p_left)
+                // safety: structurally, TreeNodes always point to TreeNodes,
+                // and we just verified that `p_left` is not null
+                unsafe { TreeNode::get_tree_node(p_left) }
                     .parent
                     .store(successor, Ordering::Relaxed);
             }
@@ -661,18 +682,15 @@ impl<K, V> TreeBin<K, V> {
             if p_parent.is_null() {
                 // the successor was swapped to the root as `p` was previously the root
                 root = successor;
-            } else if p
-                == TreeNode::get_tree_node(p_parent)
-                    .left
-                    .load(Ordering::Relaxed, guard)
-            {
-                TreeNode::get_tree_node(p_parent)
-                    .left
-                    .store(successor, Ordering::Relaxed);
             } else {
-                TreeNode::get_tree_node(p_parent)
-                    .right
-                    .store(successor, Ordering::Relaxed);
+                // safety: the parent of a TreeNode must be a TreeNode,
+                // and we just verified that `successor_parent` is not null
+                let p_parent = unsafe { TreeNode::get_tree_node(p_parent) };
+                if p == p_parent.left.load(Ordering::Relaxed, guard) {
+                    p_parent.left.store(successor, Ordering::Relaxed);
+                } else {
+                    p_parent.right.store(successor, Ordering::Relaxed);
+                }
             }
 
             // We have swapped `p` with `successor`, which is the next element
@@ -702,13 +720,16 @@ impl<K, V> TreeBin<K, V> {
         if replacement != p {
             // `p` (at its potentially new position) has a child, so we need to do a replacement.
             let p_parent = p_deref.parent.load(Ordering::Relaxed, guard);
-            TreeNode::get_tree_node(replacement)
+            // safety: we just assigned `replacement` to a non-null TreeNode
+            unsafe { TreeNode::get_tree_node(replacement) }
                 .parent
                 .store(p_parent, Ordering::Relaxed);
             if p_parent.is_null() {
                 root = replacement;
             } else {
-                let p_parent_deref = TreeNode::get_tree_node(p_parent);
+                // safety: the parent of a TreeNode must be a TreeNode,
+                // and we just verified that `p_parent` is not null
+                let p_parent_deref = unsafe { TreeNode::get_tree_node(p_parent) };
                 if p == p_parent_deref.left.load(Ordering::Relaxed, guard) {
                     p_parent_deref.left.store(replacement, Ordering::Relaxed);
                 } else {
@@ -733,11 +754,11 @@ impl<K, V> TreeBin<K, V> {
             // `p` does _not_ have children, so we unlink it as a leaf.
             let p_parent = p_deref.parent.load(Ordering::Relaxed, guard);
             if !p_parent.is_null() {
-                let p_parent_deref = TreeNode::get_tree_node(p_parent);
+                // safety: the parent of a TreeNode must be a TreeNode,
+                // and we just verified that `p_parent` is not null
+                let p_parent_deref = unsafe { TreeNode::get_tree_node(p_parent) };
                 if p == p_parent_deref.left.load(Ordering::Relaxed, guard) {
-                    TreeNode::get_tree_node(p_parent)
-                        .left
-                        .store(Shared::null(), Ordering::Relaxed);
+                    p_parent_deref.left.store(Shared::null(), Ordering::Relaxed);
                 } else if p == p_parent_deref.right.load(Ordering::Relaxed, guard) {
                     p_parent_deref
                         .right
@@ -930,6 +951,7 @@ impl<K, V> TreeBin<K, V> {
     /// Defers dropping the given tree bin without its nodes' values.
     ///
     /// # Safety
+    ///
     /// The given bin must be a valid, non-null BinEntry::TreeBin and the caller must ensure
     /// that no references to the bin can be obtained by other threads after the call to this
     /// method.
@@ -937,26 +959,31 @@ impl<K, V> TreeBin<K, V> {
         bin: Shared<'g, BinEntry<K, V>>,
         guard: &'g Guard<'_>,
     ) {
-        guard.retire(bin.as_ptr(), |mut link| {
-            let bin = unsafe {
-                // SAFETY: `bin` is a `BinEntry<K, V>`
-                let ptr = link.cast::<BinEntry<K, V>>();
-                // SAFETY: `retire` guarantees that we
-                // have unique access to `bin` at this point
-                *Box::from_raw(ptr)
-            };
+        // safety: the caller ensures `bin` is non-null, and no
+        // references to the bin can be obtained by other threads
+        unsafe {
+            guard.retire(bin.as_ptr(), |mut link| {
+                let bin = unsafe {
+                    // safety: `bin` is a `BinEntry<K, V>`
+                    let ptr = link.cast::<BinEntry<K, V>>();
+                    // safety: `retire` guarantees that we
+                    // have unique access to `bin` at this point
+                    *Box::from_raw(ptr)
+                };
 
-            if let BinEntry::Tree(mut tree_bin) = Linked::into_inner(bin) {
-                tree_bin.drop_fields(false);
-            } else {
-                unreachable!("bin is a tree bin");
-            }
-        });
+                if let BinEntry::Tree(mut tree_bin) = Linked::into_inner(bin) {
+                    tree_bin.drop_fields(false);
+                } else {
+                    unreachable!("bin is a tree bin");
+                }
+            });
+        }
     }
 
     /// Drops the given tree bin, but only drops its nodes' values when specified.
     ///
     /// # Safety
+    ///
     /// The pointer to the tree bin must be valid and the caller must be the single owner
     /// of the tree bin. If the nodes' values are to be dropped, there must be no outstanding
     /// references to these values in other threads and it must be impossible to obtain them.
@@ -967,14 +994,16 @@ impl<K, V> TreeBin<K, V> {
 
         // swap out first pointer so nodes will not get dropped again when
         // `tree_bin` is dropped
-        let guard = Guard::unprotected();
+        // safety: we have exclusive accesss to self
+        let guard = unsafe { Guard::unprotected() };
         let p = self.first.swap(Shared::null(), Ordering::Relaxed, &guard);
-        Self::drop_tree_nodes(p, drop_values, &guard);
+        unsafe { Self::drop_tree_nodes(p, drop_values, &guard) }
     }
 
     /// Drops the given list of tree nodes, but only drops their values when specified.
     ///
     /// # Safety
+    ///
     /// The pointers to the tree nodes must be valid and the caller must be the single owner
     /// of the tree nodes. If the nodes' values are to be dropped, there must be no outstanding
     /// references to these values in other threads and it must be impossible to obtain them.
@@ -985,10 +1014,14 @@ impl<K, V> TreeBin<K, V> {
     ) {
         let mut p = from;
         while !p.is_null() {
-            if let BinEntry::TreeNode(tree_node) = Linked::into_inner(*p.into_box()) {
+            // safety: we just verified that `p` is non-null, and the caller
+            // guarantees exclusive access
+            let p_owned = unsafe { *p.into_box() };
+            if let BinEntry::TreeNode(tree_node) = Linked::into_inner(p_owned) {
                 // if specified, drop the value in this node
                 if drop_values {
-                    let _ = tree_node.node.value.into_box();
+                    // safety: same as above
+                    let _ = unsafe { tree_node.node.value.into_box() };
                 }
                 // then we move to the next node
                 p = tree_node.node.next.load(Ordering::SeqCst, guard);
@@ -1005,13 +1038,15 @@ impl<K, V> TreeNode<K, V> {
     /// returns its `tree_node`.
     ///
     /// # Safety
+    ///
     /// All safety concerns of [`deref`](Shared::deref) apply. In particular, the
     /// supplied pointer must be non-null and must point to valid memory.
     /// Additionally, it must point to an instance of BinEntry that is actually a
     /// TreeNode.
     #[inline]
     pub(crate) unsafe fn get_tree_node(bin: Shared<'_, BinEntry<K, V>>) -> &'_ TreeNode<K, V> {
-        bin.deref().as_tree_node().unwrap()
+        // safety: guaranteed by caller
+        unsafe { bin.deref().as_tree_node().unwrap() }
     }
 }
 

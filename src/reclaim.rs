@@ -20,8 +20,13 @@ impl<T> Atomic<T> {
         self.0.store(new.ptr, ordering);
     }
 
+    /// Converts the pointer to a `Box`.
+    ///
+    /// # Safety
+    ///
+    /// This method may be called only if the pointer is valid.
     pub(crate) unsafe fn into_box(self) -> Box<Linked<T>> {
-        Box::from_raw(self.0.into_inner())
+        unsafe { Box::from_raw(self.0.into_inner()) }
     }
 
     pub(crate) fn swap<'g>(
@@ -97,20 +102,36 @@ impl<'g, T> Shared<'g, T> {
         Shared::from(collector.link_boxed(value))
     }
 
+    /// Converts the pointer to a `Box`.
+    ///
+    /// # Safety
+    ///
+    /// This method may be called only if the pointer is valid
+    /// and nobody else is holding a reference to the same object.
     pub(crate) unsafe fn into_box(self) -> Box<Linked<T>> {
-        Box::from_raw(self.ptr)
+        unsafe { Box::from_raw(self.ptr) }
     }
 
-    pub(crate) unsafe fn as_ptr(&self) -> *mut Linked<T> {
+    pub(crate) fn as_ptr(&self) -> *mut Linked<T> {
         self.ptr
     }
 
+    /// Dereference the shared pointer if it is not null.
+    ///
+    /// # Safety
+    ///
+    /// All concerns of calling `as_ref` on a shared, raw pointer apply.
     pub(crate) unsafe fn as_ref(&self) -> Option<&'g Linked<T>> {
-        self.ptr.as_ref()
+        unsafe { self.ptr.as_ref() }
     }
 
+    /// Dereference the shared pointer.
+    ///
+    /// # Safety
+    ///
+    /// All concerns of dereferencing a shared, raw pointer apply.
     pub(crate) unsafe fn deref(&self) -> &'g Linked<T> {
-        &*self.ptr
+        unsafe { &*self.ptr }
     }
 
     pub(crate) fn is_null(&self) -> bool {
@@ -148,8 +169,15 @@ pub(crate) trait RetireShared {
 }
 
 impl RetireShared for Guard<'_> {
+    /// Retire the value, reclaiming it when all outstanding references are dropped.
+    ///
+    /// # Safety
+    ///
+    /// An object can only be retired if it is non-null, and is no longer accessible
+    /// to any thread. The value also may not be accessed by the current thread after
+    /// this guard is dropped.
     unsafe fn retire_shared<T>(&self, shared: Shared<'_, T>) {
-        self.retire(shared.ptr, seize::reclaim::boxed::<T>);
+        unsafe { self.retire(shared.ptr, seize::reclaim::boxed::<T>) }
     }
 }
 

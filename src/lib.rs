@@ -236,7 +236,8 @@
     missing_docs,
     missing_debug_implementations,
     unreachable_pub,
-    rustdoc::broken_intra_doc_links
+    rustdoc::broken_intra_doc_links,
+    unsafe_op_in_unsafe_fn
 )]
 #![warn(rust_2018_idioms)]
 #![allow(clippy::cognitive_complexity)]
