@@ -1,4 +1,5 @@
 use seize::Linked;
+use fast_counter::ConcurrentCounter;
 
 use crate::iter::*;
 use crate::node::*;
@@ -93,7 +94,7 @@ pub struct HashMap<K, V, S = crate::DefaultHashBuilder> {
     /// The next table index (plus one) to split while resizing.
     transfer_index: AtomicIsize,
 
-    count: AtomicIsize,
+    counter: ConcurrentCounter,
 
     /// Table initialization and resizing control.  When negative, the
     /// table is being initialized or resized: -1 for initialization,
@@ -280,7 +281,7 @@ impl<K, V, S> HashMap<K, V, S> {
             table: Atomic::null(),
             next_table: Atomic::null(),
             transfer_index: AtomicIsize::new(0),
-            count: AtomicIsize::new(0),
+            counter: ConcurrentCounter::new(num_cpus()),
             size_ctl: AtomicIsize::new(0),
             build_hasher: hash_builder,
             collector: Collector::new(),
@@ -349,6 +350,12 @@ impl<K, V, S> HashMap<K, V, S> {
 
     /// Returns the number of entries in the map.
     ///
+    /// Note that the returned value is _NOT_ an
+    /// atomic snapshot; invocation in the absence of concurrent
+    /// updates returns an accurate result, but concurrent updates that
+    /// occur while the sum is being calculated might not be
+    /// incorporated.
+    ///
     /// # Examples
     ///
     /// ```
@@ -361,7 +368,7 @@ impl<K, V, S> HashMap<K, V, S> {
     /// assert!(map.pin().len() == 2);
     /// ```
     pub fn len(&self) -> usize {
-        let n = self.count.load(Ordering::Relaxed);
+        let n = self.counter.sum();
         if n < 0 {
             0
         } else {
@@ -1141,20 +1148,15 @@ where
     }
 
     fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard<'_>) {
-        // TODO: implement the Java CounterCell business here
-
-        use std::cmp;
-        let mut count = match n.cmp(&0) {
-            cmp::Ordering::Greater => self.count.fetch_add(n, Ordering::SeqCst) + n,
-            cmp::Ordering::Less => self.count.fetch_sub(n.abs(), Ordering::SeqCst) - n,
-            cmp::Ordering::Equal => self.count.load(Ordering::SeqCst),
-        };
+        self.counter.add(n);
 
         // if resize_hint is None, it means the caller does not want us to consider a resize.
         // if it is Some(n), the caller saw n entries in a bin
         if resize_hint.is_none() {
             return;
         }
+
+        let mut count = self.counter.sum();
 
         // TODO: use the resize hint
         let _saw_bin_length = resize_hint.unwrap();
@@ -1217,7 +1219,7 @@ where
             }
 
             // another resize may be needed!
-            count = self.count.load(Ordering::SeqCst);
+            count = self.counter.sum();
         }
     }
 
