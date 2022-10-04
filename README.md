@@ -31,7 +31,7 @@ for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
 dual licensed as above, without any additional terms or conditions.
 
   [source file from JSR166]: http://gee.cs.oswego.edu/dl/concurrency-interest/index.html
-  [1.323]: http://gee.cs.oswego.edu/cgi-bin/viewcvs.cgi/jsr166/src/main/java/util/concurrent/ConcurrentHashMap.java?revision=1.323&view=markup
+  [1.323]: http://gee.cs.oswego.edu/cgi-bin/viewcvs.cgi/jsr166/jsr166/src/main/java/util/concurrent/ConcurrentHashMap.java?revision=1.323&view=markup
   [Rust API guidelines]: https://rust-lang.github.io/api-guidelines/necessities.html#crate-and-its-dependencies-have-a-permissive-license-c-permissive
   [live coding streams]: https://www.youtube.com/playlist?list=PLqbS7AVVErFj824-6QgnK_Za1187rNfnl
   [this tweet]: https://twitter.com/jonhoo/status/1194969578855714816
