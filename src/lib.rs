@@ -78,7 +78,7 @@
 //! team](http://gee.cs.oswego.edu/dl/concurrency-interest/). Huge thanks to them for releasing the
 //! code into the public domain! Much of the documentation is also lifted from there. What follows
 //! is a slightly modified version of their implementation notes from within the [source
-//! file](http://gee.cs.oswego.edu/cgi-bin/viewcvs.cgi/jsr166/src/main/java/util/concurrent/ConcurrentHashMap.java?view=markup).
+//! file](http://gee.cs.oswego.edu/cgi-bin/viewcvs.cgi/jsr166/jsr166/src/main/java/util/concurrent/ConcurrentHashMap.java?revision=1.323&view=markup).
 //!
 //! The primary design goal of this hash table is to maintain concurrent readability (typically
 //! method [`get`](HashMap::get), but also iterators and related methods) while minimizing update contention.
