@@ -8,7 +8,7 @@
 //!
 //! # A note on `Guard` and memory use
 //!
-//! You may have noticed that many of the access methods on this map take a reference to an
+//! You may have noticed that many of the access methods on this map take a reference to a
 //! [`Guard`]. The exact details of this are beyond the scope of this documentation (for
 //! that, see the [`seize`] crate), but some of the implications bear repeating here. You obtain a
 //! `Guard` using [`HashMap::guard`], and you can use references to the same guard to make multiple API
