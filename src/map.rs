@@ -1148,18 +1148,19 @@ where
     }
 
     fn add_count(&self, n: isize, resize_hint: Option<usize>, guard: &Guard<'_>) {
-        self.counter.add(n);
+        if n != 0 {
+            self.counter.add(n);
+        }
 
         // if resize_hint is None, it means the caller does not want us to consider a resize.
         // if it is Some(n), the caller saw n entries in a bin
-        if resize_hint.is_none() {
-            return;
-        }
+        // TODO: use the resize hint
+        let _saw_bin_length = match resize_hint {
+            Some(hint) => hint,
+            None => return
+        };
 
         let mut count = self.counter.sum();
-
-        // TODO: use the resize hint
-        let _saw_bin_length = resize_hint.unwrap();
 
         loop {
             let sc = self.size_ctl.load(Ordering::SeqCst);
