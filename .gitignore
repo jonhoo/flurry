@@ -1,7 +1,5 @@
 # Don't include build output
 /target
-# We're a library--don't include our lockfile
-Cargo.lock
 # Don't include rustfmt backup files
 **/*.rs.bk
 
