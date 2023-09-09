@@ -92,7 +92,7 @@ jobs:
     # https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability
     strategy:
       matrix:
-        msrv: ["1.56.1"] # UnsafeCell::raw_get
+        msrv: ["1.60.0"] # regex 1.6
     name: ubuntu / ${{ matrix.msrv }}
     steps:
       - uses: actions/checkout@v4
