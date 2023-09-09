@@ -17,7 +17,7 @@ jobs:
           submodules: true
       - name: Generate code coverage
         run: |
-          cargo tarpaulin --verbose --all-features --timeout 120 --run-types doctests --run-types lib --run-types tests --out Xml
+          cargo tarpaulin --verbose --all-features --timeout 120 --run-types doctests --run-types lib --run-types tests --out xml
       - name: Upload to codecov.io
         uses: codecov/codecov-action@v3
         with:
