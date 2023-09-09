@@ -247,6 +247,7 @@ dependencies = [
  "parking_lot",
  "rand",
  "rayon",
+ "regex",
  "seize",
  "serde",
  "serde_json",
