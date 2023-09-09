@@ -3421,7 +3421,7 @@ mod tree_bins {
                 BinEntry::TreeNode(_) => panic!("bin was not correctly treeified -- is TreeNode"),
             }
 
-            drop(guard);
+            let _ = guard;
         }
         // then, spin up lots of reading and writing threads on a range of keys
         const NUM_WRITERS: usize = 5;
@@ -3522,7 +3522,7 @@ mod tree_bins {
             for i in 0..9 {
                 f(i, &map, guard);
             }
-            drop(guard);
+            let _ = guard;
         }
         assert_eq!(map.len(), 1);
 
