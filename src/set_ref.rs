@@ -105,7 +105,7 @@ where
     /// Returns `true` if the set is a superset of another, i.e., `self` contains at least all the values in `other`.
     ///
     /// See also [`HashSet::is_superset`].
-    pub fn is_superset<'other>(&self, other: &HashSetRef<'other, T, S>) -> bool {
+    pub fn is_superset(&self, other: &HashSetRef<'_, T, S>) -> bool {
         self.set.is_superset(other.set, &self.guard, &other.guard)
     }
 }

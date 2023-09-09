@@ -782,7 +782,7 @@ where
             // the target of these references won't be dropped while the guard remains active.
             let table = unsafe { table.deref() };
 
-            let bin = table.bin(i as usize, guard);
+            let bin = table.bin(i, guard);
             if bin.is_null() {
                 advance = table
                     .cas_bin(
@@ -1161,7 +1161,7 @@ where
 
         loop {
             let sc = self.size_ctl.load(Ordering::SeqCst);
-            if (count as isize) < sc {
+            if count < sc {
                 // we're not at the next resize point yet
                 break;
             }
