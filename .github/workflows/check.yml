@@ -61,7 +61,7 @@ jobs:
           RUSTDOCFLAGS: --cfg docsrs
   deny:
     runs-on: ubuntu-latest
-    name: ubuntu / stable / features
+    name: cargo-deny
     steps:
       - uses: actions/checkout@v3
         with:
