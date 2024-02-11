@@ -263,7 +263,90 @@ pub use map_ref::HashMapRef;
 pub use set::HashSet;
 pub use set_ref::HashSetRef;
 
-/// Default hasher for [`HashMap`].
-pub type DefaultHashBuilder = ahash::RandomState;
-
 pub use seize::Guard;
+
+/// Default hash builder for [`HashMap`].
+// NOTE: This and the below exists solely to avoid ahash being part of the public flurry API,
+// so that we can bump the ahash major version without bumping flurry's major version.
+#[derive(Debug, Clone, Default)]
+#[repr(transparent)]
+pub struct DefaultHashBuilder(ahash::RandomState);
+
+/// Default hasher for [`HashMap`].
+#[derive(Debug, Clone)]
+#[repr(transparent)]
+pub struct DefaultHasher(ahash::AHasher);
+
+impl std::hash::BuildHasher for DefaultHashBuilder {
+    type Hasher = DefaultHasher;
+
+    fn build_hasher(&self) -> Self::Hasher {
+        DefaultHasher(self.0.build_hasher())
+    }
+
+    // NOTE: also implement hash_one so we can forward to ahash::RandomState's optimized impl.
+    fn hash_one<T: std::hash::Hash>(&self, x: T) -> u64
+    where
+        Self: Sized,
+    {
+        self.0.hash_one(x)
+    }
+}
+
+impl std::hash::Hasher for DefaultHasher {
+    fn finish(&self) -> u64 {
+        self.0.finish()
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.0.write(bytes)
+    }
+
+    fn write_u8(&mut self, i: u8) {
+        self.0.write_u8(i)
+    }
+
+    fn write_u16(&mut self, i: u16) {
+        self.0.write_u16(i)
+    }
+
+    fn write_u32(&mut self, i: u32) {
+        self.0.write_u32(i)
+    }
+
+    fn write_u64(&mut self, i: u64) {
+        self.0.write_u64(i)
+    }
+
+    fn write_u128(&mut self, i: u128) {
+        self.0.write_u128(i)
+    }
+
+    fn write_usize(&mut self, i: usize) {
+        self.0.write_usize(i)
+    }
+
+    fn write_i8(&mut self, i: i8) {
+        self.0.write_i8(i)
+    }
+
+    fn write_i16(&mut self, i: i16) {
+        self.0.write_i16(i)
+    }
+
+    fn write_i32(&mut self, i: i32) {
+        self.0.write_i32(i)
+    }
+
+    fn write_i64(&mut self, i: i64) {
+        self.0.write_i64(i)
+    }
+
+    fn write_i128(&mut self, i: i128) {
+        self.0.write_i128(i)
+    }
+
+    fn write_isize(&mut self, i: isize) {
+        self.0.write_isize(i)
+    }
+}
