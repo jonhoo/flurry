@@ -42,7 +42,7 @@ where
 impl<'de, K, V, S> Deserialize<'de> for HashMap<K, V, S>
 where
     K: Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
-    V: Deserialize<'de> + Send + Sync + Ord,
+    V: Deserialize<'de> + Send + Sync,
     S: Default + BuildHasher,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -66,7 +66,7 @@ impl<K, V, S> HashMapVisitor<K, V, S> {
 impl<'de, K, V, S> Visitor<'de> for HashMapVisitor<K, V, S>
 where
     K: Deserialize<'de> + Send + Sync + Hash + Clone + Ord,
-    V: Deserialize<'de> + Send + Sync + Ord,
+    V: Deserialize<'de> + Send + Sync,
     S: Default + BuildHasher,
 {
     type Value = HashMap<K, V, S>;
@@ -218,5 +218,24 @@ mod test {
             serde_json::from_str(&serialized).expect("Couldn't deserialize map");
 
         assert_eq!(set, deserialized);
+    }
+
+    #[test]
+    fn test_map_no_ord() {
+        let map: HashMap<u8, f64> = HashMap::with_capacity(5);
+        let guard = map.guard();
+
+        let _ = map.insert(0,4.0, &guard);
+        let _ = map.insert(1,3.0, &guard);
+        let _ = map.insert(2,2.0, &guard);
+        let _ = map.insert(3,1.0, &guard);
+        let _ = map.insert(4,0.0, &guard);
+
+        let serialized = serde_json::to_string(&map).expect("Couldn't serialize map");
+
+        let deserialized: HashMap<u8, f64> =
+            serde_json::from_str(&serialized).expect("Couldn't deserialize map");
+
+        assert_eq!(map, deserialized);
     }
 }
