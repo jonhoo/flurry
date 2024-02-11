@@ -1,6 +1,6 @@
 [package]
 name = "flurry"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Jon Gjengset <jon@thesquareplanet.com>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
