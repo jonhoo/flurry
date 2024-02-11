@@ -27,8 +27,13 @@ serde = {version = "1.0.105", optional = true}
 seize = "0.2.1"
 
 [dependencies.ahash]
-version = "0.7.6"
+version = "0.8.4"
+# NOTE: we enable just compile-time-rng to get a reasonable ahash::RandomState::default
+# without _also_ forcing consumers of flurry into using runtime-rng. they can, however,
+# still opt into that feature if they wish, which will take precedence over compile-time-rng
+# as per the ahash docs.
 default-features = false
+features = ["compile-time-rng"]
 
 # for minimal-versions
 [target.'cfg(any())'.dependencies]
