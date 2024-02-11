@@ -128,7 +128,7 @@ impl<T> Eq for Shared<'_, T> {}
 
 impl<T> Clone for Shared<'_, T> {
     fn clone(&self) -> Self {
-        Shared::from(self.ptr)
+        *self
     }
 }
 

@@ -241,7 +241,7 @@ where
     /// assert!(!set.contains(&1, &guard));
     /// ```
     #[inline]
-    pub fn contains<'g, Q>(&self, value: &Q, guard: &'g Guard<'_>) -> bool
+    pub fn contains<Q>(&self, value: &Q, guard: &Guard<'_>) -> bool
     where
         T: Borrow<Q>,
         Q: ?Sized + Hash + Ord,
