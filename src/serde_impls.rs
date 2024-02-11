@@ -225,11 +225,11 @@ mod test {
         let map: HashMap<u8, f64> = HashMap::with_capacity(5);
         let guard = map.guard();
 
-        let _ = map.insert(0,4.0, &guard);
-        let _ = map.insert(1,3.0, &guard);
-        let _ = map.insert(2,2.0, &guard);
-        let _ = map.insert(3,1.0, &guard);
-        let _ = map.insert(4,0.0, &guard);
+        let _ = map.insert(0, 4.0, &guard);
+        let _ = map.insert(1, 3.0, &guard);
+        let _ = map.insert(2, 2.0, &guard);
+        let _ = map.insert(3, 1.0, &guard);
+        let _ = map.insert(4, 0.0, &guard);
 
         let serialized = serde_json::to_string(&map).expect("Couldn't serialize map");
 
