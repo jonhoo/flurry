@@ -938,7 +938,7 @@ impl<K, V> TreeBin<K, V> {
         guard: &'g Guard<'_>,
     ) {
         guard.retire(bin.as_ptr(), |mut link| {
-            let bin = unsafe {
+            let bin = {
                 // SAFETY: `bin` is a `BinEntry<K, V>`
                 let ptr = link.cast::<BinEntry<K, V>>();
                 // SAFETY: `retire` guarantees that we
