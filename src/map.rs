@@ -394,7 +394,7 @@ impl<K, V, S> HashMap<K, V, S> {
         if table.is_null() {
             0
         } else {
-            // Safety: we loaded `table` under the `guard`,
+            // safety: we loaded `table` under the `guard`,
             // so it must still be valid here
             unsafe { table.deref() }.len()
         }
@@ -1462,7 +1462,7 @@ where
         let mut idx = 0usize;
 
         let mut table = self.table.load(Ordering::SeqCst, guard);
-        // Safety: self.table is a valid pointer because we checked it above.
+        // safety: self.table is a valid pointer because we checked it above.
         while !table.is_null() && idx < unsafe { table.deref() }.len() {
             let tab = unsafe { table.deref() };
             let raw_node = tab.bin(idx, guard);
@@ -1470,7 +1470,7 @@ where
                 idx += 1;
                 continue;
             }
-            // Safety: node is a valid pointer because we checked
+            // safety: node is a valid pointer because we checked
             // it in the above if stmt.
             match **unsafe { raw_node.deref() } {
                 BinEntry::Moved => {
