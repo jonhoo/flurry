@@ -1664,7 +1664,7 @@ where
                 not_inserted,
             } => Err(TryInsertError {
                 current,
-                not_inserted: Linked::into_inner(*not_inserted),
+                not_inserted: not_inserted.value,
             }),
             PutResult::Inserted { new } => Ok(new),
             PutResult::Replaced { .. } => {
@@ -1731,9 +1731,7 @@ where
                     Err(changed) => {
                         assert!(!changed.current.is_null());
                         bin = changed.current;
-                        if let BinEntry::Node(node) =
-                            Linked::into_inner(*unsafe { changed.new.into_box() })
-                        {
+                        if let BinEntry::Node(node) = unsafe { changed.new.into_box() }.value {
                             key = node.key;
                         } else {
                             unreachable!("we declared node and it is a BinEntry::Node");
@@ -3317,7 +3315,7 @@ fn no_replacement_return_val() {
             map.put(42, String::from("world"), true, &guard),
             PutResult::Exists {
                 current: &String::from("hello"),
-                not_inserted: Box::new(map.collector.link(String::from("world"))),
+                not_inserted: Box::new(map.collector.link_value(String::from("world"))),
             }
         );
     }

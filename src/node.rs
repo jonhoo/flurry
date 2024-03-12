@@ -2,7 +2,7 @@ use crate::raw::Table;
 use crate::reclaim::{Atomic, Collector, Guard, RetireShared, Shared};
 use core::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use parking_lot::Mutex;
-use seize::Linked;
+use seize::{Link, Linked};
 use std::borrow::Borrow;
 use std::thread::{current, park, Thread};
 
@@ -937,16 +937,16 @@ impl<K, V> TreeBin<K, V> {
         bin: Shared<'g, BinEntry<K, V>>,
         guard: &'g Guard<'_>,
     ) {
-        guard.retire(bin.as_ptr(), |mut link| {
+        guard.defer_retire(bin.as_ptr(), |link| {
             let bin = unsafe {
-                // SAFETY: `bin` is a `BinEntry<K, V>`
-                let ptr = link.cast::<BinEntry<K, V>>();
+                // SAFETY: `bin` is a `Linked<BinEntry<K, V>>`
+                let ptr: *mut Linked<BinEntry<K, V>> = Link::cast(link);
                 // SAFETY: `retire` guarantees that we
                 // have unique access to `bin` at this point
-                *Box::from_raw(ptr)
+                Box::from_raw(ptr).value
             };
 
-            if let BinEntry::Tree(mut tree_bin) = Linked::into_inner(bin) {
+            if let BinEntry::Tree(mut tree_bin) = bin {
                 tree_bin.drop_fields(false);
             } else {
                 unreachable!("bin is a tree bin");
@@ -985,7 +985,7 @@ impl<K, V> TreeBin<K, V> {
     ) {
         let mut p = from;
         while !p.is_null() {
-            if let BinEntry::TreeNode(tree_node) = Linked::into_inner(*p.into_box()) {
+            if let BinEntry::TreeNode(tree_node) = p.into_box().value {
                 // if specified, drop the value in this node
                 if drop_values {
                     let _ = tree_node.node.value.into_box();
@@ -1544,7 +1544,7 @@ mod tests {
         let entry = table.get_moved(table2, &guard);
         table.store_bin(0, entry);
         assert!(table
-            .find(&collector.link(BinEntry::Moved), 1, &2, &guard)
+            .find(&collector.link_value(BinEntry::Moved), 1, &2, &guard)
             .is_null());
         table.drop_bins();
         // safety: table2 is still valid and not accessed by different threads
@@ -1562,7 +1562,7 @@ mod tests {
         let entry = table.get_moved(table2, &guard);
         table.store_bin(0, entry);
         assert!(table
-            .find(&collector.link(BinEntry::Moved), 1, &2, &guard)
+            .find(&collector.link_value(BinEntry::Moved), 1, &2, &guard)
             .is_null());
         table.drop_bins();
         // safety: table2 is still valid and not accessed by different threads
@@ -1584,7 +1584,7 @@ mod tests {
         let entry = table.get_moved(table2, &guard);
         table.store_bin(0, entry);
         assert!(table
-            .find(&collector.link(BinEntry::Moved), 0, &1, &guard)
+            .find(&collector.link_value(BinEntry::Moved), 0, &1, &guard)
             .is_null());
         table.drop_bins();
         // safety: table2 is still valid and not accessed by different threads
@@ -1611,7 +1611,7 @@ mod tests {
             // entry was not removed
             unsafe {
                 table
-                    .find(&collector.link(BinEntry::Moved), 1, &2, &guard)
+                    .find(&collector.link_value(BinEntry::Moved), 1, &2, &guard)
                     .deref()
             }
             .as_node()
