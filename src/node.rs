@@ -241,9 +241,13 @@ where
     /// Constructs a new bin from the given nodes.
     ///
     /// Nodes are arranged into an ordered red-black tree.
-    pub(crate) fn new(bin: Box<Linked<BinEntry<K, V>>>, guard: &Guard<'_>) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// The `bin` pointer was created from `Box::into_raw`.
+    pub(crate) unsafe fn new(bin: *mut Linked<BinEntry<K, V>>, guard: &Guard<'_>) -> Self {
         let mut root = Shared::null();
-        let bin = Shared::from(Box::into_raw(bin));
+        let bin = Shared::from(bin);
 
         // safety: We own the nodes for creating this new TreeBin, so they are
         // not shared with another thread and cannot get invalidated.
