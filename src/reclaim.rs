@@ -2,14 +2,14 @@ pub(crate) use seize::{Collector, Guard, Linked};
 
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicPtr, Ordering};
 use std::{fmt, ptr};
 
-pub(crate) struct Atomic<T>(seize::AtomicPtr<T>);
+pub(crate) struct Atomic<T>(AtomicPtr<Linked<T>>);
 
 impl<T> Atomic<T> {
     pub(crate) fn null() -> Self {
-        Self(seize::AtomicPtr::default())
+        Self(AtomicPtr::default())
     }
 
     pub(crate) fn load<'g>(&self, ordering: Ordering, guard: &'g Guard<'_>) -> Shared<'g, T> {
@@ -149,7 +149,7 @@ pub(crate) trait RetireShared {
 
 impl RetireShared for Guard<'_> {
     unsafe fn retire_shared<T>(&self, shared: Shared<'_, T>) {
-        self.retire(shared.ptr, seize::reclaim::boxed::<T>);
+        self.defer_retire(shared.ptr, seize::reclaim::boxed::<Linked<T>>);
     }
 }
 
