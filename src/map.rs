@@ -7,8 +7,7 @@ use crate::reclaim::{Atomic, Collector, Guard, RetireShared, Shared};
 use std::borrow::Borrow;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
-use std::hash::{BuildHasher, Hash, Hasher};
-use std::iter::FromIterator;
+use std::hash::{BuildHasher, Hash};
 use std::sync::atomic::{AtomicIsize, Ordering};
 
 const ISIZE_BITS: usize = core::mem::size_of::<isize>() * 8;
@@ -1251,9 +1250,7 @@ where
 {
     #[inline]
     fn hash<Q: ?Sized + Hash>(&self, key: &Q) -> u64 {
-        let mut h = self.build_hasher.build_hasher();
-        key.hash(&mut h);
-        h.finish()
+        self.build_hasher.hash_one(key)
     }
 
     fn get_node<'g, Q>(&'g self, key: &Q, guard: &'g Guard<'_>) -> Option<&'g Node<K, V>>
@@ -3357,6 +3354,7 @@ fn replace_twice() {
 #[cfg(test)]
 mod tree_bins {
     use super::*;
+    use std::hash::Hasher;
 
     // Tests for the tree bin optimization.
     // Includes testing that bins are actually treeified and untreeified, and that, when tree bins
