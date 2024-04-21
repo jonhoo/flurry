@@ -244,7 +244,7 @@ where
     ///
     /// # Safety
     ///
-    /// The `bin` pointer was created with `Shared::boxed` and never shared.
+    /// The `bin` pointer and its successors were created with `Shared::boxed` and never shared.
     pub(crate) unsafe fn new(bin: Shared<'_, BinEntry<K, V>>, guard: &Guard<'_>) -> Self {
         let mut root = Shared::null();
 
