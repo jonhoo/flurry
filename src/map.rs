@@ -1020,15 +1020,11 @@ where
                         // the new bin will also be a tree bin. if both the high
                         // bin and the low bin are non-empty, we have to
                         // allocate a new TreeBin.
-                        Shared::boxed(
-                            BinEntry::Tree(TreeBin::new(
-                                // safety: we have just created `low` and its `next`
-                                // nodes and have never shared them
-                                unsafe { low.into_box() },
-                                guard,
-                            )),
-                            &self.collector,
-                        )
+                        // safety: we have just created `low` and its `next` nodes using `Shared::boxed`
+                        // and have never shared them
+                        let low_bin = unsafe { BinEntry::Tree(TreeBin::new(low, guard)) };
+
+                        Shared::boxed(low_bin, &self.collector)
                     } else {
                         // if not, we can re-use the old bin here, since it will
                         // be swapped for a Moved entry while we are still
@@ -1048,15 +1044,11 @@ where
                         unsafe { TreeBin::drop_tree_nodes(high, false, guard) };
                         high_linear
                     } else if low_count != 0 {
-                        Shared::boxed(
-                            BinEntry::Tree(TreeBin::new(
-                                // safety: we have just created `high` and its `next`
-                                // nodes and have never shared them
-                                unsafe { high.into_box() },
-                                guard,
-                            )),
-                            &self.collector,
-                        )
+                        // safety: we have just created `high` and its `next` nodes using `Shared::boxed`
+                        // and have never shared them
+                        let high_bin = unsafe { BinEntry::Tree(TreeBin::new(high, guard)) };
+
+                        Shared::boxed(high_bin, &self.collector)
                     } else {
                         reused_bin = true;
                         // since we also don't use the created low nodes here,
@@ -1664,7 +1656,7 @@ where
                 not_inserted,
             } => Err(TryInsertError {
                 current,
-                not_inserted: Linked::into_inner(*not_inserted),
+                not_inserted: not_inserted.value,
             }),
             PutResult::Inserted { new } => Ok(new),
             PutResult::Replaced { .. } => {
@@ -1731,9 +1723,7 @@ where
                     Err(changed) => {
                         assert!(!changed.current.is_null());
                         bin = changed.current;
-                        if let BinEntry::Node(node) =
-                            Linked::into_inner(*unsafe { changed.new.into_box() })
-                        {
+                        if let BinEntry::Node(node) = unsafe { changed.new.into_box() }.value {
                             key = node.key;
                         } else {
                             unreachable!("we declared node and it is a BinEntry::Node");
@@ -2795,18 +2785,11 @@ where
                         tail = new_tree_node;
                         e = e_deref.next.load(Ordering::SeqCst, guard);
                     }
-                    tab.store_bin(
-                        index,
-                        Shared::boxed(
-                            BinEntry::Tree(TreeBin::new(
-                                // safety: we have just created `head` and its `next`
-                                // nodes and have never shared them
-                                unsafe { head.into_box() },
-                                guard,
-                            )),
-                            &self.collector,
-                        ),
-                    );
+
+                    // safety: we have just created `head` and its `next` nodes using `Shared::boxed`
+                    // and have never shared them
+                    let head_bin = unsafe { BinEntry::Tree(TreeBin::new(head, guard)) };
+                    tab.store_bin(index, Shared::boxed(head_bin, &self.collector));
                     drop(lock);
                     // make sure the old bin entries get dropped
                     e = bin;
@@ -3317,7 +3300,7 @@ fn no_replacement_return_val() {
             map.put(42, String::from("world"), true, &guard),
             PutResult::Exists {
                 current: &String::from("hello"),
-                not_inserted: Box::new(map.collector.link(String::from("world"))),
+                not_inserted: Box::new(map.collector.link_value(String::from("world"))),
             }
         );
     }

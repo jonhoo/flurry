@@ -68,4 +68,4 @@ jobs:
       - name: cargo miri test
         run: cargo miri test
         env:
-          MIRIFLAGS: "-Zmiri-tag-raw-pointers -Zmiri-disable-isolation"
+          MIRIFLAGS: "-Zmiri-disable-isolation"

@@ -209,7 +209,7 @@ impl<K, V> Table<K, V> {
                         // we replaced the bin with a NULL, so there's no future way to access it
                         // either; we own all the nodes in the list.
 
-                        let node = if let BinEntry::Node(node) = Linked::into_inner(*p) {
+                        let node = if let BinEntry::Node(node) = p.value {
                             node
                         } else {
                             unreachable!();
@@ -228,7 +228,7 @@ impl<K, V> Table<K, V> {
                 BinEntry::Tree(_) => {
                     // safety: same as for BinEntry::Node
                     let p = unsafe { bin.into_box() };
-                    let bin = if let BinEntry::Tree(bin) = Linked::into_inner(*p) {
+                    let bin = if let BinEntry::Tree(bin) = p.value {
                         bin
                     } else {
                         unreachable!();

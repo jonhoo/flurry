@@ -109,7 +109,7 @@ mod tests {
         let mut guard = map.guard();
         map.insert(1, 42, &guard);
         map.insert(2, 84, &guard);
-        guard.flush();
+        guard.refresh();
 
         assert_eq!(
             map.values(&guard).collect::<HashSet<&usize>>(),
