@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [0.5.0] - 2024-02-11
+### Changed
+- (BREAKING) Updated to `ahash 0.8` ([#121])
+
 ## [0.4.0] - 2022-02-26
 ### Changed
 - Moved memory management to [`seize`]() ([#102])
@@ -44,7 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - First "real" release.
 
-[Unreleased]: https://github.com/jonhoo/flurry/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jonhoo/flurry/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jonhoo/flurry/compare/v0.4.0...v0.5.0
+[0.4.1]: https://github.com/jonhoo/flurry/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jonhoo/flurry/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/jonhoo/flurry/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/jonhoo/flurry/compare/v0.2.1...v0.3.0
