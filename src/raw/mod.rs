@@ -117,9 +117,7 @@ impl<K, V> Table<K, V> {
             BinEntry::Node(_) => {
                 let mut node = bin;
                 loop {
-                    let n = if let BinEntry::Node(ref n) = **node {
-                        n
-                    } else {
+                    let BinEntry::Node(ref n) = **node else {
                         unreachable!("BinEntry::Node only points to BinEntry::Node");
                     };
 
@@ -209,9 +207,7 @@ impl<K, V> Table<K, V> {
                         // we replaced the bin with a NULL, so there's no future way to access it
                         // either; we own all the nodes in the list.
 
-                        let node = if let BinEntry::Node(node) = p.value {
-                            node
-                        } else {
+                        let BinEntry::Node(node) = p.value else {
                             unreachable!();
                         };
 
@@ -228,10 +224,8 @@ impl<K, V> Table<K, V> {
                 BinEntry::Tree(_) => {
                     // safety: same as for BinEntry::Node
                     let p = unsafe { bin.into_box() };
-                    let bin = if let BinEntry::Tree(bin) = p.value {
-                        bin
-                    } else {
-                        unreachable!();
+                    let BinEntry::Tree(bin) = p.value else {
+                        unreachable!()
                     };
                     // TreeBin::drop will take care of freeing the contained TreeNodes and their values
                     drop(bin);
