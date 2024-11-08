@@ -5,6 +5,12 @@
 //! most part has a similar API. Even though all operations on the map are thread-safe and operate
 //! on shared references, retrieval operations do *not* entail locking, and there is *not* any
 //! support for locking the entire table in a way that prevents all access.
+//! 
+//! # Better Alternatives
+//!
+//! Flurry currently suffers performance and memory usage issues under load.
+//! You may wish to consider [`papaya`] or [`dashmap`] as alternatives if this is
+//! important to you.
 //!
 //! # A note on `Guard` and memory use
 //!
@@ -232,6 +238,8 @@
 //! operation than if every individual value had to be atomically reference-counted.
 //!
 //!  [`seize`]: https://docs.rs/seize
+//!  [`papaya`]: https://docs.rs/papaya
+//!  [`dashmap`]: https://docs.rs/dashmap
 #![deny(
     missing_docs,
     missing_debug_implementations,
