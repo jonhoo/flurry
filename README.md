@@ -13,6 +13,12 @@ under the `jsr166/` subdirectory for easy reference.
 The port was developed as part of a series of [live coding streams]
 kicked off by [this tweet].
 
+## Better Alternatives
+
+Flurry currently suffers performance and memory usage issues under load.
+You may wish to consider [papaya] or [dashmap] as alternatives if this is
+important to you.
+
 ## License
 
 Licensed under either of
@@ -36,3 +42,5 @@ dual licensed as above, without any additional terms or conditions.
   [live coding streams]: https://www.youtube.com/playlist?list=PLqbS7AVVErFj824-6QgnK_Za1187rNfnl
   [this tweet]: https://twitter.com/jonhoo/status/1194969578855714816
   [upstream tests]: https://hg.openjdk.java.net/jdk/jdk13/file/tip/test/jdk/java/util/concurrent/ConcurrentHashMap
+  [papaya]: https://github.com/ibraheemdev/papaya
+  [dashmap]: https://github.com/xacrimon/dashmap
