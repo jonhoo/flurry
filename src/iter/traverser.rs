@@ -128,8 +128,9 @@ impl<'g, K, V> Iterator for NodeIter<'g, K, V> {
                     BinEntry::TreeNode(ref tree_node) => {
                         e = Some(&tree_node.node);
                     }
-                    BinEntry::Moved => unreachable!("Nodes can only point to Nodes or TreeNodes"),
-                    BinEntry::Tree(_) => unreachable!("Nodes can only point to Nodes or TreeNodes"),
+                    BinEntry::Moved | BinEntry::Tree(_) => {
+                        unreachable!("Nodes can only point to Nodes or TreeNodes")
+                    }
                 }
             }
         }

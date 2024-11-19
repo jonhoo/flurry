@@ -949,11 +949,10 @@ impl<K, V> TreeBin<K, V> {
                 Box::from_raw(ptr).value
             };
 
-            if let BinEntry::Tree(mut tree_bin) = bin {
-                tree_bin.drop_fields(false);
-            } else {
+            let BinEntry::Tree(mut tree_bin) = bin else {
                 unreachable!("bin is a tree bin");
-            }
+            };
+            tree_bin.drop_fields(false);
         });
     }
 
@@ -988,16 +987,15 @@ impl<K, V> TreeBin<K, V> {
     ) {
         let mut p = from;
         while !p.is_null() {
-            if let BinEntry::TreeNode(tree_node) = p.into_box().value {
-                // if specified, drop the value in this node
-                if drop_values {
-                    let _ = tree_node.node.value.into_box();
-                }
-                // then we move to the next node
-                p = tree_node.node.next.load(Ordering::SeqCst, guard);
-            } else {
+            let BinEntry::TreeNode(tree_node) = p.into_box().value else {
                 unreachable!("Trees can only ever contain TreeNodes");
             };
+            // if specified, drop the value in this node
+            if drop_values {
+                let _ = tree_node.node.value.into_box();
+            }
+            // then we move to the next node
+            p = tree_node.node.next.load(Ordering::SeqCst, guard);
         }
     }
 }

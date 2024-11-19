@@ -1720,11 +1720,10 @@ where
                     Err(changed) => {
                         assert!(!changed.current.is_null());
                         bin = changed.current;
-                        if let BinEntry::Node(node) = unsafe { changed.new.into_box() }.value {
-                            key = node.key;
-                        } else {
+                        let BinEntry::Node(node) = unsafe { changed.new.into_box() }.value else {
                             unreachable!("we declared node and it is a BinEntry::Node");
-                        }
+                        };
+                        key = node.key;
                     }
                 }
             }
