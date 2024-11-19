@@ -207,7 +207,7 @@
 //! `BinEntry::Tree` bins use a special form of comparison for search and related operations (which
 //! is the main reason we cannot use existing collections such as tree maps). The contained tree
 //! is primarily ordered by hash value, then by [`cmp`](std::cmp::Ord::cmp) order on keys. The
-//! red-black balancing code is updated from pre-jdk colelctions (http://gee.cs.oswego.edu/dl/classes/collections/RBCell.java)
+//! red-black balancing code is updated from pre-jdk collections (http://gee.cs.oswego.edu/dl/classes/collections/RBCell.java)
 //! based in turn on Cormen, Leiserson, and Rivest "Introduction to Algorithms" (CLR).
 //!
 //! `BinEntry::Tree` bins also require an additional locking mechanism. While list traversal is
