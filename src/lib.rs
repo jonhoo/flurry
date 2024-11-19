@@ -5,7 +5,7 @@
 //! most part has a similar API. Even though all operations on the map are thread-safe and operate
 //! on shared references, retrieval operations do *not* entail locking, and there is *not* any
 //! support for locking the entire table in a way that prevents all access.
-//! 
+//!
 //! # Better Alternatives
 //!
 //! Flurry currently suffers performance and memory usage issues under load.
