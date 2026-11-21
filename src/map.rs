@@ -35,10 +35,9 @@ const TREEIFY_THRESHOLD: usize = 8;
 /// shrinkage detection under removal.
 const UNTREEIFY_THRESHOLD: usize = 6;
 
-/// The smallest table capacity for which bins may be treeified. (Otherwise the
-/// table is resized if too many nodes in a bin.) The value should be at least 4
-/// * TREEIFY_THRESHOLD to avoid conflicts between resizing and treeification
-/// thresholds.
+/// The smallest table capacity for which bins may be treeified. (Otherwise the table is resized if
+/// too many nodes in a bin.) The value should be at least 4 * TREEIFY_THRESHOLD to avoid conflicts
+/// between resizing and treeification thresholds.
 const MIN_TREEIFY_CAPACITY: usize = 64;
 
 /// Minimum number of rebinnings per transfer step. Ranges are
