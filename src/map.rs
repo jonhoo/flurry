@@ -1419,7 +1419,7 @@ where
         }
 
         self.iter(our_guard)
-            .all(|(key, value)| other.get(key, their_guard).map_or(false, |v| *value == *v))
+            .all(|(key, value)| other.get(key, their_guard).is_some_and(|v| *value == *v))
     }
 }
 

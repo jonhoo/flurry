@@ -29,13 +29,13 @@ fn check<S: BuildHasher + Default>() {
         map.insert(i, i, &guard);
     }
 
-    assert!(!map.contains_key(&i32::min_value(), &guard));
+    assert!(!map.contains_key(&i32::MIN, &guard));
     assert!(!map.contains_key(&(range.start - 1), &guard));
     for i in range.clone() {
         assert!(map.contains_key(&i, &guard));
     }
     assert!(!map.contains_key(&range.end, &guard));
-    assert!(!map.contains_key(&i32::max_value(), &guard));
+    assert!(!map.contains_key(&i32::MAX, &guard));
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn test_max_hasher() {
 
     impl Hasher for MaxHasher {
         fn finish(&self) -> u64 {
-            u64::max_value()
+            u64::MAX
         }
         fn write(&mut self, _: &[u8]) {}
     }
