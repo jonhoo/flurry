@@ -102,7 +102,7 @@
 //!
 /*
 //! TODO: TreeNodes, ReservationNodes
-*/
+ */
 //! The table is lazily initialized to a power-of-two size upon the first insertion.  Each bin in
 //! the table normally contains a list of nodes (most often, the list has only zero or one
 //! `BinEntry`). Table accesses require atomic reads, writes, and CASes.
@@ -193,7 +193,7 @@
 //! the first operation is from a `from_iter`, `From::from`, or deserialization. These cases
 //! attempt to override the initial capacity settings, but harmlessly fail to take effect in cases
 //! of races.
-*/
+ */
 /*
 //! TODO:
 //!
