@@ -96,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     name: cargo-deny
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install stable
